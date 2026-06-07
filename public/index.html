@@ -3,16 +3,28 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>多模态幻觉 · 论文学习</title>
+<title>多模态幻觉 · 论文精读</title>
 <link rel="stylesheet" href="style.css" />
 <script src="vendor/marked.min.js"></script>
 </head>
 <body>
   <header id="topbar">
-    <div class="brand">📚 多模态幻觉 · 论文学习</div>
+    <div class="brand">
+      <span class="logo">✦</span>
+      <div class="brand-txt">
+        <div class="brand-title">多模态幻觉 · 论文精读</div>
+        <div class="brand-sub">MLLM Hallucination · Detection & Mitigation</div>
+      </div>
+    </div>
     <div class="filters">
-      <input id="search" type="text" placeholder="搜索标题 / 会议…" />
+      <div class="search-box">
+        <span class="search-ico">⌕</span>
+        <input id="search" type="text" placeholder="搜索标题 / 会议 / 方向…" />
+      </div>
       <div id="yearFilters" class="chips"></div>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress"><div id="progressBar"></div></div>
       <span id="progressSummary" class="summary"></span>
     </div>
   </header>
@@ -23,42 +35,51 @@
 
     <!-- 中：PDF -->
     <section id="viewer">
-      <div id="viewerEmpty" class="empty">← 从左侧选择一篇论文开始</div>
+      <div id="viewerEmpty" class="empty">
+        <div class="empty-ico">📄</div>
+        <div class="empty-title">从左侧选择一篇论文</div>
+        <div class="empty-sub">建议从 2024 年 ① HallusionBench 开始</div>
+      </div>
       <iframe id="pdf" title="PDF" style="display:none"></iframe>
     </section>
 
     <!-- 右：讲解 / 笔记 -->
     <section id="panel">
       <div id="panelHead">
-        <div id="paperTitle" class="paper-title">—</div>
+        <div id="paperTitle" class="paper-title">未选择论文</div>
         <div class="status-row">
-          <label>状态：</label>
-          <select id="statusSel">
-            <option>未开始</option>
-            <option>学习中</option>
-            <option>已理解</option>
+          <span class="status-label">学习状态</span>
+          <div class="seg" id="statusSeg">
+            <button data-st="未开始" class="active">未开始</button>
+            <button data-st="学习中">学习中</button>
+            <button data-st="已理解">已理解</button>
+          </div>
+          <select id="statusSel" class="hidden-sel">
+            <option>未开始</option><option>学习中</option><option>已理解</option>
           </select>
         </div>
-        <div class="tabs">
+        <div class="tabs seg seg-tabs">
           <button class="tab active" data-tab="explainer">📖 论文讲解</button>
           <button class="tab" data-tab="note">✍️ 我的笔记</button>
         </div>
       </div>
 
-      <!-- 讲解（只读） -->
       <div id="tab-explainer" class="tabpane active">
-        <div id="explainerView" class="markdown">选择论文后，这里显示我写的详细讲解。</div>
+        <div id="explainerView" class="markdown">
+          <div class="placeholder">选择论文后，这里显示我写的<strong>详细讲解</strong>（问题→验证→方法→实验→局限→对我们的意义）。</div>
+        </div>
       </div>
 
-      <!-- 笔记（可编辑） -->
       <div id="tab-note" class="tabpane">
         <div class="note-toolbar">
-          <button id="btnEdit" class="mini">✏️ 编辑</button>
-          <button id="btnPreview" class="mini">👁 预览</button>
-          <button id="btnSave" class="mini primary">💾 保存</button>
+          <div class="seg seg-sm">
+            <button id="btnPreview" class="active">预览</button>
+            <button id="btnEdit">编辑</button>
+          </div>
+          <button id="btnSave" class="mini primary">保存</button>
           <span id="saveHint" class="hint"></span>
         </div>
-        <textarea id="noteEdit" placeholder="在这里记笔记（支持 Markdown）。也可以让我在对话里说“记录”，我会直接写到这个文件。" style="display:none"></textarea>
+        <textarea id="noteEdit" placeholder="在这里记笔记（支持 Markdown）。也可以在对话里对我说「记录」，我会直接写到这个文件。" style="display:none"></textarea>
         <div id="notePreview" class="markdown"></div>
       </div>
     </section>
