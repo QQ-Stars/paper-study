@@ -1,0 +1,83 @@
+:root{
+  --bg:#f6f7f9; --panel:#fff; --line:#e6e8eb; --ink:#1f2328;
+  --muted:#6b7280; --accent:#2563eb; --accent-soft:#eff4ff;
+  --ok:#16a34a; --warn:#d97706; --idle:#9ca3af;
+  --chip:#eef1f5;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:-apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;color:var(--ink);background:var(--bg);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+
+/* 顶栏 */
+#topbar{display:flex;align-items:center;gap:18px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto}
+.brand{font-weight:700;font-size:15px;white-space:nowrap}
+.filters{display:flex;align-items:center;gap:12px;flex:1;flex-wrap:wrap}
+#search{padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;width:220px;outline:none}
+#search:focus{border-color:var(--accent)}
+.chips{display:flex;gap:6px}
+.chip-btn{padding:4px 10px;border:1px solid var(--line);background:#fff;border-radius:999px;font-size:12px;cursor:pointer;color:var(--muted)}
+.chip-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.summary{margin-left:auto;font-size:12px;color:var(--muted)}
+
+/* 三栏布局 */
+#layout{display:grid;grid-template-columns:300px 1fr 420px;flex:1;min-height:0}
+#sidebar{border-right:1px solid var(--line);overflow-y:auto;background:var(--panel)}
+#viewer{position:relative;background:#525659;min-width:0}
+#viewer .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#cbd0d6;font-size:14px}
+#pdf{width:100%;height:100%;border:0}
+#panel{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-width:0}
+
+/* 侧栏分组 */
+.year-group{padding:6px 0}
+.year-head{padding:8px 14px 4px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.5px;position:sticky;top:0;background:var(--panel);z-index:1}
+.paper-item{padding:9px 14px;border-bottom:1px solid #f1f2f4;cursor:pointer;display:flex;flex-direction:column;gap:4px}
+.paper-item:hover{background:var(--accent-soft)}
+.paper-item.active{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.pi-title{font-size:13px;font-weight:600;line-height:1.3}
+.pi-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.venue{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--chip);color:#374151}
+.venue.arxiv{background:#fbeae5;color:#9a3412}
+.dir{font-size:11px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--idle);flex:0 0 auto}
+.dot.学习中{background:var(--warn)}
+.dot.已理解{background:var(--ok)}
+.order-badge{font-size:10px;background:#111827;color:#fff;border-radius:4px;padding:0 5px;margin-right:2px}
+
+/* 右面板 */
+#panelHead{padding:12px 14px;border-bottom:1px solid var(--line)}
+.paper-title{font-size:14px;font-weight:700;margin-bottom:8px}
+.status-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:10px}
+#statusSel{padding:3px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px}
+.tabs{display:flex;gap:6px}
+.tab{flex:1;padding:7px;border:1px solid var(--line);background:#fff;border-radius:8px;font-size:13px;cursor:pointer;color:var(--muted)}
+.tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.tabpane{display:none;flex:1;min-height:0;overflow-y:auto;padding:14px 16px}
+.tabpane.active{display:block}
+
+/* 笔记工具栏 */
+.note-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.mini{padding:5px 10px;border:1px solid var(--line);background:#fff;border-radius:7px;font-size:12px;cursor:pointer}
+.mini.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.mini:hover{filter:brightness(.97)}
+.hint{font-size:12px;color:var(--ok)}
+#noteEdit{width:100%;height:calc(100% - 40px);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:"Cascadia Code",Consolas,monospace;font-size:13px;line-height:1.6;resize:none;outline:none}
+#noteEdit:focus{border-color:var(--accent)}
+
+/* markdown 渲染 */
+.markdown{font-size:13.5px;line-height:1.7;color:#222}
+.markdown h1{font-size:19px;margin:.6em 0 .4em;border-bottom:1px solid var(--line);padding-bottom:4px}
+.markdown h2{font-size:16px;margin:1em 0 .4em}
+.markdown h3{font-size:14px;margin:.9em 0 .3em}
+.markdown code{background:#f1f2f4;padding:1px 5px;border-radius:4px;font-size:12px}
+.markdown pre{background:#f6f8fa;padding:10px;border-radius:8px;overflow-x:auto}
+.markdown pre code{background:none;padding:0}
+.markdown table{border-collapse:collapse;width:100%;margin:.6em 0;font-size:12.5px}
+.markdown th,.markdown td{border:1px solid var(--line);padding:5px 8px;text-align:left}
+.markdown th{background:#f6f8fa}
+.markdown blockquote{border-left:3px solid var(--accent);margin:.5em 0;padding:2px 12px;color:var(--muted);background:var(--accent-soft)}
+.markdown a{color:var(--accent);text-decoration:none}
+.markdown a:hover{text-decoration:underline}
+.markdown ul,.markdown ol{padding-left:22px}
+
+/* 响应式：窄屏堆叠 */
+@media(max-width:1100px){#layout{grid-template-columns:240px 1fr}#panel{display:none}}
