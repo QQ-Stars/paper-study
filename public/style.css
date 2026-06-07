@@ -219,7 +219,7 @@ body{
 .pdf-open{color:#9db4ff;text-decoration:none;font-size:12px;margin-left:8px}
 .pdf-open:hover{text-decoration:underline}
 #pdfScroll{flex:1;min-height:0;overflow-y:auto;padding:18px;display:flex;flex-direction:column;align-items:center;gap:14px;position:relative}
-.pdf-page{background:#fff;border-radius:6px;box-shadow:0 6px 22px rgba(0,0,0,.4);position:relative;overflow:hidden}
+.pdf-page{flex:0 0 auto;background:#fff;border-radius:6px;box-shadow:0 6px 22px rgba(0,0,0,.4);position:relative;overflow:hidden}
 .pdf-page canvas{display:block}
 .pdf-loading{color:#aeb4bf;font-size:13px;margin-top:40px}
 #viewer .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#aeb4bf}
