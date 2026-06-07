@@ -157,21 +157,27 @@ async function openPaper(p) {
     : '<div class="placeholder">还没有笔记。点「编辑」开始记，或在对话里让我「记录」。</div>';
   showNoteMode('preview');
   // PDF
-  renderPdf('/papers/' + encodeURIComponent(p.file));
+  renderPdf(p.id);
 }
 
 // ====== PDF.js 渲染（懒加载 + 缩放）======
-async function renderPdf(url) {
+async function renderPdf(id) {
   const token = ++renderToken;
   const scroll = $('#pdfScroll');
   scroll.innerHTML = '<div class="pdf-loading">加载 PDF 中…</div>';
   if (!window.pdfjsLib) { scroll.innerHTML = '<div class="pdf-loading">PDF.js 未加载</div>'; return; }
   try {
-    const doc = await pdfjsLib.getDocument({ url }).promise;
+    const resp = await fetch('/pdfbytes?id=' + encodeURIComponent(id));
+    if (resp.status !== 200) {
+      throw new Error('服务器返回 ' + resp.status + (resp.status === 204
+        ? '（仍被下载器/迅雷拦截：请在迅雷设置→“监视设置”里把 localhost 设为不接管，或临时禁用迅雷的浏览器扩展后刷新）' : ''));
+    }
+    const data = await resp.arrayBuffer();
+    if (token !== renderToken) return;
+    const doc = await pdfjsLib.getDocument({ data }).promise;
     if (token !== renderToken) return;
     pdfDoc = doc;
-    const pg1 = await doc.getPage(1);
-    baseW = pg1.getViewport({ scale: 1 }).width;
+    baseW = (await doc.getPage(1)).getViewport({ scale: 1 }).width;
     await layoutPages(token);
   } catch (e) {
     scroll.innerHTML = '<div class="pdf-loading">PDF 加载失败：' + e.message + '</div>';
