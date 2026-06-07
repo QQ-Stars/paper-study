@@ -40,7 +40,11 @@ const server = http.createServer(async (req, res) => {
       const papers = JSON.parse(fs.readFileSync(path.join(DATA, 'papers.json'), 'utf8'));
       let prog = {};
       try { prog = JSON.parse(fs.readFileSync(path.join(DATA, 'progress.json'), 'utf8')); } catch (e) {}
-      papers.forEach(x => { x.status = prog[x.id] || '未开始'; });
+      papers.forEach(x => {
+        x.status = prog[x.id] || '未开始';
+        const nf = path.join(NOTES, x.id + '.md');
+        x.hasNote = fs.existsSync(nf) && fs.statSync(nf).size > 0;
+      });
       return send(res, 200, JSON.stringify(papers), MIME['.json']);
     }
     if (p === '/api/note' && req.method === 'GET') {
