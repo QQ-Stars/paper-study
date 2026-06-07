@@ -63,15 +63,15 @@ body{
 .summary{font-size:11.5px;color:var(--muted);font-weight:500}
 
 /* ============ 三栏布局 ============ */
-#layout{display:grid;grid-template-columns:312px 1fr 440px;flex:1;min-height:0;gap:0}
-#sidebar{overflow-y:auto;background:var(--panel);border-right:1px solid var(--line);padding:6px 10px 30px}
+#layout{display:grid;grid-template-columns:312px 1fr 440px;grid-template-rows:minmax(0,1fr);flex:1;min-height:0;gap:0;overflow:hidden}
+#sidebar{overflow-y:auto;min-height:0;background:var(--panel);border-right:1px solid var(--line);padding:6px 10px 30px}
 #viewer{position:relative;background:#2c2f36;min-width:0;padding:14px}
 #viewer .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#aeb4bf}
 .empty-ico{font-size:46px;opacity:.55}
 .empty-title{font-size:15px;font-weight:600;color:#cdd2da}
 .empty-sub{font-size:12.5px;color:#8c93a0}
 #pdf{width:100%;height:100%;border:0;border-radius:12px;background:#fff;box-shadow:0 10px 40px rgba(0,0,0,.35)}
-#panel{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+#panel{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0}
 
 /* ============ 侧栏：论文卡片 ============ */
 .year-group{margin-top:8px}
@@ -205,7 +205,7 @@ body{
 .ht-note{font-size:14px}
 
 /* ============ PDF.js 阅读区 ============ */
-#viewer{display:flex;flex-direction:column;padding:0;background:#33363d}
+#viewer{display:flex;flex-direction:column;padding:0;background:#33363d;min-height:0;min-width:0}
 #pdfBar{
   display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;
   background:#2a2d33;border-bottom:1px solid #1f2228;color:#d7dbe2;flex:0 0 auto;
