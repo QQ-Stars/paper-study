@@ -69,7 +69,14 @@ const server = http.createServer(async (req, res) => {
       fs.writeFileSync(path.join(DATA, 'progress.json'), JSON.stringify(prog, null, 2), 'utf8');
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
-    // ---- PDF 流式 ----
+    // ---- PDF 字节（绕过迅雷类下载器：路径不含 .pdf，由脚本 fetch 取字节）----
+    if (p === '/pdfbytes') {
+      const f = path.join(PAPERS_DIR, safeBase(u.searchParams.get('id')) + '.pdf');
+      if (!fs.existsSync(f)) return send(res, 404, 'not found');
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': fs.statSync(f).size, 'Cache-Control': 'no-store' });
+      return fs.createReadStream(f).pipe(res);
+    }
+    // ---- PDF 流式（原文直链，供“↗ 原文”用）----
     if (p.startsWith('/papers/')) {
       const f = path.join(PAPERS_DIR, safeBase(decodeURIComponent(p.slice('/papers/'.length))));
       if (!fs.existsSync(f)) return send(res, 404, 'PDF not found');
