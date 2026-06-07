@@ -6,6 +6,7 @@ let yearFilter = 'all';
 let q = '';
 let currentView = 'home';
 let homeSort = { key: 'year', dir: 1 };
+let chProgress = null, chDir = null, chVenue = null;
 
 const $ = (s) => document.querySelector(s);
 const md = (t) => (window.marked ? window.marked.parse(t || '') :
@@ -25,12 +26,13 @@ async function init() {
   if (localStorage.getItem('hide-right') === '1') $('#layout').classList.add('hide-right');
   buildYearFilters();
   renderSidebar();
+  buildDashShell();
   renderHome();
   bindUI();
   showView('home');
 }
 function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = $('#themeBtn'); if (b) b.textContent = t === 'dark' ? '☀️' : '🌙'; localStorage.setItem('theme', t); }
-function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); }
+function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); renderHome(); }
 function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); localStorage.setItem(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
 
 function buildYearFilters() {
@@ -64,54 +66,34 @@ function showView(v) {
 }
 
 // ====== 总览 Dashboard ======
+function buildDashShell() {
+  $('#dash').innerHTML = `
+    <div class="chart-card">
+      <div class="chart-title">概况</div>
+      <div class="kpi-big" id="kpiTotal">0</div>
+      <div class="kpi-sub" id="kpiSub">篇论文</div>
+      <div class="kpi-rows">
+        <div><span>顶会发表</span><b id="kpiPub">0</b></div>
+        <div><span>arXiv 预印</span><b id="kpiArxiv">0</b></div>
+        <div><span>2024 / 25 / 26</span><b id="kpiYears">0 / 0 / 0</b></div>
+      </div>
+    </div>
+    <div class="chart-card"><div class="chart-title">学习进度</div><div id="chartProgress" class="echart"></div></div>
+    <div class="chart-card"><div class="chart-title">研究方向分布</div><div id="chartDir" class="echart"></div></div>
+    <div class="chart-card"><div class="chart-title">会议分布</div><div id="chartVenue" class="echart"></div></div>`;
+  if (window.echarts) {
+    chProgress = echarts.init($('#chartProgress'));
+    chDir = echarts.init($('#chartDir'));
+    chVenue = echarts.init($('#chartVenue'));
+  }
+}
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
 function renderHome() {
   let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter));
   if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(k)); }
 
-  const total = list.length;
-  const done = list.filter(p => p.status === '已理解').length;
-  const ing = list.filter(p => p.status === '学习中').length;
-  const idle = total - done - ing;
-  const pub = list.filter(p => p.venue !== 'arXiv').length;
-  const yc = (yr) => list.filter(p => p.year === yr).length;
-  const pct = total ? Math.round(done / total * 100) : 0;
-
-  const dirOrder = [['检测', '#6366f1'], ['缓解', '#14b8a6'], ['机制', '#8b5cf6'], ['评测', '#f59e0b'], ['定义/其他', '#94a3b8']];
-  const dirBucket = (t) => t.includes('检测') ? '检测' : t.includes('缓解') ? '缓解' : t.includes('机制') ? '机制' : t.includes('Bench') ? '评测' : '定义/其他';
-  const dc = {}; list.forEach(p => dc[dirBucket(p.type)] = (dc[dirBucket(p.type)] || 0) + 1);
-  const dirItems = dirOrder.map(([k, c]) => ({ label: k, value: dc[k] || 0, color: c }));
-
-  const vOrder = [['CV', '#6366f1'], ['ML', '#8b5cf6'], ['NLP', '#14b8a6'], ['AAAI', '#f59e0b'], ['arXiv', '#ec4899']];
-  const vBucket = (v) => ['CVPR', 'ICCV', 'ECCV'].includes(v) ? 'CV' : ['ICLR', 'ICML', 'NeurIPS'].includes(v) ? 'ML' : ['ACL', 'EMNLP'].includes(v) ? 'NLP' : v === 'AAAI' ? 'AAAI' : 'arXiv';
-  const vc = {}; list.forEach(p => vc[vBucket(p.venue)] = (vc[vBucket(p.venue)] || 0) + 1);
-  const vItems = vOrder.map(([k, c]) => ({ label: k, value: vc[k] || 0, color: c }));
-
-  const dseg = [
-    { label: '已理解', value: done, color: 'var(--ok)' },
-    { label: '学习中', value: ing, color: 'var(--warn)' },
-    { label: '未开始', value: idle, color: 'var(--idle)' }
-  ];
-
-  $('#dash').innerHTML = `
-    <div class="chart-card">
-      <div class="chart-title">概况</div>
-      <div class="kpi-big">${total}</div>
-      <div class="kpi-sub">篇论文 ${yearFilter === 'all' ? '· 全部' : '· ' + yearFilter}</div>
-      <div class="kpi-rows">
-        <div><span>顶会发表</span><b>${pub}</b></div>
-        <div><span>arXiv 预印</span><b>${total - pub}</b></div>
-        <div><span>2024 / 25 / 26</span><b>${yc('2024')} / ${yc('2025')} / ${yc('2026')}</b></div>
-      </div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-title">学习进度</div>
-      <div class="donut-wrap">${donutSVG(dseg, pct + '%', '已理解')}
-        <div class="legend">${dseg.map(s => `<div class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${s.label}<span class="legend-val">${s.value}</span></div>`).join('')}</div>
-      </div>
-    </div>
-    <div class="chart-card"><div class="chart-title">研究方向分布</div>${barsHTML(dirItems)}</div>
-    <div class="chart-card"><div class="chart-title">会议分布</div>${barsHTML(vItems)}</div>`;
-
+  // 表格
   list.sort(cmpHome);
   $('#homeBody').innerHTML = list.map(rowHTML).join('');
   document.querySelectorAll('#homeBody tr').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
@@ -120,24 +102,74 @@ function renderHome() {
     th.dataset.label = base;
     th.innerHTML = base + (homeSort.key === th.dataset.sort ? ` <span class="arrow">${homeSort.dir > 0 ? '▲' : '▼'}</span>` : '');
   });
+
+  // 看板（KPI + ECharts 图表）
+  if (document.getElementById('kpiTotal')) {
+    const total = list.length;
+    const done = list.filter(p => p.status === '已理解').length;
+    const ing = list.filter(p => p.status === '学习中').length;
+    const idle = total - done - ing;
+    const pub = list.filter(p => p.venue !== 'arXiv').length;
+    const yc = (yr) => list.filter(p => p.year === yr).length;
+    const pct = total ? Math.round(done / total * 100) : 0;
+    $('#kpiTotal').textContent = total;
+    $('#kpiSub').textContent = '篇论文 ' + (yearFilter === 'all' ? '· 全部' : '· ' + yearFilter);
+    $('#kpiPub').textContent = pub;
+    $('#kpiArxiv').textContent = total - pub;
+    $('#kpiYears').textContent = `${yc('2024')} / ${yc('2025')} / ${yc('2026')}`;
+
+    const dirOrder = [['检测', '#6366f1'], ['缓解', '#14b8a6'], ['机制', '#8b5cf6'], ['评测', '#f59e0b'], ['定义/其他', '#94a3b8']];
+    const dirBucket = (t) => t.includes('检测') ? '检测' : t.includes('缓解') ? '缓解' : t.includes('机制') ? '机制' : t.includes('Bench') ? '评测' : '定义/其他';
+    const dc = {}; list.forEach(p => dc[dirBucket(p.type)] = (dc[dirBucket(p.type)] || 0) + 1);
+    const dirItems = dirOrder.map(([k, c]) => ({ name: k, value: dc[k] || 0, color: c }));
+
+    const vOrder = [['CV', '#6366f1'], ['ML', '#8b5cf6'], ['NLP', '#14b8a6'], ['AAAI', '#f59e0b'], ['arXiv', '#ec4899']];
+    const vBucket = (v) => ['CVPR', 'ICCV', 'ECCV'].includes(v) ? 'CV' : ['ICLR', 'ICML', 'NeurIPS'].includes(v) ? 'ML' : ['ACL', 'EMNLP'].includes(v) ? 'NLP' : v === 'AAAI' ? 'AAAI' : 'arXiv';
+    const vc = {}; list.forEach(p => vc[vBucket(p.venue)] = (vc[vBucket(p.venue)] || 0) + 1);
+    const vItems = vOrder.map(([k, c]) => ({ name: k, value: vc[k] || 0, color: c }));
+
+    updateCharts({ done, ing, idle, pct, dirItems, vItems });
+  }
   updateSummary();
 }
-function donutSVG(segs, center, sub) {
-  const total = segs.reduce((s, x) => s + x.value, 0) || 1;
-  const R = 54, C = 2 * Math.PI * R; let off = 0;
-  const arcs = segs.map(s => {
-    const len = C * s.value / total;
-    const el = `<circle r="${R}" cx="70" cy="70" fill="none" stroke="${s.color}" stroke-width="15" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 70 70)"></circle>`;
-    off += len; return el;
-  }).join('');
-  return `<svg viewBox="0 0 140 140" class="donut"><circle r="${R}" cx="70" cy="70" fill="none" stroke="var(--surface-3)" stroke-width="15"></circle>${arcs}<text x="70" y="68" text-anchor="middle" class="donut-num">${center}</text><text x="70" y="86" text-anchor="middle" class="donut-sub">${sub}</text></svg>`;
+
+function updateCharts(d) {
+  if (!window.echarts || !chProgress) return;
+  const text = cssVar('--text'), t2 = cssVar('--text-2'), t3 = cssVar('--text-3');
+  const surf = cssVar('--surface'), ok = cssVar('--ok'), warn = cssVar('--warn'), idle = cssVar('--idle');
+  chProgress.setOption({
+    animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
+    title: {
+      text: d.pct + '%', subtext: '已理解', left: 'center', top: '38%', itemGap: 3,
+      textStyle: { fontSize: 23, fontWeight: 700, color: text }, subtextStyle: { fontSize: 10, color: t3 }
+    },
+    tooltip: { trigger: 'item', formatter: '{b}：{c} 篇 ({d}%)' },
+    series: [{
+      type: 'pie', radius: ['62%', '86%'], center: ['50%', '50%'], avoidLabelOverlap: false,
+      itemStyle: { borderColor: surf, borderWidth: 2, borderRadius: 5 },
+      label: { show: false }, labelLine: { show: false }, emphasis: { scale: true, scaleSize: 6 },
+      data: [
+        { value: d.done, name: '已理解', itemStyle: { color: ok } },
+        { value: d.ing, name: '学习中', itemStyle: { color: warn } },
+        { value: d.idle, name: '未开始', itemStyle: { color: idle } }
+      ]
+    }]
+  });
+  chDir.setOption(barOption(d.dirItems, t2, t3));
+  chVenue.setOption(barOption(d.vItems, t2, t3));
 }
-function barsHTML(items) {
-  const max = Math.max(...items.map(i => i.value), 1);
-  return `<div class="barlist">` + items.map(i => `
-    <div class="barrow"><div class="barlabel" title="${i.label}">${i.label}</div>
-    <div class="bartrack"><div class="barfill" style="width:${(i.value / max * 100).toFixed(1)}%;background:${i.color}"></div></div>
-    <div class="barval">${i.value}</div></div>`).join('') + `</div>`;
+
+function barOption(items, t2, t3) {
+  const labels = items.map(i => i.name).reverse();
+  const data = items.map(i => ({ value: i.value, itemStyle: { color: i.color, borderRadius: [0, 5, 5, 0] } })).reverse();
+  return {
+    animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
+    grid: { left: 4, right: 28, top: 6, bottom: 2, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (p) => `${p[0].name}：${p[0].value} 篇` },
+    xAxis: { type: 'value', max: 'dataMax', axisLabel: { show: false }, splitLine: { show: false }, axisLine: { show: false }, axisTick: { show: false } },
+    yAxis: { type: 'category', data: labels, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: t2, fontSize: 12 } },
+    series: [{ type: 'bar', data, barWidth: '54%', label: { show: true, position: 'right', color: t3, fontSize: 11, formatter: '{c}' } }]
+  };
 }
 function cmpHome(a, b) {
   const k = homeSort.key, d = homeSort.dir;
@@ -290,7 +322,7 @@ function bindUI() {
   $('#themeBtn').onclick = toggleTheme;
   $('#toggleLeft').onclick = () => togglePane('hide-left');
   $('#toggleRight').onclick = () => togglePane('hide-right');
-  let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (pdfDoc && currentView === 'read') layoutPages(++renderToken); }, 200); });
+  let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (pdfDoc && currentView === 'read') layoutPages(++renderToken); [chProgress, chDir, chVenue].forEach(c => c && c.resize()); }, 200); });
 }
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
