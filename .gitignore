@@ -1,0 +1,16 @@
+# 依赖（本项目零依赖，保险起见忽略）
+node_modules/
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+
+# PDF 不入库（体积大，放在 ../paper/，通过相对路径引用）
+*.pdf
+paper/
+
+# 笔记与进度【保留】——它们是版本控制的核心，不忽略
+# notes/  data/progress.json  均纳入 git
