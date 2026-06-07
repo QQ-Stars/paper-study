@@ -84,6 +84,31 @@ button{font-family:inherit}
 .stat-label{font-size:12px;color:var(--text-2);margin-top:5px;font-weight:500}
 .stat-mini{font-size:11px;color:var(--text-3);margin-top:2px}
 
+/* ===== 看板图表 ===== */
+.dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-bottom:16px}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;min-height:172px}
+.chart-title{font-size:11px;font-weight:600;color:var(--text-3);letter-spacing:.4px;text-transform:uppercase;margin-bottom:15px}
+.kpi-big{font-size:34px;font-weight:720;letter-spacing:-1.2px;line-height:1;color:var(--text)}
+.kpi-sub{font-size:12px;color:var(--text-2);margin:5px 0 15px}
+.kpi-rows{display:flex;flex-direction:column;gap:9px}
+.kpi-rows>div{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--text-2);padding-bottom:9px;border-bottom:1px solid var(--border)}
+.kpi-rows>div:last-child{border-bottom:0;padding-bottom:0}
+.kpi-rows b{color:var(--text);font-weight:650;font-variant-numeric:tabular-nums}
+.donut-wrap{display:flex;align-items:center;gap:16px}
+.donut{width:120px;height:120px;flex:0 0 auto}
+.donut-num{font-size:23px;font-weight:720;fill:var(--text)}
+.donut-sub{font-size:8px;fill:var(--text-3);letter-spacing:1.5px;text-transform:uppercase}
+.legend{display:flex;flex-direction:column;gap:10px;flex:1}
+.legend-item{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2)}
+.legend-dot{width:9px;height:9px;border-radius:3px;flex:0 0 auto}
+.legend-val{margin-left:auto;font-weight:650;color:var(--text);font-variant-numeric:tabular-nums}
+.barlist{display:flex;flex-direction:column;gap:13px}
+.barrow{display:grid;grid-template-columns:60px 1fr 24px;align-items:center;gap:10px}
+.barlabel{font-size:12px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bartrack{height:8px;background:var(--surface-3);border-radius:99px;overflow:hidden}
+.barfill{height:100%;border-radius:99px;transition:width .55s cubic-bezier(.4,0,.2,1)}
+.barval{font-size:12px;font-weight:650;text-align:right;color:var(--text);font-variant-numeric:tabular-nums}
+
 .table-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
 #homeTable{border-collapse:collapse;width:100%;font-size:13px}
 #homeTable thead th{text-align:left;padding:12px 16px;font-size:11px;font-weight:600;color:var(--text-3);background:var(--surface-2);border-bottom:1px solid var(--border);position:sticky;top:0;letter-spacing:.3px;text-transform:uppercase}

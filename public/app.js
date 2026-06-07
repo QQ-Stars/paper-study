@@ -65,23 +65,53 @@ function showView(v) {
 
 // ====== 总览 Dashboard ======
 function renderHome() {
-  const total = PAPERS.length;
-  const done = PAPERS.filter(p => p.status === '已理解').length;
-  const ing = PAPERS.filter(p => p.status === '学习中').length;
-  const pub = PAPERS.filter(p => p.venue !== 'arXiv').length;
-  const yc = (yr) => PAPERS.filter(p => p.year === yr).length;
-  const card = (num, label, plain, mini) =>
-    `<div class="stat-card"><div class="stat-num ${plain ? 'plain' : ''}">${num}</div><div class="stat-label">${label}</div>${mini ? '<div class="stat-mini">' + mini + '</div>' : ''}</div>`;
-  $('#statCards').innerHTML = [
-    card(total, '论文总数', true),
-    card(done, '已理解 ✓', false),
-    card(ing, '学习中', false),
-    card(pub, '顶会发表', true, (total - pub) + ' 篇 arXiv'),
-    card(`${yc('2024')} / ${yc('2025')} / ${yc('2026')}`, '2024 / 25 / 26', true)
-  ].join('');
-
   let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter));
   if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(k)); }
+
+  const total = list.length;
+  const done = list.filter(p => p.status === '已理解').length;
+  const ing = list.filter(p => p.status === '学习中').length;
+  const idle = total - done - ing;
+  const pub = list.filter(p => p.venue !== 'arXiv').length;
+  const yc = (yr) => list.filter(p => p.year === yr).length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+
+  const dirOrder = [['检测', '#6366f1'], ['缓解', '#14b8a6'], ['机制', '#8b5cf6'], ['评测', '#f59e0b'], ['定义/其他', '#94a3b8']];
+  const dirBucket = (t) => t.includes('检测') ? '检测' : t.includes('缓解') ? '缓解' : t.includes('机制') ? '机制' : t.includes('Bench') ? '评测' : '定义/其他';
+  const dc = {}; list.forEach(p => dc[dirBucket(p.type)] = (dc[dirBucket(p.type)] || 0) + 1);
+  const dirItems = dirOrder.map(([k, c]) => ({ label: k, value: dc[k] || 0, color: c }));
+
+  const vOrder = [['CV', '#6366f1'], ['ML', '#8b5cf6'], ['NLP', '#14b8a6'], ['AAAI', '#f59e0b'], ['arXiv', '#ec4899']];
+  const vBucket = (v) => ['CVPR', 'ICCV', 'ECCV'].includes(v) ? 'CV' : ['ICLR', 'ICML', 'NeurIPS'].includes(v) ? 'ML' : ['ACL', 'EMNLP'].includes(v) ? 'NLP' : v === 'AAAI' ? 'AAAI' : 'arXiv';
+  const vc = {}; list.forEach(p => vc[vBucket(p.venue)] = (vc[vBucket(p.venue)] || 0) + 1);
+  const vItems = vOrder.map(([k, c]) => ({ label: k, value: vc[k] || 0, color: c }));
+
+  const dseg = [
+    { label: '已理解', value: done, color: 'var(--ok)' },
+    { label: '学习中', value: ing, color: 'var(--warn)' },
+    { label: '未开始', value: idle, color: 'var(--idle)' }
+  ];
+
+  $('#dash').innerHTML = `
+    <div class="chart-card">
+      <div class="chart-title">概况</div>
+      <div class="kpi-big">${total}</div>
+      <div class="kpi-sub">篇论文 ${yearFilter === 'all' ? '· 全部' : '· ' + yearFilter}</div>
+      <div class="kpi-rows">
+        <div><span>顶会发表</span><b>${pub}</b></div>
+        <div><span>arXiv 预印</span><b>${total - pub}</b></div>
+        <div><span>2024 / 25 / 26</span><b>${yc('2024')} / ${yc('2025')} / ${yc('2026')}</b></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">学习进度</div>
+      <div class="donut-wrap">${donutSVG(dseg, pct + '%', '已理解')}
+        <div class="legend">${dseg.map(s => `<div class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${s.label}<span class="legend-val">${s.value}</span></div>`).join('')}</div>
+      </div>
+    </div>
+    <div class="chart-card"><div class="chart-title">研究方向分布</div>${barsHTML(dirItems)}</div>
+    <div class="chart-card"><div class="chart-title">会议分布</div>${barsHTML(vItems)}</div>`;
+
   list.sort(cmpHome);
   $('#homeBody').innerHTML = list.map(rowHTML).join('');
   document.querySelectorAll('#homeBody tr').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
@@ -91,6 +121,23 @@ function renderHome() {
     th.innerHTML = base + (homeSort.key === th.dataset.sort ? ` <span class="arrow">${homeSort.dir > 0 ? '▲' : '▼'}</span>` : '');
   });
   updateSummary();
+}
+function donutSVG(segs, center, sub) {
+  const total = segs.reduce((s, x) => s + x.value, 0) || 1;
+  const R = 54, C = 2 * Math.PI * R; let off = 0;
+  const arcs = segs.map(s => {
+    const len = C * s.value / total;
+    const el = `<circle r="${R}" cx="70" cy="70" fill="none" stroke="${s.color}" stroke-width="15" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 70 70)"></circle>`;
+    off += len; return el;
+  }).join('');
+  return `<svg viewBox="0 0 140 140" class="donut"><circle r="${R}" cx="70" cy="70" fill="none" stroke="var(--surface-3)" stroke-width="15"></circle>${arcs}<text x="70" y="68" text-anchor="middle" class="donut-num">${center}</text><text x="70" y="86" text-anchor="middle" class="donut-sub">${sub}</text></svg>`;
+}
+function barsHTML(items) {
+  const max = Math.max(...items.map(i => i.value), 1);
+  return `<div class="barlist">` + items.map(i => `
+    <div class="barrow"><div class="barlabel" title="${i.label}">${i.label}</div>
+    <div class="bartrack"><div class="barfill" style="width:${(i.value / max * 100).toFixed(1)}%;background:${i.color}"></div></div>
+    <div class="barval">${i.value}</div></div>`).join('') + `</div>`;
 }
 function cmpHome(a, b) {
   const k = homeSort.key, d = homeSort.dir;
