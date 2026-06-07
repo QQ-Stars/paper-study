@@ -6,6 +6,7 @@
 <title>多模态幻觉 · 论文精读</title>
 <link rel="stylesheet" href="style.css" />
 <script src="vendor/marked.min.js"></script>
+<script src="vendor/pdfjs/pdf.min.js"></script>
 </head>
 <body>
   <header id="topbar">
@@ -16,6 +17,10 @@
         <div class="brand-sub">MLLM Hallucination · Detection & Mitigation</div>
       </div>
     </div>
+    <nav class="viewnav seg">
+      <button data-view="home" class="active">📋 总览</button>
+      <button data-view="read">📖 阅读</button>
+    </nav>
     <div class="filters">
       <div class="search-box">
         <span class="search-ico">⌕</span>
@@ -29,21 +34,52 @@
     </div>
   </header>
 
-  <main id="layout">
-    <!-- 左：论文列表 -->
+  <!-- ============ 总览 Dashboard ============ -->
+  <section id="home">
+    <div id="statCards" class="stats"></div>
+    <div class="table-card">
+      <table id="homeTable">
+        <thead>
+          <tr>
+            <th style="width:48px">#</th>
+            <th data-sort="title">论文标题</th>
+            <th data-sort="venue" style="width:120px">会议</th>
+            <th data-sort="year" style="width:70px">年份</th>
+            <th data-sort="type" style="width:120px">方向</th>
+            <th data-sort="topic" style="width:120px">主题</th>
+            <th data-sort="status" style="width:96px">状态</th>
+            <th style="width:60px">笔记</th>
+          </tr>
+        </thead>
+        <tbody id="homeBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 阅读视图 ============ -->
+  <main id="layout" class="hidden">
     <aside id="sidebar"></aside>
 
-    <!-- 中：PDF -->
     <section id="viewer">
-      <div id="viewerEmpty" class="empty">
-        <div class="empty-ico">📄</div>
-        <div class="empty-title">从左侧选择一篇论文</div>
-        <div class="empty-sub">建议从 2024 年 ① HallusionBench 开始</div>
+      <div id="pdfBar">
+        <span id="pdfDocTitle" class="pdf-doc-title">—</span>
+        <div class="pdf-zoom">
+          <button id="zoomOut" title="缩小">－</button>
+          <span id="zoomVal">100%</span>
+          <button id="zoomIn" title="放大">＋</button>
+          <span id="pdfPages" class="pdf-pages"></span>
+          <a id="pdfOpen" class="pdf-open" target="_blank" title="在新标签页打开">↗ 原文</a>
+        </div>
       </div>
-      <iframe id="pdf" title="PDF" style="display:none"></iframe>
+      <div id="pdfScroll">
+        <div id="viewerEmpty" class="empty">
+          <div class="empty-ico">📄</div>
+          <div class="empty-title">从左侧选择一篇论文</div>
+          <div class="empty-sub">建议从 ① HallusionBench 开始</div>
+        </div>
+      </div>
     </section>
 
-    <!-- 右：讲解 / 笔记 -->
     <section id="panel">
       <div id="panelHead">
         <div id="paperTitle" class="paper-title">未选择论文</div>
@@ -54,10 +90,8 @@
             <button data-st="学习中">学习中</button>
             <button data-st="已理解">已理解</button>
           </div>
-          <select id="statusSel" class="hidden-sel">
-            <option>未开始</option><option>学习中</option><option>已理解</option>
-          </select>
         </div>
+        <select id="statusSel" class="hidden-sel"><option>未开始</option><option>学习中</option><option>已理解</option></select>
         <div class="tabs seg seg-tabs">
           <button class="tab active" data-tab="explainer">📖 论文讲解</button>
           <button class="tab" data-tab="note">✍️ 我的笔记</button>
@@ -66,7 +100,7 @@
 
       <div id="tab-explainer" class="tabpane active">
         <div id="explainerView" class="markdown">
-          <div class="placeholder">选择论文后，这里显示我写的<strong>详细讲解</strong>（问题→验证→方法→实验→局限→对我们的意义）。</div>
+          <div class="placeholder">选择论文后，这里显示我写的<strong>详细讲解</strong>。</div>
         </div>
       </div>
 
@@ -79,7 +113,7 @@
           <button id="btnSave" class="mini primary">保存</button>
           <span id="saveHint" class="hint"></span>
         </div>
-        <textarea id="noteEdit" placeholder="在这里记笔记（支持 Markdown）。也可以在对话里对我说「记录」，我会直接写到这个文件。" style="display:none"></textarea>
+        <textarea id="noteEdit" placeholder="在这里记笔记（支持 Markdown）。也可以在对话里对我说「记录」。" style="display:none"></textarea>
         <div id="notePreview" class="markdown"></div>
       </div>
     </section>

@@ -166,3 +166,60 @@ body{
 .markdown strong{color:#111827}
 
 @media(max-width:1180px){#layout{grid-template-columns:260px 1fr}#panel{display:none}}
+
+/* ============ 视图切换 / 通用 ============ */
+.hidden{display:none !important}
+.viewnav{flex:0 0 auto}
+.viewnav button{padding:7px 14px;font-size:13px}
+.viewnav button.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 4px 12px rgba(99,102,241,.3)}
+
+/* ============ 总览 Dashboard ============ */
+#home{flex:1;min-height:0;overflow-y:auto;padding:22px 26px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px}
+.stat-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow-sm)}
+.stat-num{font-size:26px;font-weight:780;line-height:1.1;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.stat-num.plain{background:none;-webkit-text-fill-color:initial;color:var(--ink)}
+.stat-label{font-size:12px;color:var(--muted);margin-top:4px;font-weight:550}
+.stat-mini{font-size:11px;color:var(--faint);margin-top:2px}
+
+.table-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+#homeTable{border-collapse:collapse;width:100%;font-size:13px}
+#homeTable thead th{
+  text-align:left;padding:12px 14px;font-size:11.5px;font-weight:700;color:var(--muted);
+  background:#f7f8fb;border-bottom:1px solid var(--line);position:sticky;top:0;letter-spacing:.4px;
+}
+#homeTable thead th[data-sort]{cursor:pointer;user-select:none}
+#homeTable thead th[data-sort]:hover{color:var(--accent)}
+#homeTable thead th .arrow{opacity:.5;font-size:10px;margin-left:3px}
+#homeTable tbody td{padding:11px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+#homeTable tbody tr{cursor:pointer;transition:background .12s}
+#homeTable tbody tr:hover{background:var(--accent-soft)}
+#homeTable tbody tr:last-child td{border-bottom:0}
+.ht-order{width:24px;height:24px;border-radius:7px;display:inline-grid;place-items:center;font-size:11px;font-weight:700;color:#fff;background:linear-gradient(135deg,#3b3f4a,#23262e)}
+.ht-order.none{background:#e6e8ee;color:#9aa1ac}
+.ht-title{font-weight:650;color:var(--ink)}
+.ht-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 9px;border-radius:999px;font-weight:600}
+.ht-status.未开始{background:var(--idlebg);color:#6b7280}
+.ht-status.学习中{background:var(--warnbg);color:#b45309}
+.ht-status.已理解{background:var(--okbg);color:#047857}
+.ht-note{font-size:14px}
+
+/* ============ PDF.js 阅读区 ============ */
+#viewer{display:flex;flex-direction:column;padding:0;background:#33363d}
+#pdfBar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;
+  background:#2a2d33;border-bottom:1px solid #1f2228;color:#d7dbe2;flex:0 0 auto;
+}
+.pdf-doc-title{font-size:12.5px;font-weight:600;color:#c8cdd6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
+.pdf-zoom{display:flex;align-items:center;gap:8px;font-size:12px;color:#aeb4bf}
+.pdf-zoom button{width:26px;height:26px;border-radius:7px;border:1px solid #444953;background:#3a3e46;color:#e6e9f0;cursor:pointer;font-size:14px;line-height:1}
+.pdf-zoom button:hover{background:#474c56}
+#zoomVal{min-width:42px;text-align:center}
+.pdf-pages{margin-left:6px}
+.pdf-open{color:#9db4ff;text-decoration:none;font-size:12px;margin-left:8px}
+.pdf-open:hover{text-decoration:underline}
+#pdfScroll{flex:1;min-height:0;overflow-y:auto;padding:18px;display:flex;flex-direction:column;align-items:center;gap:14px;position:relative}
+.pdf-page{background:#fff;border-radius:6px;box-shadow:0 6px 22px rgba(0,0,0,.4);position:relative;overflow:hidden}
+.pdf-page canvas{display:block}
+.pdf-loading{color:#aeb4bf;font-size:13px;margin-top:40px}
+#viewer .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#aeb4bf}
