@@ -20,12 +20,18 @@ let pdfDoc = null, baseW = 600, zoomFactor = 1, renderToken = 0, io = null;
 init();
 async function init() {
   PAPERS = await (await fetch('/api/papers')).json();
+  applyTheme(localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  if (localStorage.getItem('hide-left') === '1') $('#layout').classList.add('hide-left');
+  if (localStorage.getItem('hide-right') === '1') $('#layout').classList.add('hide-right');
   buildYearFilters();
   renderSidebar();
   renderHome();
   bindUI();
   showView('home');
 }
+function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = $('#themeBtn'); if (b) b.textContent = t === 'dark' ? '☀️' : '🌙'; localStorage.setItem('theme', t); }
+function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); }
+function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); localStorage.setItem(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
 
 function buildYearFilters() {
   const years = [...new Set(PAPERS.map(p => p.year))].sort();
@@ -234,6 +240,10 @@ function bindUI() {
   document.querySelectorAll('#statusSeg button').forEach(b => b.onclick = () => saveStatus(b.dataset.st));
   $('#zoomIn').onclick = () => setZoom(zoomFactor + 0.15);
   $('#zoomOut').onclick = () => setZoom(zoomFactor - 0.15);
+  $('#themeBtn').onclick = toggleTheme;
+  $('#toggleLeft').onclick = () => togglePane('hide-left');
+  $('#toggleRight').onclick = () => togglePane('hide-right');
+  let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (pdfDoc && currentView === 'read') layoutPages(++renderToken); }, 200); });
 }
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
