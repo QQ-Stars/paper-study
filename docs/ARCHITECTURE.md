@@ -11,7 +11,7 @@
 | 采集 Agent | **Python** | PDF 提取 / LLM / 爬虫生态最强 |
 | 数据库 | **SQLite（WAL 模式）单文件** | 零运维、Node+Python 共享一个文件；将来可换 PostgreSQL |
 | 大模型 | **多供应商可切换**（DeepSeek / Qwen / OpenAI / Claude） | 填 key 即用，随时换 |
-| 数据源 | **全顶会**（arXiv 先行 → CVF/OpenReview/ACL/PMLR/NeurIPS/AAAI） | 覆盖面最大 |
+| 数据源 | **学术聚合 API**（Semantic Scholar + OpenAlex + arXiv），**不自写逐站爬虫** | 一两个官方API即覆盖所有顶会，且白送摘要/TLDR/引用/开放PDF链接，更省更稳更合规 |
 | 部署 | **先本地，后期 Docker 上线** | 小白先把功能跑通，别被运维卡住 |
 
 > 📦 **依赖只在项目内**：Node 包装到 `node_modules/`，Python 包装到项目内虚拟环境 `.venv/`（均 gitignore），不污染其他目录。
@@ -55,8 +55,8 @@ study-app/
 │  ├─ extract.py        # PDF→文本（PyMuPDF）
 │  ├─ llm.py            # 多供应商统一封装（OpenAI兼容 + Anthropic）
 │  ├─ schema.py         # 属性 schema（pydantic）
-│  └─ sources/          # 各 venue 适配器
-│     ├─ arxiv.py  cvf.py  openreview.py  acl.py  pmlr.py  neurips.py  aaai.py
+│  └─ sources/          # 聚合 API 客户端（不是爬虫）
+│     ├─ semanticscholar.py  openalex.py  arxiv.py   # + base.py
 ├─ db/schema.sql        # ★ 建表 DDL（Node 与 Python 共用）
 ├─ docs/                # 文档（本目录）
 ├─ .env.example         # 环境变量模板（真实 .env 不入库）
@@ -71,10 +71,11 @@ study-app/
 2. **去重** 按 `arxiv_id / doi / 标准化标题` 查 DB，已存在则跳过
 3. **下载 PDF** → 缓存到 `data/pdfs/`（限速、重试）
 4. **提取文本** PyMuPDF：标题+摘要+前 N 页（控制 token）
-5. **LLM 抽属性**（结构化 JSON，见 §4）
+5. **LLM 增强（只在刀刃上）**：摘要/TLDR/领域由 API 免费提供作输入，LLM 只产出**自定义分类(type/topic)**等结构化属性（见 §4）。多数情况**用摘要+TLDR即可，不必下载 PDF**。
 6. **相关性打分**（可选）LLM 判断与目标方向相关度 0–1，过滤噪音
-7. **自动讲解**（可选）LLM 生成"科学方法论讲解" markdown
+7. **自动讲解**（可选，需正文时才下开放 PDF）LLM 生成"科学方法论讲解" markdown
 8. **入库** 写入 SQLite `papers`
+9. **（可选）向量化** 入 `paper_vectors`，供"相似论文/语义检索"
 
 > 设计哲学：**先确定性、后智能**。爬取用规则（稳定、便宜），LLM 只负责"理解/分类/写作"。等成熟再让 LLM 更自主。
 
@@ -120,17 +121,18 @@ LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-chat
 ```
 
-## 7. 各数据源接入方式
+## 7. 数据源：聚合 API 优先（避免逐站爬虫）
 
-| 源 | 覆盖会议 | 接入方式 | 难度 |
+**核心思路**：顶会论文的元数据，学术聚合平台早已索引好；一两个官方 API 即覆盖所有会议，还白送摘要/AI总结/引用/开放PDF链接——比自写 7 个爬虫**更省、更稳、更合规**。
+
+| 源 | 角色 | 给到的数据 | 覆盖 |
 |---|---|---|---|
-| **arXiv** | 几乎所有预印 | 官方 API（Atom）| ⭐ 低（先做） |
-| **CVF** | CVPR/ICCV/ECCV/WACV | openaccess.thecvf.com 列表页解析 | ⭐⭐ |
-| **OpenReview** | ICLR / 部分 NeurIPS | 官方 API | ⭐⭐ |
-| **ACL Anthology** | ACL/EMNLP/NAACL/EACL | 官方批量数据/API | ⭐⭐ |
-| **PMLR** | ICML/AISTATS | proceedings.mlr.press 解析 | ⭐⭐ |
-| **NeurIPS** | NeurIPS | proceedings.neurips.cc | ⭐⭐ |
-| **AAAI** | AAAI | ojs.aaai.org 解析 | ⭐⭐⭐ |
+| **Semantic Scholar API** | 主力（发现+元数据） | 标题/作者/会议/年/摘要、**TLDR(免费AI总结)**、领域标签、引用数、**openAccessPdf链接**、推荐 | 所有顶会 + arXiv |
+| **OpenAlex API** | 副力（交叉校验+主题层级） | 摘要、四级主题(带置信度)、引用、开放获取状态 | 2.4亿+ 论文，免费 CC0 |
+| **arXiv API** | 时效兜底 | 最新预印本（聚合平台收录有几天滞后） | 预印本 |
+| (兜底) 个别会议官网 | 极少数只在官网 | 仅当 API 查不到时才单独一次性处理 | 罕见 |
+
+**PDF**：仅从 `openAccessPdf` / arXiv 等**开放链接**获取；线上不公开转存（版权）。
 
 ## 8. 合规与礼仪（上线前必读）
 

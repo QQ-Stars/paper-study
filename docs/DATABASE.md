@@ -27,16 +27,21 @@ PRAGMA synchronous = NORMAL;   -- WAL 下兼顾安全与性能
 -- ========== 论文主表 ==========
 CREATE TABLE IF NOT EXISTS papers (
   id           TEXT PRIMARY KEY,          -- slug，人类可读且用于文件名/URL，如 "2310.14566_HallusionBench-CVPR24"
-  source       TEXT NOT NULL,             -- 来源: arxiv|cvf|openreview|acl|pmlr|neurips|aaai|manual|seed
+  source       TEXT NOT NULL,             -- 来源: semanticscholar|openalex|arxiv|manual|seed
   source_id    TEXT,                      -- 在该来源内的 id
   arxiv_id     TEXT,                      -- arXiv 编号(可空)，用于去重
   doi          TEXT,                      -- DOI(可空)，用于去重
+  s2_id        TEXT,                      -- Semantic Scholar paperId(可空)
+  openalex_id  TEXT,                      -- OpenAlex id(可空)
   title        TEXT NOT NULL,
   title_norm   TEXT,                      -- 标题归一化(小写去标点)，用于模糊去重
   authors      TEXT,                      -- JSON 数组字符串: ["A","B"]
   venue        TEXT,                      -- CVPR|ICCV|...|arXiv
   year         TEXT,                      -- "2024"(用文本，便于与前端筛选一致)
   abstract     TEXT,
+  tldr         TEXT,                      -- AI 一句话总结(Semantic Scholar 免费; 无则 LLM 兜底)
+  citations    INTEGER,                   -- 引用数(API)
+  s2_fields    TEXT,                      -- S2 研究领域标签 JSON 数组(API)
   url          TEXT,                      -- 论文落地页
   pdf_url      TEXT,                      -- 远程 PDF 地址
   pdf_path     TEXT,                      -- 本地缓存路径 data/pdfs/<id>.pdf
@@ -46,9 +51,8 @@ CREATE TABLE IF NOT EXISTS papers (
   task         TEXT,
   models       TEXT,                      -- JSON 数组
   datasets     TEXT,                      -- JSON 数组
-  contribution TEXT,                      -- 一句话核心贡献
-  tldr         TEXT,                      -- 三句话速览
-  tags         TEXT,                      -- JSON 数组(关键词)
+  contribution TEXT,                      -- 一句话核心贡献(LLM)
+  tags         TEXT,                      -- JSON 数组(关键词, LLM)
   relevance    REAL,                      -- 与目标方向相关度 0~1(可空)
   explainer    TEXT,                      -- 自动生成的"科学方法论讲解" markdown(可空)
   extracted_by TEXT,                      -- 产出属性的模型名(溯源)，如 "deepseek-chat"
@@ -76,6 +80,13 @@ CREATE TABLE IF NOT EXISTS notes (
   paper_id   TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
   content    TEXT NOT NULL DEFAULT '',
   updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ========== 论文向量(可选，语义检索用) ==========
+CREATE TABLE IF NOT EXISTS paper_vectors (
+  paper_id  TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+  dim       INTEGER,
+  vector    BLOB                          -- 序列化 float32 向量(SPECTER2/自算)
 );
 
 -- ========== 采集任务(P5 后台任务用，先建好) ==========
@@ -113,7 +124,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 | arxiv_id / doi / title_norm | 系统 | **去重三件套** |
 | title/authors/venue/year/abstract/url/pdf_url | 数据源 | 原始元数据 |
 | pdf_path | 系统 | 本地缓存 PDF |
-| type/topic/task/models/datasets/contribution/tldr/tags/relevance | **大模型** | 分类与理解 |
+| type/topic/task/models/datasets/contribution/tags/relevance | **大模型** | 自定义分类与理解 |
+| tldr/citations/s2_fields | **聚合API** | TLDR、引用数、领域免费拿 |
 | explainer | **大模型** | 自动讲解 markdown |
 | extracted_by | 系统 | 哪个模型抽的(溯源/复现) |
 | order_no | 系统/人工 | 学习顺序 |

@@ -28,11 +28,13 @@ agent/
 ├─ pipeline.py      # 编排: 发现→去重→下载→提取→LLM→(相关性/讲解)→入库
 ├─ relevance.py     # 可选: LLM 相关性打分
 ├─ explainer.py     # 可选: LLM 生成讲解 markdown
+├─ embed.py         # 可选: 论文向量(SPECTER2/自算) + 相似检索
 ├─ util.py          # slug / title_norm / 带限速重试的 http
-└─ sources/
-   ├─ base.py       # Source 抽象基类
-   ├─ arxiv.py      # ← P2 先实现这个
-   ├─ cvf.py  openreview.py  acl.py  pmlr.py  neurips.py  aaai.py   # ← P4
+└─ sources/         # 聚合 API 客户端（不是爬虫）
+   ├─ base.py            # Source 抽象基类
+   ├─ semanticscholar.py # ← P2 主力: 发现+元数据+TLDR+领域+PDF链接
+   ├─ openalex.py        # ← P4 副力: 交叉校验+四级主题
+   └─ arxiv.py           # ← P2 兜底: 最新预印本
 ```
 
 ---
@@ -80,43 +82,42 @@ class PaperAttributes(BaseModel):     # 大模型抽取的"成品"
 一次 `ingest` 的时序：
 
 ```
-source.search(query, years, limit)   →  [PaperStub, ...]
+source.search(query, years, limit)  →  [PaperStub(含 摘要/TLDR/领域/引用/PDF链接), ...]
         │
         ▼  对每个 stub:
    ┌─ 去重: exists(arxiv_id or title_norm)? ──是──▶ 跳过(skipped++)
    │否
    ▼
-   下载 PDF(限速/缓存)  →  data/pdfs/<slug>.pdf
-   ▼
-   extract.first_pages(pdf, n=8) + abstract   →  text(截断到~8k token)
-   ▼
-   llm.extract(stub, text)  →  PaperAttributes(已 pydantic 校验)
+   llm.classify(stub)  →  PaperAttributes(type/topic/...)   # 用 摘要+TLDR 即可, 多数不必下PDF
    ▼
    (可选) 若 query 且 relevance < 阈值 → 标记/跳过
    ▼
-   db.insert_paper(slug, stub, attrs, pdf_path)   (added++)
+   db.insert_paper(slug, stub, attrs)   (added++)
    ▼
-   (可选) explainer = explainer.generate(stub, text); db.set_explainer(slug, ...)
+   (可选, --explain 时) 下载开放PDF → extract.first_pages → explainer.generate → 入库
+   ▼
+   (可选) embed.add(slug)   # 向量入库, 供相似/语义检索
 ```
 
 伪代码：
 ```python
-def ingest(query, venues, years, limit, min_rel=0.0, explain=False):
+def ingest(query, sources, years, limit, min_rel=0.0, explain=False):
     con = db.connect()
-    for src in [get_source(v) for v in venues]:
-        for stub in src.search(query, years, limit):
+    for src in [get_source(s) for s in sources]:   # semanticscholar / openalex / arxiv
+        for stub in src.search(query, years, limit):   # stub 已含 摘要/TLDR/领域/引用/pdf_url
             tn = util.title_norm(stub.title)
             if db.exists(con, arxiv_id=stub.arxiv_id, title_norm=tn):
                 continue
             try:
-                pdf = util.download(stub.pdf_url, dest=pdf_path_for(stub))
-                text = extract.first_pages(pdf, 8, with_abstract=stub.abstract)
-                attrs = llm.extract(stub, text)             # 带重试+校验
+                attrs = llm.classify(stub)              # 用 摘要+TLDR 分类, 多数不必下PDF; 带重试+校验
                 if query and (attrs.relevance or 1) < min_rel:
                     continue
-                db.insert_paper(con, build_row(stub, attrs, pdf, tn))
-                if explain:
-                    db.set_explainer(con, slug, explainer.generate(stub, text))
+                db.insert_paper(con, build_row(stub, attrs, tn))
+                if explain:                             # 需要正文时才下开放PDF
+                    pdf = util.download(stub.pdf_url, dest=pdf_path_for(stub))
+                    text = extract.first_pages(pdf, 8, with_abstract=stub.abstract)
+                    db.set_explainer(con, stub.slug, explainer.generate(stub, text))
+                # embed.add(con, stub)                  # 可选: 向量入库
             except Exception as e:
                 log.warning("skip %s: %s", stub.title[:40], e)   # 单篇失败不影响整体
     con.close()
@@ -202,23 +203,27 @@ class Source(ABC):
     def search(self, query: str, years: tuple[int,int], limit: int) -> Iterable[PaperStub]: ...
 ```
 
-### 6.1 arXiv（P2 先做，最简单）
-- 接口：`http://export.arxiv.org/api/query?search_query=all:<query>&start=0&max_results=N&sortBy=submittedDate&sortOrder=descending`
-- 解析：`feedparser` 读 Atom；每条取 id→arxiv_id、title、authors、summary→abstract、`pdf` 链接、published→year。
-- **venue 识别**：`arxiv_comment` 里常有 "Accepted to CVPR 2024" → 正则提取 venue/year，否则 venue="arXiv"。
-- 限速：**每 3 秒 ≤1 次请求**（arXiv 要求）。
+### 6.1 Semantic Scholar（主力，P2）
+- 批量搜索：`GET https://api.semanticscholar.org/graph/v1/paper/search/bulk`
+  `?query=<q>&year=2024-2026&fields=title,authors,venue,year,abstract,tldr,s2FieldsOfStudy,citationCount,externalIds,openAccessPdf`
+- 每页最多 **1000 条**；每条直接给 标题/作者/venue/年/摘要/**TLDR**/领域/引用数/arxivId/**开放PDF链接**。
+- 速率：未鉴权 5000 次/5 分钟；有 key 1 RPS；需指数退避。
+- 实现：`httpx` 直接调，或 `semanticscholar` 包。
 
-### 6.2 其它顶会（P4，逐个接）
-| 源 | 会议 | 取数方式 | 备注 |
-|---|---|---|---|
-| `cvf.py` | CVPR/ICCV/ECCV | 解析 `openaccess.thecvf.com/<CONF><YEAR>?day=all` 列表 | 无API→礼貌爬+缓存；按 query 过滤标题 |
-| `openreview.py` | ICLR/部分NeurIPS | OpenReview API v2 (`api2.openreview.net`) 查 venue 下 notes | 结构化、稳定 |
-| `acl.py` | ACL/EMNLP/NAACL/EACL | ACL Anthology 批量数据(GitHub) 或卷页 | 有 bibtex/元数据 |
-| `pmlr.py` | ICML | 解析 `proceedings.mlr.press/v<NNN>/` | 每年对应卷号 |
-| `neurips.py` | NeurIPS | 解析 `proceedings.neurips.cc/paper_files/paper/<year>` | |
-| `aaai.py` | AAAI | 解析 `ojs.aaai.org` 期号页 | 结构最杂 |
+### 6.2 OpenAlex（副力，P4：交叉校验+主题）
+- `GET https://api.openalex.org/works?search=<q>&filter=from_publication_date:2024-01-01&per-page=200`（建议带 `mailto=` 进礼貌池）
+- 给 摘要(倒排索引需还原)、**四级主题(置信度)**、引用、开放获取状态。
+- 用途：补全 S2 缺的字段、用其主题层级**校正分类**。
 
-> **成本控制关键**：顶会一年几千篇。**先用关键词在标题/摘要里粗筛**，只对命中的少量论文调用 LLM；再用 `relevance` 精筛。别对全量调用大模型。
+### 6.3 arXiv（时效兜底，P2）
+- `http://export.arxiv.org/api/query?search_query=all:<q>&sortBy=submittedDate&sortOrder=descending`（`feedparser` 解析 Atom）
+- 抓"刚出、聚合平台还没收录"的最新预印本；venue 从 `comment` 里识别 "Accepted to CVPR 2024"，否则 "arXiv"。
+- 限速：**每 3 秒 ≤1 次**。
+
+### 6.4 兜底（很少用到）
+- 极少数**只在某会议官网、且 S2/OpenAlex 都查不到**的论文，才单独写一次性抓取（`httpx`+`bs4`）。
+
+> **成本/效率关键**：S2/OpenAlex 已免费给 摘要/TLDR/领域 → **分类多数只用摘要+TLDR 就够，不必下 PDF**；只有要"写讲解"时才下载开放 PDF 取正文。
 
 ---
 
@@ -256,16 +261,17 @@ pip install -r requirements.txt
 ```
 `requirements.txt`：
 ```
-pymupdf            # PDF 提取
+httpx              # 调 Semantic Scholar / OpenAlex API、下载开放PDF
+feedparser         # arXiv Atom 解析
 openai             # DeepSeek/Qwen/OpenAI 兼容
 anthropic          # Claude
 pydantic>=2        # 结构化校验
-httpx              # HTTP
-feedparser         # arXiv Atom
-beautifulsoup4     # 解析顶会页面
-lxml
 python-dotenv      # 读 .env
-tenacity           # 重试
+tenacity           # 重试/指数退避
+pymupdf            # PDF 提取（仅在要写讲解/取正文时）
+# 可选:
+# beautifulsoup4 lxml   # 仅当需要兜底抓某会议官网
+# numpy faiss-cpu       # 可选: 语义检索向量（或用 sqlite-vss）
 ```
 > Node 依赖（`better-sqlite3`）装到 `node_modules`。两者都在项目内，不污染系统/其他目录。
 
@@ -273,7 +279,7 @@ tenacity           # 重试
 
 ## 10. 成本与质量
 
-- **成本**：仅对**粗筛命中**的论文、用**标题+摘要+前几页**调用**便宜模型** → 约 **¥0.01~0.07/篇**；写讲解更贵些（输出长），按需开启。
+- **成本**：S2/OpenAlex 已免费给 摘要+TLDR+领域 → 分类**只喂 标题+摘要+TLDR** 给**便宜模型**、多数**无需下载/读取 PDF** → 约 **¥0.005~0.03/篇**，更省；只有"写讲解"按需下 PDF、贵一些。
 - **质量自检**：首批抽样人工校对 `type/topic/contribution`；不准就调 prompt / 加 few-shot / 换模型，再 `reextract`（不用重抓 PDF）。
 
 ---
@@ -282,3 +288,15 @@ tenacity           # 重试
 
 - **现在(本地)**：你手动跑 `python -m agent ingest ...`，论文进库，刷新网页就能看到。Node 只管读库。
 - **P5(网页触发)**：网页 `POST /api/ingest` 往 `ingest_jobs` 插一条任务；Python worker 轮询该表 → 执行流水线 → 回写进度；网页 `GET /api/jobs` 看进度。**两端通过数据库解耦，互不直接调用**，简单可靠。
+
+---
+
+## 12. 语义搜索 / 相似论文（可选，体验升级）
+
+固定标签（type/topic）适合"分类浏览"，但"按方向找论文/找相似"用**向量检索**更聪明：
+
+- **算向量**：用 Semantic Scholar 提供的 **SPECTER2** 论文向量，或自己用 embedding 模型算"标题+摘要"向量。
+- **存**：写入 `paper_vectors` 表（见 DATABASE.md）。
+- **检索**：`faiss` / `sqlite-vss` 做近邻搜索 → "找和这篇相似的"、"按语义找某方向"。
+- 建议放在**功能稳定后**做（ROADMAP P4）。
+

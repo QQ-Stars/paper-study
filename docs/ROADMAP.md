@@ -15,17 +15,17 @@
 - ☐ PDF 仍从 `data/pdfs|../paper` 提供
 - **交付**：刷新页面，一切照旧，但数据已在 `data/app.db` 里。
 
-## P2 · Python 采集 Agent v1（arXiv）  ☐
-**目标**：第一次能"自动把论文加进来"。
+## P2 · Python 采集 Agent v1（Semantic Scholar + arXiv）  ☐
+**目标**：第一次能"自动把论文加进来"——**用聚合 API，免写爬虫**。
 
-- ☐ 项目内 `.venv` + `requirements.txt`（pymupdf, openai, anthropic, pydantic, httpx, feedparser…）
+- ☐ 项目内 `.venv` + `requirements.txt`（httpx, feedparser, openai, anthropic, pydantic, tenacity, python-dotenv, pymupdf）
 - ☐ `agent/llm.py`：多供应商统一封装（OpenAI兼容 + Anthropic），`.env` 配置
-- ☐ `agent/schema.py`：pydantic 属性 schema
-- ☐ `agent/extract.py`：PDF→文本（PyMuPDF，取摘要+前N页）
-- ☐ `agent/sources/arxiv.py`：官方 API 检索
-- ☐ `agent/pipeline.py` + `__main__.py`：`python -m agent ingest --query "multimodal hallucination" --max 20`
-- ☐ 写入 SQLite，去重（arxiv_id）
-- **交付**：跑一条命令，网页里就多出一批自动抓取+分类好的 arXiv 论文。
+- ☐ `agent/models.py`：pydantic 模型（PaperStub / PaperAttributes）
+- ☐ `agent/sources/semanticscholar.py`：bulk 搜索（拿 摘要/TLDR/领域/引用/开放PDF链接）
+- ☐ `agent/sources/arxiv.py`：最新预印本兜底
+- ☐ `agent/pipeline.py` + `__main__.py`：`python -m agent ingest --query "multimodal hallucination" --max 30`
+- ☐ LLM **只做自定义分类**(type/topic)；多数无需下 PDF；写入 SQLite、去重
+- **交付**：跑一条命令，网页里就多出一批自动抓取+分类好的论文（含 TLDR/引用数）。
 
 ## P3 · 抽取质量 + 自动讲解 + 相关性  ☐
 - ☐ 结构化输出 + 失败重试 + pydantic 校验
@@ -34,13 +34,14 @@
 - ☐ 抽取质量自检（抽样人工校对）
 - **交付**：自动入库的论文属性又准又全，讲解可一键生成。
 
-## P4 · 全顶会适配器  ☐
-- ☐ `sources/cvf.py`（CVPR/ICCV/ECCV）
-- ☐ `sources/openreview.py`（ICLR/NeurIPS 部分）
-- ☐ `sources/acl.py`（ACL/EMNLP）
-- ☐ `sources/pmlr.py`（ICML）· `sources/neurips.py` · `sources/aaai.py`
-- ☐ 统一 `search(query, year)` 接口；各源限速与缓存
-- **交付**：一个方向，能从所有主流顶会一网打尽。
+## P4 · 多源补全 + 语义检索  ☐
+> 顶会覆盖已由 S2/arXiv 解决；本阶段做"补全"与"更聪明的找"。
+
+- ☐ `sources/openalex.py`：交叉校验、补全 S2 缺失字段、用四级主题校正分类
+- ☐ 跨源去重/合并（同一篇在多源出现 → 合并为一条，补全 arxiv_id/venue）
+- ☐ **语义检索**：`agent/embed.py` 论文向量（SPECTER2/自算）+ 近邻检索（faiss/sqlite-vss）
+- ☐ （兜底）极少数只在会议官网、且 API 查不到的，再单独一次性抓取
+- **交付**：一个方向一网打尽，且能"按语义找相似/相关论文"。
 
 ## P5 · 后台任务 + 定时 + 网页触发  ☐
 - ☐ `ingest_jobs` 表 + Python worker（轮询执行）
@@ -58,8 +59,8 @@
 - **交付**：一个可公开访问、稳定运行的正规产品。
 
 ## P7 · 增强（可选）  ☐
-- ☐ 语义搜索/相似论文（embedding + 向量检索）
-- ☐ 阅读推荐、引用关系图、趋势分析
+- ☐ 阅读推荐（Semantic Scholar Recommendations API）、引用关系图、趋势分析
+- ☐ 把论文库包成 **MCP server**，让 Claude 等客户端可"对话式"检索/分类/管理论文
 
 ---
 
