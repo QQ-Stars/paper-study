@@ -30,7 +30,7 @@ SYSTEM = (
 )
 
 
-def classify(stub, query: str = "") -> PaperAttributes:
+def classify(stub, query: str = "", fulltext: str = None) -> PaperAttributes:
     info = (
         f"检索方向: {query}\n"
         f"标题: {stub.title}\n"
@@ -39,6 +39,8 @@ def classify(stub, query: str = "") -> PaperAttributes:
         f"TLDR: {stub.tldr or ''}\n"
         f"领域标签: {', '.join(stub.fields or [])}"
     )
+    if fulltext:
+        info += f"\n\n正文片段(节选):\n{fulltext[:12000]}"
     last = None
     for _ in range(3):
         resp = client().chat.completions.create(

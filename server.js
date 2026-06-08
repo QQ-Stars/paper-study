@@ -3,6 +3,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const dbapi = require('./db');
 
 const ROOT = __dirname;
@@ -59,6 +60,31 @@ const server = http.createServer(async (req, res) => {
       const b = JSON.parse(await readBody(req));
       dbapi.setStatus(safeBase(b.id), b.status);
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
+    }
+    if (p === '/api/delete' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const id = safeBase(b.id);
+      dbapi.deletePaper(id);
+      try { const f = path.join(PDFS_DIR, id + '.pdf'); if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {}
+      return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
+    }
+    if (p === '/api/ingest' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const sources = (Array.isArray(b.sources) ? b.sources : []).filter(s => ['semanticscholar', 'arxiv'].includes(s));
+      if (!b.query || !sources.length) return send(res, 400, JSON.stringify({ ok: false, error: '缺少检索方向或数据源' }), MIME['.json']);
+      const pyWin = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
+      const py = fs.existsSync(pyWin) ? pyWin : 'python';
+      const args = ['-m', 'agent', 'ingest', '--query', String(b.query), '--sources', sources.join(','),
+        '--years', String(b.years || '2024-2026'), '--max', String(Math.min(parseInt(b.max) || 10, 50)),
+        '--min-relevance', String(b.minRelevance == null ? 0.5 : b.minRelevance)];
+      if (b.deep) args.push('--deep');
+      let out = '';
+      const child = spawn(py, args, { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+      child.stdout.on('data', d => out += d.toString());
+      child.stderr.on('data', d => out += d.toString());
+      child.on('error', e => send(res, 200, JSON.stringify({ ok: false, output: String(e) }), MIME['.json']));
+      child.on('close', code => send(res, 200, JSON.stringify({ ok: code === 0, code, output: out }), MIME['.json']));
+      return;
     }
     // ---- PDF 字节（绕过迅雷类下载器：路径不含 .pdf，由脚本 fetch 取字节）----
     if (p === '/pdfbytes') {

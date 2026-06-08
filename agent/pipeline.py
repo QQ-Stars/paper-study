@@ -7,7 +7,7 @@ from .sources.arxiv import Arxiv
 SOURCES = {"semanticscholar": SemanticScholar, "arxiv": Arxiv}
 
 
-def ingest(query, sources, years, limit, min_rel=0.0, explain=False):
+def ingest(query, sources, years, limit, min_rel=0.0, explain=False, deep=False):
     con = db.connect()
     found = added = skipped = 0
     for sname in sources:
@@ -26,11 +26,6 @@ def ingest(query, sources, years, limit, min_rel=0.0, explain=False):
                 skipped += 1
                 continue
             try:
-                attrs = llm.classify(stub, query)
-                if query and attrs.relevance is not None and attrs.relevance < min_rel:
-                    skipped += 1
-                    print(f"  - 相关度低({attrs.relevance:.2f})跳过: {stub.title[:50]}")
-                    continue
                 slug = util.make_slug(stub)
                 pdf_path = None
                 if stub.pdf_url:
@@ -40,6 +35,17 @@ def ingest(query, sources, years, limit, min_rel=0.0, explain=False):
                         pdf_path = f"data/pdfs/{slug}.pdf"
                     except Exception:
                         pdf_path = None
+                body = None
+                if deep and pdf_path:
+                    try:
+                        body = extract.first_pages(config.ROOT / pdf_path, 8, stub.abstract)
+                    except Exception:
+                        body = None
+                attrs = llm.classify(stub, query, body)
+                if query and attrs.relevance is not None and attrs.relevance < min_rel:
+                    skipped += 1
+                    print(f"  - 相关度低({attrs.relevance:.2f})跳过: {stub.title[:50]}")
+                    continue
                 row = {
                     "id": slug, "source": stub.source, "source_id": stub.source_id,
                     "arxiv_id": stub.arxiv_id, "doi": stub.doi, "s2_id": stub.s2_id,
@@ -60,12 +66,7 @@ def ingest(query, sources, years, limit, min_rel=0.0, explain=False):
                 added += 1
                 pdf_flag = "📄" if pdf_path else "  "
                 print(f"  + {pdf_flag} [{stub.venue} {stub.year}] {stub.title[:58]}  ({attrs.type}/{attrs.topic})")
-                if explain and pdf_path:
-                    try:
-                        text = extract.first_pages(config.ROOT / pdf_path, 8, stub.abstract)
-                        # 讲解生成留待 explainer 模块(P3)；此处先占位
-                    except Exception:
-                        pass
+                # 讲解(explainer)生成在 P3 实现
             except Exception as ex:
                 skipped += 1
                 print(f"  ! 跳过: {stub.title[:46]} -> {ex}")

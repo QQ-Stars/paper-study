@@ -21,6 +21,7 @@
     <nav class="viewnav">
       <button data-view="home" class="active">总览</button>
       <button data-view="read">阅读</button>
+      <button data-view="manage">管理</button>
     </nav>
     <div class="filters">
       <div class="search-box">
@@ -47,12 +48,43 @@
           <th data-sort="venue" style="width:110px">会议</th>
           <th data-sort="year" style="width:66px">年份</th>
           <th data-sort="type" style="width:120px">方向</th>
-          <th data-sort="topic" style="width:120px">主题</th>
-          <th data-sort="status" style="width:92px">状态</th>
-          <th style="width:54px">笔记</th>
+          <th data-sort="topic" style="width:110px">主题</th>
+          <th data-sort="created_at" style="width:128px">添加时间</th>
+          <th data-sort="status" style="width:88px">状态</th>
+          <th style="width:50px">笔记</th>
         </tr></thead>
         <tbody id="homeBody"></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- 管理 -->
+  <section id="manage" class="hidden">
+    <div class="manage-grid">
+      <div class="m-card">
+        <div class="m-title">🔍 采集新论文</div>
+        <div class="m-field"><label>检索方向（英文关键词效果最好）</label>
+          <input id="ingQuery" placeholder="如 multimodal hallucination detection" /></div>
+        <div class="m-field"><label>数据源</label>
+          <div class="src-toggles">
+            <label class="src"><input type="checkbox" id="srcArxiv" checked> arXiv <em>稳定 · 推荐</em></label>
+            <label class="src"><input type="checkbox" id="srcS2"> Semantic Scholar <em>覆盖全 · 高峰限流</em></label>
+          </div>
+        </div>
+        <div class="m-row3">
+          <div class="m-field"><label>年份</label><input id="ingYears" value="2024-2026" /></div>
+          <div class="m-field"><label>数量(≤50)</label><input id="ingMax" type="number" value="10" min="1" max="50" /></div>
+          <div class="m-field"><label>相关度 ≥</label><input id="ingRel" type="number" value="0.5" min="0" max="1" step="0.1" /></div>
+        </div>
+        <label class="src deep"><input type="checkbox" id="ingDeep"> 深度分类（读 PDF 正文，更准但更慢/更贵）</label>
+        <button id="ingBtn" class="mini primary ing-btn">🔍 抓取并入库</button>
+        <pre id="ingLog" class="ing-log">日志将显示在这里…</pre>
+      </div>
+      <div class="m-card">
+        <div class="m-title">🗂️ 库内论文管理 <span id="mCount" class="m-count"></span></div>
+        <input id="mSearch" class="m-search" placeholder="搜索 标题 / 会议 / 方向 / 主题…" />
+        <div id="mList" class="m-list"></div>
+      </div>
     </div>
   </section>
 
