@@ -230,7 +230,7 @@ async function openPaper(p) {
   renderSidebar();
   $('#paperTitle').textContent = `${p.title} — ${p.venue} ${p.year}`;
   $('#pdfDocTitle').textContent = `${p.title} · ${p.venue} ${p.year}`;
-  $('#pdfOpen').href = '/papers/' + encodeURIComponent(p.file);
+  $('#pdfOpen').href = p.pdf_url || ('/papers/' + encodeURIComponent(p.file));
   setStatusUI(p.status || '未开始');
   // 讲解
   const ex = await (await fetch('/api/explainer?id=' + encodeURIComponent(p.id))).text();
