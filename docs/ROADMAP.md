@@ -15,17 +15,17 @@
 - ☑ PDF 仍从 `../paper` 提供（`/pdfbytes` 不变）
 - **交付**：✅ 刷新页面一切照旧，数据已在 `data/app.db`。
 
-## P2 · Python 采集 Agent v1（Semantic Scholar + arXiv）  ☐
+## P2 · Python 采集 Agent v1（Semantic Scholar + arXiv）  ☑
 **目标**：第一次能"自动把论文加进来"——**用聚合 API，免写爬虫**。
 
-- ☐ 项目内 `.venv` + `requirements.txt`（httpx, feedparser, openai, anthropic, pydantic, tenacity, python-dotenv, pymupdf）
-- ☐ `agent/llm.py`：多供应商统一封装（OpenAI兼容 + Anthropic），`.env` 配置
-- ☐ `agent/models.py`：pydantic 模型（PaperStub / PaperAttributes）
-- ☐ `agent/sources/semanticscholar.py`：bulk 搜索（拿 摘要/TLDR/领域/引用/开放PDF链接）
-- ☐ `agent/sources/arxiv.py`：最新预印本兜底
-- ☐ `agent/pipeline.py` + `__main__.py`：`python -m agent ingest --query "multimodal hallucination" --max 30`
-- ☐ LLM **只做自定义分类**(type/topic)；多数无需下 PDF；写入 SQLite、去重
-- **交付**：跑一条命令，网页里就多出一批自动抓取+分类好的论文（含 TLDR/引用数）。
+- ☑ 项目内 `.venv` + `requirements.txt`（httpx/feedparser/openai/anthropic/pydantic/tenacity/dotenv/pymupdf）
+- ☑ `agent/llm.py`：多供应商封装（OpenAI兼容，DeepSeek 已验证）+ JSON结构化输出 + 重试；`.env` 配置
+- ☑ `agent/models.py`：pydantic 模型（PaperStub / PaperAttributes）+ 受控词表
+- ☑ `agent/sources/semanticscholar.py`（主力）+ `arxiv.py`（相关度排序，venue从comment识别）
+- ☑ `agent/pipeline.py` + `__main__.py`：`ingest / ping / purge` 命令
+- ☑ LLM 只做自定义分类 + 相关性打分；下载开放PDF到 data/pdfs；去重；server 改为多目录找PDF
+- **交付**：✅ `python -m agent ingest --query "multimodal hallucination" --sources arxiv --max 8 --min-relevance 0.5` → 网页里多出 6 篇自动抓取+分类好、可直接阅读的论文。
+- ⚠️ 注：S2 匿名接口高峰期会 429（已优雅跳过）；要稳定用 S2，建议申请其免费 API key 填入 `.env`。
 
 ## P3 · 抽取质量 + 自动讲解 + 相关性  ☐
 - ☐ 结构化输出 + 失败重试 + pydantic 校验

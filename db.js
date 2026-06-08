@@ -19,6 +19,7 @@ const listPapers = () => db.prepare(`
   SELECT p.id,
          p.id || '.pdf'              AS file,
          p.title, p.venue, p.year, p.type, p.topic,
+         p.pdf_url, p.url, p.tldr, p.contribution, p.citations,
          p.order_no                  AS "order",
          COALESCE(g.status,'未开始') AS status,
          CASE WHEN n.content IS NOT NULL AND length(n.content) > 0 THEN 1 ELSE 0 END AS hasNote

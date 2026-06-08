@@ -11,7 +11,17 @@ const PUBLIC = path.join(ROOT, 'public');
 let cfg = { papersDir: '../paper', port: 5173 };
 try { Object.assign(cfg, JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'))); } catch (e) {}
 const PAPERS_DIR = path.resolve(ROOT, cfg.papersDir);
+const PDFS_DIR = path.join(ROOT, 'data', 'pdfs');   // 采集 Agent 下载的 PDF
 const PORT = process.env.PORT || cfg.port || 5173;
+
+// 优先用本地缓存(data/pdfs)，再回退到种子目录(../paper)
+const resolvePdf = (name) => {
+  for (const dir of [PDFS_DIR, PAPERS_DIR]) {
+    const f = path.join(dir, name);
+    if (fs.existsSync(f)) return f;
+  }
+  return null;
+};
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -52,15 +62,15 @@ const server = http.createServer(async (req, res) => {
     }
     // ---- PDF 字节（绕过迅雷类下载器：路径不含 .pdf，由脚本 fetch 取字节）----
     if (p === '/pdfbytes') {
-      const f = path.join(PAPERS_DIR, safeBase(u.searchParams.get('id')) + '.pdf');
-      if (!fs.existsSync(f)) return send(res, 404, 'not found');
+      const f = resolvePdf(safeBase(u.searchParams.get('id')) + '.pdf');
+      if (!f) return send(res, 404, 'not found');
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': fs.statSync(f).size, 'Cache-Control': 'no-store' });
       return fs.createReadStream(f).pipe(res);
     }
     // ---- PDF 流式（原文直链，供“↗ 原文”用）----
     if (p.startsWith('/papers/')) {
-      const f = path.join(PAPERS_DIR, safeBase(decodeURIComponent(p.slice('/papers/'.length))));
-      if (!fs.existsSync(f)) return send(res, 404, 'PDF not found');
+      const f = resolvePdf(safeBase(decodeURIComponent(p.slice('/papers/'.length))));
+      if (!f) return send(res, 404, 'PDF not found');
       res.writeHead(200, { 'Content-Type': MIME[path.extname(f).toLowerCase()] || 'application/octet-stream' });
       return fs.createReadStream(f).pipe(res);
     }

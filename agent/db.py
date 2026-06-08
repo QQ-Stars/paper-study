@@ -1,0 +1,37 @@
+"""SQLite 读写（与 Node 共享同一个 app.db）。"""
+import sqlite3
+import re
+from . import config
+
+
+def connect():
+    con = sqlite3.connect(config.DB_PATH)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA foreign_keys=ON")
+    con.execute("PRAGMA busy_timeout=5000")
+    return con
+
+
+def title_norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9一-龥]+", "", (s or "").lower())
+
+
+def exists(con, arxiv_id=None, title_norm_v=None) -> bool:
+    if arxiv_id and con.execute("SELECT 1 FROM papers WHERE arxiv_id=?", (arxiv_id,)).fetchone():
+        return True
+    if title_norm_v and con.execute("SELECT 1 FROM papers WHERE title_norm=?", (title_norm_v,)).fetchone():
+        return True
+    return False
+
+
+def insert_paper(con, row: dict):
+    cols = ",".join(row.keys())
+    ph = ",".join(["?"] * len(row))
+    con.execute(f"INSERT OR IGNORE INTO papers({cols}) VALUES({ph})", list(row.values()))
+    con.commit()
+
+
+def set_explainer(con, pid: str, md: str):
+    con.execute("UPDATE papers SET explainer=?, updated_at=datetime('now') WHERE id=?", (md, pid))
+    con.commit()
