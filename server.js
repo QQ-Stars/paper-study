@@ -115,6 +115,17 @@ const server = http.createServer(async (req, res) => {
       writeSettings(s);
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
+    if (p === '/api/test-llm' && req.method === 'POST') {
+      const pyWin = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
+      const py = fs.existsSync(pyWin) ? pyWin : 'python';
+      let out = '';
+      const child = spawn(py, ['-m', 'agent', 'ping'], { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+      child.stdout.on('data', d => out += d.toString());
+      child.stderr.on('data', d => out += d.toString());
+      child.on('error', e => send(res, 200, JSON.stringify({ ok: false, output: String(e) }), MIME['.json']));
+      child.on('close', code => send(res, 200, JSON.stringify({ ok: code === 0, output: out }), MIME['.json']));
+      return;
+    }
     // ---- PDF 字节（绕过迅雷类下载器：路径不含 .pdf，由脚本 fetch 取字节）----
     if (p === '/pdfbytes') {
       const f = resolvePdf(safeBase(u.searchParams.get('id')) + '.pdf');

@@ -6,6 +6,7 @@ let yearFilter = 'all';
 let q = '';
 let currentView = 'home';
 let homeSort = { key: 'year', dir: 1 };
+let manageSrc = 'all';
 let chProgress = null, chDir = null, chVenue = null;
 
 const $ = (s) => document.querySelector(s);
@@ -329,7 +330,14 @@ function bindUI() {
   $('#zoomOut').onclick = () => setZoom(zoomFactor - 0.15);
   $('#ingBtn').onclick = doIngest;
   $('#mSearch').oninput = renderManage;
+  $('#mSort').onchange = renderManage;
   $('#setSaveBtn').onclick = saveSettings;
+  $('#setTestBtn').onclick = testLLM;
+  document.querySelectorAll('.ib-opts .src-chip').forEach(c => c.onclick = () => c.classList.toggle('active'));
+  document.querySelectorAll('#libSrcFilter .fchip').forEach(c => c.onclick = () => {
+    document.querySelectorAll('#libSrcFilter .fchip').forEach(x => x.classList.remove('active'));
+    c.classList.add('active'); manageSrc = c.dataset.src; renderManage();
+  });
   $('#themeBtn').onclick = toggleTheme;
   $('#toggleLeft').onclick = () => togglePane('hide-left');
   $('#toggleRight').onclick = () => togglePane('hide-right');
@@ -373,29 +381,55 @@ function renderManage() {
   let list = PAPERS.slice();
   const kw = (($('#mSearch') && $('#mSearch').value) || '').trim().toLowerCase();
   if (kw) list = list.filter(p => (p.title + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(kw));
-  list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));   // 最近添加在前
+  if (manageSrc === 'collected') list = list.filter(p => p.source !== 'seed');
+  else if (manageSrc === 'seed') list = list.filter(p => p.source === 'seed');
+  const sort = ($('#mSort') && $('#mSort').value) || 'added';
+  const cmp = {
+    added: (a, b) => (b.created_at || '').localeCompare(a.created_at || ''),
+    relevance: (a, b) => (b.relevance || 0) - (a.relevance || 0),
+    year: (a, b) => (b.year || '').localeCompare(a.year || ''),
+    citations: (a, b) => (b.citations || 0) - (a.citations || 0),
+    title: (a, b) => (a.title || '').localeCompare(b.title || '')
+  }[sort] || (() => 0);
+  list.sort(cmp);
   $('#mCount').textContent = `共 ${list.length}`;
-  $('#mList').innerHTML = list.map(p => `
-    <div class="m-item">
+  $('#mList').innerHTML = list.map(p => {
+    const meta = [`<span class="venue">${p.venue} ${p.year}</span>`, p.type];
+    if (p.topic) meta.push(p.topic);
+    if (p.relevance != null) meta.push('rel ' + p.relevance);
+    if (p.citations != null) meta.push(p.citations + ' cite');
+    meta.push(fmtTime(p.created_at));
+    return `<div class="m-item">
+      <span class="mi-status status-dot ${p.status}" data-id="${p.id}" title="点击切换学习状态（当前：${p.status}）"></span>
       <div class="m-item-main" data-id="${p.id}">
         <div class="m-item-title">${p.title}</div>
-        <div class="m-item-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span> · ${p.type} · 添加 ${fmtTime(p.created_at)}${p.source !== 'seed' ? ' <span class="m-tag">采集</span>' : ''}</div>
+        <div class="m-item-meta">${meta.join(' · ')}${p.source !== 'seed' ? ' <span class="m-tag">采集</span>' : ''}</div>
       </div>
       <button class="m-del" data-id="${p.id}" title="删除">🗑</button>
-    </div>`).join('') || '<div class="placeholder">没有匹配的论文。</div>';
+    </div>`;
+  }).join('') || '<div class="placeholder">没有匹配的论文。</div>';
   document.querySelectorAll('#mList .m-item-main').forEach(el => el.onclick = () => openPaper(PAPERS.find(x => x.id === el.dataset.id)));
   document.querySelectorAll('#mList .m-del').forEach(b => b.onclick = () => deletePaper(b.dataset.id));
+  document.querySelectorAll('#mList .mi-status').forEach(s => s.onclick = () => cyclePaperStatus(s.dataset.id));
+}
+const STATUS_NEXT = { '未开始': '学习中', '学习中': '已理解', '已理解': '未开始' };
+async function cyclePaperStatus(id) {
+  const p = PAPERS.find(x => x.id === id); if (!p) return;
+  const next = STATUS_NEXT[p.status] || '学习中';
+  await fetch('/api/progress', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status: next }) });
+  p.status = next;
+  if (current && current.id === id) setStatusUI(next);
+  renderManage(); renderSidebar(); updateSummary();
 }
 
 async function doIngest() {
-  const sources = [];
-  if ($('#srcArxiv').checked) sources.push('arxiv');
-  if ($('#srcS2').checked) sources.push('semanticscholar');
+  const sources = [...document.querySelectorAll('.ib-opts .src-chip.active')].map(c => c.dataset.src);
   const query = $('#ingQuery').value.trim();
-  if (!query) { $('#ingLog').textContent = '请填写检索方向'; return; }
-  if (!sources.length) { $('#ingLog').textContent = '请至少选一个数据源'; return; }
+  const log = $('#ingLog'); log.classList.remove('hidden');
+  if (!query) { log.textContent = '请填写检索方向'; return; }
+  if (!sources.length) { log.textContent = '请至少选择一个数据源'; return; }
   const btn = $('#ingBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = '采集中…';
-  $('#ingLog').textContent = '正在采集，请稍候（数量越多越久；深度分类更慢）…';
+  log.textContent = '正在采集，请稍候（数量越多越久；深度分类更慢）…';
   try {
     const r = await fetch('/api/ingest', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -403,19 +437,15 @@ async function doIngest() {
         query, sources, years: $('#ingYears').value.trim(),
         max: parseInt($('#ingMax').value) || 10,
         minRelevance: parseFloat($('#ingRel').value),
-        deep: $('#ingDeep').checked,
-        expand: $('#ingExpand').checked
+        deep: $('#ingDeep').checked, expand: $('#ingExpand').checked
       })
     });
     const j = await r.json();
-    $('#ingLog').textContent = j.output || j.error || '(无输出)';
-    await reloadPapers();
-    renderManage();
-  } catch (e) {
-    $('#ingLog').textContent = '失败: ' + e;
-  } finally {
-    btn.disabled = false; btn.textContent = old;
-  }
+    log.textContent = j.output || j.error || '(无输出)';
+    log.scrollTop = log.scrollHeight;
+    await reloadPapers(); renderManage();
+  } catch (e) { log.textContent = '失败: ' + e; }
+  finally { btn.disabled = false; btn.textContent = old; }
 }
 
 async function reloadPapers() {
@@ -445,7 +475,16 @@ async function loadSettings() {
     $('#setS2Key').value = '';
     $('#setKeyTip').textContent = s.hasApiKey ? `当前已配置：${s.apiKeyTail}` : '⚠️ 未配置 API Key';
     $('#setS2Tip').textContent = s.hasS2Key ? `当前已配置：${s.s2KeyTail}` : '未配置（不填也能用，仅高峰可能限流）';
+    const meta = $('#setSummaryMeta'); if (meta) meta.textContent = `${s.provider} · ${s.model || '—'}` + (s.hasApiKey ? '' : ' · ⚠ 未配置 Key');
   } catch (e) { }
+}
+async function testLLM() {
+  const h = $('#setHint'); h.textContent = '测试中…';
+  try {
+    const j = await (await fetch('/api/test-llm', { method: 'POST' })).json();
+    h.textContent = j.ok ? '连接正常 ✓' : ('失败：' + String(j.output || '').replace(/\s+/g, ' ').slice(-100));
+  } catch (e) { h.textContent = '失败：' + e; }
+  setTimeout(() => h.textContent = '', 6000);
 }
 async function saveSettings() {
   const body = {
