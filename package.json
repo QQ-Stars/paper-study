@@ -1,0 +1,28 @@
+{
+  "name": "study-app",
+  "version": "1.0.0",
+  "description": "一个**本地、零依赖**的论文精读工具：左侧论文列表、中间 PDF、右侧「论文讲解 + 我的笔记」。笔记以 `notes/*.md` 存储，纳入 git 版本控制。",
+  "main": "server.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QQ-Stars/paper-study.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/QQ-Stars/paper-study/issues"
+  },
+  "homepage": "https://github.com/QQ-Stars/paper-study#readme",
+  "dependencies": {
+    "better-sqlite3": "^12.10.0"
+  }
+}

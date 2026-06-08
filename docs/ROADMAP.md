@@ -5,15 +5,15 @@
 
 ---
 
-## P1 · 数据库地基与迁移  ◐
+## P1 · 数据库地基与迁移  ☑
 **目标**：把数据从散落的 JSON/文件迁到 SQLite，Web 改为读数据库。用户体验不变，但为"自动加论文"铺好地基。
 
-- ☐ 写 `db/schema.sql`（papers / progress / notes / ingest_jobs）
-- ☐ Node 接入 `better-sqlite3`，开启 WAL
-- ☐ 迁移脚本：`papers.json` + `notes/*.md` + `progress.json` → SQLite（38 篇 + 现有笔记/进度）
-- ☐ `server.js` 的 `/api/papers /api/note /api/progress` 改为读写 DB
-- ☐ PDF 仍从 `data/pdfs|../paper` 提供
-- **交付**：刷新页面，一切照旧，但数据已在 `data/app.db` 里。
+- ☑ 写 `db/schema.sql`（papers / progress / notes / paper_vectors / ingest_jobs / schema_migrations）
+- ☑ Node 接入 `better-sqlite3`，开启 WAL
+- ☑ 迁移脚本 `scripts/migrate.js`：papers.json + notes + progress + 讲解 md → SQLite（38 篇全部，含讲解）
+- ☑ `server.js` 的 `/api/papers /api/note /api/progress /api/explainer` 改为读写 DB（前端零改动）
+- ☑ PDF 仍从 `../paper` 提供（`/pdfbytes` 不变）
+- **交付**：✅ 刷新页面一切照旧，数据已在 `data/app.db`。
 
 ## P2 · Python 采集 Agent v1（Semantic Scholar + arXiv）  ☐
 **目标**：第一次能"自动把论文加进来"——**用聚合 API，免写爬虫**。
