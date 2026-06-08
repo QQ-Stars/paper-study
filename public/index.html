@@ -60,6 +60,36 @@
 
   <!-- 管理 -->
   <section id="manage" class="hidden">
+    <div class="m-card settings-card">
+      <div class="m-title">⚙️ 设置</div>
+      <div class="settings-cols">
+        <div>
+          <div class="settings-sub">大模型</div>
+          <div class="m-field"><label>供应商</label>
+            <select id="setProvider">
+              <option value="deepseek">DeepSeek</option>
+              <option value="qwen">通义千问 Qwen</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic Claude</option>
+            </select></div>
+          <div class="m-field"><label>API Key</label><input id="setApiKey" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
+          <div class="set-tip" id="setKeyTip"></div>
+          <div class="m-row2">
+            <div class="m-field"><label>Base URL</label><input id="setBaseUrl" placeholder="https://api.deepseek.com" /></div>
+            <div class="m-field"><label>模型</label><input id="setModel" placeholder="deepseek-v4-flash" /></div>
+          </div>
+        </div>
+        <div>
+          <div class="settings-sub">数据源 API</div>
+          <div class="m-field"><label>Semantic Scholar API Key（可选，填了不再限流）</label>
+            <input id="setS2Key" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
+          <div class="set-tip" id="setS2Tip"></div>
+          <div class="set-tip">· arXiv 无需 key（公开 API）<br>· 没有 S2 key 也能用，只是高峰期可能限流</div>
+        </div>
+      </div>
+      <button id="setSaveBtn" class="mini primary" style="margin-top:6px">💾 保存设置</button>
+      <span id="setHint" class="hint"></span>
+    </div>
     <div class="manage-grid">
       <div class="m-card">
         <div class="m-title">🔍 采集新论文</div>

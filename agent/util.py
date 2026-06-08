@@ -18,8 +18,9 @@ def make_slug(stub) -> str:
 
 
 @retry(wait=wait_exponential(min=2, max=30), stop=stop_after_attempt(6), reraise=True)
-def get(url, **kw):
-    r = httpx.get(url, timeout=30, headers=UA, follow_redirects=True, **kw)
+def get(url, headers=None, **kw):
+    h = {**UA, **(headers or {})}
+    r = httpx.get(url, timeout=30, headers=h, follow_redirects=True, **kw)
     r.raise_for_status()   # 429/5xx 会抛出 -> 被 tenacity 退避重试
     return r
 
