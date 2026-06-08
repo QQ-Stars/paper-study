@@ -24,6 +24,13 @@ const resolvePdf = (name) => {
   return null;
 };
 
+// ---- 设置（模型/数据源），存 data/settings.json（gitignore），Python Agent 也读它 ----
+const SETTINGS_PATH = path.join(ROOT, 'data', 'settings.json');
+const readSettings = () => { try { return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); } catch (e) { return {}; } };
+const writeSettings = (s) => { fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true }); fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2)); };
+const readEnv = () => { const o = {}; try { fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split(/\r?\n/).forEach(l => { const m = /^([A-Z0-9_]+)=(.*)$/.exec(l.trim()); if (m) o[m[1]] = m[2]; }); } catch (e) {} return o; };
+const maskKey = (k) => k ? '****' + String(k).slice(-4) : '';
+
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -85,6 +92,27 @@ const server = http.createServer(async (req, res) => {
       child.on('error', e => send(res, 200, JSON.stringify({ ok: false, output: String(e) }), MIME['.json']));
       child.on('close', code => send(res, 200, JSON.stringify({ ok: code === 0, code, output: out }), MIME['.json']));
       return;
+    }
+    if (p === '/api/settings' && req.method === 'GET') {
+      const s = readSettings(), e = readEnv();
+      return send(res, 200, JSON.stringify({
+        provider: s.provider || e.LLM_PROVIDER || 'deepseek',
+        baseUrl: s.baseUrl || e.LLM_BASE_URL || '',
+        model: s.model || e.LLM_MODEL || '',
+        apiKeyTail: maskKey(s.apiKey || e.LLM_API_KEY), hasApiKey: !!(s.apiKey || e.LLM_API_KEY),
+        s2KeyTail: maskKey(s.s2ApiKey), hasS2Key: !!s.s2ApiKey
+      }), MIME['.json']);
+    }
+    if (p === '/api/settings' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const s = readSettings();
+      if (b.provider) s.provider = b.provider;
+      if (b.baseUrl !== undefined) s.baseUrl = b.baseUrl;
+      if (b.model !== undefined) s.model = b.model;
+      if (b.apiKey) s.apiKey = b.apiKey;          // 非空才更新
+      if (b.s2ApiKey) s.s2ApiKey = b.s2ApiKey;
+      writeSettings(s);
+      return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
     // ---- PDF 字节（绕过迅雷类下载器：路径不含 .pdf，由脚本 fetch 取字节）----
     if (p === '/pdfbytes') {

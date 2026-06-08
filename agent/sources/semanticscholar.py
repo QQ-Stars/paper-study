@@ -1,6 +1,6 @@
 """Semantic Scholar 数据源（主力）：一个 API 覆盖所有顶会，附带 TLDR/领域/引用/开放PDF链接。"""
 from ..models import PaperStub
-from .. import util
+from .. import util, config
 
 FIELDS = ("title,authors,venue,year,abstract,tldr,s2FieldsOfStudy,"
           "citationCount,externalIds,openAccessPdf,url")
@@ -14,7 +14,8 @@ class SemanticScholar:
         params = {"query": query, "fields": FIELDS, "limit": min(limit, 100)}
         if years:
             params["year"] = f"{years[0]}-{years[1]}"
-        r = util.get(ENDPOINT, params=params)
+        headers = {"x-api-key": config.S2_API_KEY} if getattr(config, "S2_API_KEY", "") else None
+        r = util.get(ENDPOINT, params=params, headers=headers)
         for p in (r.json().get("data") or [])[:limit]:
             ext = p.get("externalIds") or {}
             oa = p.get("openAccessPdf") or {}

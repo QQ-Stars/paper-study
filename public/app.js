@@ -63,7 +63,7 @@ function showView(v) {
   $('#manage').classList.toggle('hidden', v !== 'manage');
   $('#layout').classList.toggle('hidden', v !== 'read');
   if (v === 'home') renderHome();
-  if (v === 'manage') renderManage();
+  if (v === 'manage') { renderManage(); loadSettings(); }
   if (v === 'read' && !current) { $('#pdfScroll').innerHTML = EMPTY_HTML; }
 }
 function fmtTime(s) {
@@ -329,6 +329,7 @@ function bindUI() {
   $('#zoomOut').onclick = () => setZoom(zoomFactor - 0.15);
   $('#ingBtn').onclick = doIngest;
   $('#mSearch').oninput = renderManage;
+  $('#setSaveBtn').onclick = saveSettings;
   $('#themeBtn').onclick = toggleTheme;
   $('#toggleLeft').onclick = () => togglePane('hide-left');
   $('#toggleRight').onclick = () => togglePane('hide-right');
@@ -430,4 +431,30 @@ async function deletePaper(id) {
   PAPERS = PAPERS.filter(x => x.id !== id);
   if (current && current.id === id) { current = null; }
   renderManage(); renderHome(); renderSidebar();
+}
+
+// ====== 设置 ======
+async function loadSettings() {
+  try {
+    const s = await (await fetch('/api/settings')).json();
+    $('#setProvider').value = s.provider || 'deepseek';
+    $('#setBaseUrl').value = s.baseUrl || '';
+    $('#setModel').value = s.model || '';
+    $('#setApiKey').value = '';
+    $('#setS2Key').value = '';
+    $('#setKeyTip').textContent = s.hasApiKey ? `当前已配置：${s.apiKeyTail}` : '⚠️ 未配置 API Key';
+    $('#setS2Tip').textContent = s.hasS2Key ? `当前已配置：${s.s2KeyTail}` : '未配置（不填也能用，仅高峰可能限流）';
+  } catch (e) { }
+}
+async function saveSettings() {
+  const body = {
+    provider: $('#setProvider').value,
+    baseUrl: $('#setBaseUrl').value.trim(),
+    model: $('#setModel').value.trim()
+  };
+  if ($('#setApiKey').value.trim()) body.apiKey = $('#setApiKey').value.trim();
+  if ($('#setS2Key').value.trim()) body.s2ApiKey = $('#setS2Key').value.trim();
+  await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const h = $('#setHint'); h.textContent = '已保存 ✓（下次采集生效）'; setTimeout(() => h.textContent = '', 3000);
+  loadSettings();
 }

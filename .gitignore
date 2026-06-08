@@ -14,6 +14,7 @@ data/app.db
 data/app.db-wal
 data/app.db-shm
 data/pdfs/
+data/settings.json
 
 # 系统/编辑器
 .DS_Store
