@@ -58,6 +58,28 @@ def classify(stub, query: str = "", fulltext: str = None) -> PaperAttributes:
     raise RuntimeError(f"LLM 结构化输出多次失败: {last}")
 
 
+def expand_queries(direction: str, n: int = 6) -> list:
+    """把（可能中文/模糊的）研究方向 → 一组精准英文检索词组合。"""
+    sys = (
+        "你是学术检索专家。把用户给的研究方向（可能是中文或较模糊）转成一组用于 "
+        "arXiv / Semantic Scholar 的英文检索关键词组合。要求：必要时翻译成英文；"
+        "覆盖同义词、子方向、经典方法名、常用基准名；每条 2~6 个英文词，精准、可直接检索。"
+        f"只输出 JSON 对象，形如 {{\"queries\": [\"...\", \"...\"]}}，包含约 {n} 条。"
+    )
+    try:
+        resp = client().chat.completions.create(
+            model=config.MODEL,
+            messages=[{"role": "system", "content": sys},
+                      {"role": "user", "content": f"研究方向: {direction}"}],
+            response_format={"type": "json_object"}, temperature=0.4,
+        )
+        qs = json.loads(resp.choices[0].message.content).get("queries", [])
+        qs = [q.strip() for q in qs if isinstance(q, str) and q.strip()]
+        return qs[:n] or [direction]
+    except Exception:
+        return [direction]
+
+
 def ping() -> str:
     """连通性自检：返回模型回复的一小段文本。"""
     resp = client().chat.completions.create(

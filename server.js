@@ -85,6 +85,7 @@ const server = http.createServer(async (req, res) => {
         '--years', String(b.years || '2024-2026'), '--max', String(Math.min(parseInt(b.max) || 10, 50)),
         '--min-relevance', String(b.minRelevance == null ? 0.5 : b.minRelevance)];
       if (b.deep) args.push('--deep');
+      if (b.expand) args.push('--expand');
       let out = '';
       const child = spawn(py, args, { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
       child.stdout.on('data', d => out += d.toString());
