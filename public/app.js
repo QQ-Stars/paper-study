@@ -403,7 +403,8 @@ async function doIngest() {
         query, sources, years: $('#ingYears').value.trim(),
         max: parseInt($('#ingMax').value) || 10,
         minRelevance: parseFloat($('#ingRel').value),
-        deep: $('#ingDeep').checked
+        deep: $('#ingDeep').checked,
+        expand: $('#ingExpand').checked
       })
     });
     const j = await r.json();

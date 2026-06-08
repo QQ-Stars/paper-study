@@ -15,6 +15,8 @@ def main():
     ing.add_argument("--min-relevance", type=float, default=0.0, help="相关度阈值(0~1)")
     ing.add_argument("--explain", action="store_true", help="同时生成讲解(P3)")
     ing.add_argument("--deep", action="store_true", help="深度分类: 读取PDF正文(更准, 更慢/更贵)")
+    ing.add_argument("--expand", action="store_true", help="智能扩展检索词(中文/模糊方向→多个精准英文检索)")
+    ing.add_argument("--expand-n", type=int, default=6, help="扩展出多少个检索词")
 
     sub.add_parser("ping", help="测试大模型连通性")
     sub.add_parser("purge", help="删除采集来的论文（保留 seed 种子 38 篇）")
@@ -36,7 +38,8 @@ def main():
         parts = args.years.split("-")
         years = (int(parts[0]), int(parts[1])) if len(parts) == 2 else None
         pipeline.ingest(args.query, [s.strip() for s in args.sources.split(",") if s.strip()],
-                        years, args.max, args.min_relevance, args.explain, args.deep)
+                        years, args.max, args.min_relevance, args.explain, args.deep,
+                        args.expand, args.expand_n)
 
 
 if __name__ == "__main__":
