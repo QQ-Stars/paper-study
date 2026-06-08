@@ -125,12 +125,12 @@ function renderHome() {
     $('#kpiArxiv').textContent = total - pub;
     $('#kpiYears').textContent = `${yc('2024')} / ${yc('2025')} / ${yc('2026')}`;
 
-    const dirOrder = [['检测', '#6366f1'], ['缓解', '#14b8a6'], ['机制', '#8b5cf6'], ['评测', '#f59e0b'], ['定义/其他', '#94a3b8']];
+    const dirOrder = [['检测', '#bd5b3a'], ['缓解', '#3f7d5b'], ['机制', '#5b7387'], ['评测', '#b07a2e'], ['定义/其他', '#9a8b72']];
     const dirBucket = (t) => t.includes('检测') ? '检测' : t.includes('缓解') ? '缓解' : t.includes('机制') ? '机制' : t.includes('Bench') ? '评测' : '定义/其他';
     const dc = {}; list.forEach(p => dc[dirBucket(p.type)] = (dc[dirBucket(p.type)] || 0) + 1);
     const dirItems = dirOrder.map(([k, c]) => ({ name: k, value: dc[k] || 0, color: c }));
 
-    const vOrder = [['CV', '#6366f1'], ['ML', '#8b5cf6'], ['NLP', '#14b8a6'], ['AAAI', '#f59e0b'], ['arXiv', '#ec4899']];
+    const vOrder = [['CV', '#bd5b3a'], ['ML', '#5b7387'], ['NLP', '#3f7d5b'], ['AAAI', '#b07a2e'], ['arXiv', '#8a5a5a']];
     const vBucket = (v) => ['CVPR', 'ICCV', 'ECCV'].includes(v) ? 'CV' : ['ICLR', 'ICML', 'NeurIPS'].includes(v) ? 'ML' : ['ACL', 'EMNLP'].includes(v) ? 'NLP' : v === 'AAAI' ? 'AAAI' : 'arXiv';
     const vc = {}; list.forEach(p => vc[vBucket(p.venue)] = (vc[vBucket(p.venue)] || 0) + 1);
     const vItems = vOrder.map(([k, c]) => ({ name: k, value: vc[k] || 0, color: c }));
