@@ -60,63 +60,88 @@
 
   <!-- 管理 -->
   <section id="manage" class="hidden">
-    <div class="m-card settings-card">
-      <div class="m-title">⚙️ 设置</div>
-      <div class="settings-cols">
-        <div>
-          <div class="settings-sub">大模型</div>
-          <div class="m-field"><label>供应商</label>
-            <select id="setProvider">
-              <option value="deepseek">DeepSeek</option>
-              <option value="qwen">通义千问 Qwen</option>
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic Claude</option>
-            </select></div>
-          <div class="m-field"><label>API Key</label><input id="setApiKey" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
-          <div class="set-tip" id="setKeyTip"></div>
-          <div class="m-row2">
-            <div class="m-field"><label>Base URL</label><input id="setBaseUrl" placeholder="https://api.deepseek.com" /></div>
-            <div class="m-field"><label>模型</label><input id="setModel" placeholder="deepseek-v4-flash" /></div>
+    <!-- 采集命令条 -->
+    <div class="ingest-bar">
+      <div class="ib-head"><span class="ib-title">采集新论文</span><span class="ib-tip">输入研究方向（中文 / 英文皆可），大模型自动扩展成多个精准检索词</span></div>
+      <div class="ib-row">
+        <input id="ingQuery" class="ib-input" placeholder="如：多模态大模型的幻觉检测与缓解" />
+        <button id="ingBtn" class="mini primary ib-btn">抓取并入库 →</button>
+      </div>
+      <div class="ib-opts">
+        <div class="opt-grp"><span class="opt-lab">数据源</span>
+          <button type="button" class="src-chip active" data-src="arxiv">arXiv</button>
+          <button type="button" class="src-chip" data-src="semanticscholar">Semantic Scholar</button>
+        </div>
+        <div class="opt-grp"><span class="opt-lab">年份</span><input id="ingYears" class="opt-input" value="2024-2026" /></div>
+        <div class="opt-grp"><span class="opt-lab">数量</span><input id="ingMax" class="opt-input num" type="number" value="10" min="1" max="50" /></div>
+        <div class="opt-grp"><span class="opt-lab">相关度≥</span><input id="ingRel" class="opt-input num" type="number" value="0.5" min="0" max="1" step="0.1" /></div>
+        <label class="opt-tog"><input type="checkbox" id="ingExpand" checked /> 智能扩展</label>
+        <label class="opt-tog"><input type="checkbox" id="ingDeep" /> 深度分类</label>
+      </div>
+      <pre id="ingLog" class="ing-log hidden"></pre>
+    </div>
+
+    <!-- 库内论文 -->
+    <div class="lib-card">
+      <div class="lib-toolbar">
+        <span class="lib-title">库内论文<span id="mCount" class="m-count"></span></span>
+        <div class="lib-search"><span class="search-ico">⌕</span><input id="mSearch" placeholder="搜索 标题 / 会议 / 方向 / 主题…" /></div>
+        <div class="lib-filters" id="libSrcFilter">
+          <button type="button" class="fchip active" data-src="all">全部</button>
+          <button type="button" class="fchip" data-src="collected">采集</button>
+          <button type="button" class="fchip" data-src="seed">种子</button>
+        </div>
+        <select id="mSort" class="lib-sort">
+          <option value="added">最近添加</option>
+          <option value="relevance">相关度</option>
+          <option value="year">年份</option>
+          <option value="citations">引用数</option>
+          <option value="title">标题</option>
+        </select>
+      </div>
+      <div id="mList" class="m-list"></div>
+    </div>
+
+    <!-- 设置：折叠 -->
+    <details class="set-box" id="setBox">
+      <summary class="set-sum">
+        <span class="set-sum-t">⚙ 模型与数据源设置</span>
+        <span class="set-sum-m" id="setSummaryMeta">—</span>
+        <span class="set-chev">▾</span>
+      </summary>
+      <div class="set-body">
+        <div class="settings-cols">
+          <div>
+            <div class="settings-sub">大模型</div>
+            <div class="m-field"><label>供应商</label>
+              <select id="setProvider">
+                <option value="deepseek">DeepSeek</option>
+                <option value="qwen">通义千问 Qwen</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic Claude</option>
+              </select></div>
+            <div class="m-field"><label>API Key</label><input id="setApiKey" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
+            <div class="set-tip" id="setKeyTip"></div>
+            <div class="m-row2">
+              <div class="m-field"><label>Base URL</label><input id="setBaseUrl" placeholder="https://api.deepseek.com" /></div>
+              <div class="m-field"><label>模型</label><input id="setModel" placeholder="deepseek-v4-flash" /></div>
+            </div>
+            <div class="set-actions">
+              <button id="setSaveBtn" class="mini primary">保存设置</button>
+              <button id="setTestBtn" class="mini">测试连接</button>
+              <span id="setHint" class="hint"></span>
+            </div>
+          </div>
+          <div>
+            <div class="settings-sub">数据源 API</div>
+            <div class="m-field"><label>Semantic Scholar API Key（可选）</label>
+              <input id="setS2Key" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
+            <div class="set-tip" id="setS2Tip"></div>
+            <div class="set-tip">· arXiv 无需 key（公开 API）<br>· 没有 S2 key 也能用，只是高峰期可能限流</div>
           </div>
         </div>
-        <div>
-          <div class="settings-sub">数据源 API</div>
-          <div class="m-field"><label>Semantic Scholar API Key（可选，填了不再限流）</label>
-            <input id="setS2Key" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
-          <div class="set-tip" id="setS2Tip"></div>
-          <div class="set-tip">· arXiv 无需 key（公开 API）<br>· 没有 S2 key 也能用，只是高峰期可能限流</div>
-        </div>
       </div>
-      <button id="setSaveBtn" class="mini primary" style="margin-top:6px">💾 保存设置</button>
-      <span id="setHint" class="hint"></span>
-    </div>
-    <div class="manage-grid">
-      <div class="m-card">
-        <div class="m-title">🔍 采集新论文</div>
-        <div class="m-field"><label>检索方向（中文/英文均可，会自动扩展）</label>
-          <input id="ingQuery" placeholder="如 多模态大模型的幻觉检测和缓解" /></div>
-        <div class="m-field"><label>数据源</label>
-          <div class="src-toggles">
-            <label class="src"><input type="checkbox" id="srcArxiv" checked> arXiv <em>稳定 · 推荐</em></label>
-            <label class="src"><input type="checkbox" id="srcS2"> Semantic Scholar <em>覆盖全 · 高峰限流</em></label>
-          </div>
-        </div>
-        <div class="m-row3">
-          <div class="m-field"><label>年份</label><input id="ingYears" value="2024-2026" /></div>
-          <div class="m-field"><label>数量(≤50)</label><input id="ingMax" type="number" value="10" min="1" max="50" /></div>
-          <div class="m-field"><label>相关度 ≥</label><input id="ingRel" type="number" value="0.5" min="0" max="1" step="0.1" /></div>
-        </div>
-        <label class="src deep"><input type="checkbox" id="ingExpand" checked> 智能扩展检索词（大模型把方向变成多个精准英文检索 · 推荐）</label>
-        <label class="src deep"><input type="checkbox" id="ingDeep"> 深度分类（读 PDF 正文，更准但更慢/更贵）</label>
-        <button id="ingBtn" class="mini primary ing-btn">🔍 抓取并入库</button>
-        <pre id="ingLog" class="ing-log">日志将显示在这里…</pre>
-      </div>
-      <div class="m-card">
-        <div class="m-title">🗂️ 库内论文管理 <span id="mCount" class="m-count"></span></div>
-        <input id="mSearch" class="m-search" placeholder="搜索 标题 / 会议 / 方向 / 主题…" />
-        <div id="mList" class="m-list"></div>
-      </div>
-    </div>
+    </details>
   </section>
 
   <!-- 阅读 -->
