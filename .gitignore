@@ -1,5 +1,15 @@
-# 依赖（本项目零依赖，保险起见忽略）
+# 依赖（装在项目内）
 node_modules/
+.venv/
+
+# 密钥
+.env
+
+# SQLite 数据库与缓存（本地数据，不入库）
+data/app.db
+data/app.db-wal
+data/app.db-shm
+data/pdfs/
 
 # 系统/编辑器
 .DS_Store
