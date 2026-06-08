@@ -19,7 +19,7 @@ const listPapers = () => db.prepare(`
   SELECT p.id,
          p.id || '.pdf'              AS file,
          p.title, p.venue, p.year, p.type, p.topic,
-         p.pdf_url, p.url, p.tldr, p.contribution, p.citations,
+         p.pdf_url, p.url, p.tldr, p.contribution, p.citations, p.created_at, p.source,
          p.order_no                  AS "order",
          COALESCE(g.status,'未开始') AS status,
          CASE WHEN n.content IS NOT NULL AND length(n.content) > 0 THEN 1 ELSE 0 END AS hasNote
@@ -46,4 +46,6 @@ const setStatus = (id, status) => db.prepare(`
   ON CONFLICT(paper_id) DO UPDATE SET status = excluded.status, updated_at = datetime('now')
 `).run(id, status);
 
-module.exports = { db, listPapers, getExplainer, getNote, setNote, setStatus };
+const deletePaper = (id) => db.prepare('DELETE FROM papers WHERE id = ?').run(id);
+
+module.exports = { db, listPapers, getExplainer, getNote, setNote, setStatus, deletePaper };

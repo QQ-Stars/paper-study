@@ -60,9 +60,16 @@ function showView(v) {
   currentView = v;
   document.querySelectorAll('.viewnav button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
   $('#home').classList.toggle('hidden', v !== 'home');
+  $('#manage').classList.toggle('hidden', v !== 'manage');
   $('#layout').classList.toggle('hidden', v !== 'read');
   if (v === 'home') renderHome();
+  if (v === 'manage') renderManage();
   if (v === 'read' && !current) { $('#pdfScroll').innerHTML = EMPTY_HTML; }
+}
+function fmtTime(s) {
+  if (!s) return '—';
+  const d = new Date(String(s).replace(' ', 'T') + 'Z');
+  return isNaN(d) ? s : d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 // ====== 总览 Dashboard ======
@@ -188,6 +195,7 @@ function rowHTML(p) {
     <td>${p.year}</td>
     <td>${p.type}</td>
     <td>${p.topic || ''}</td>
+    <td class="ht-time">${fmtTime(p.created_at)}</td>
     <td><span class="ht-status ${p.status}">${p.status}</span></td>
     <td class="ht-note">${p.hasNote ? '✍️' : '<span style="color:#cbd0d8">·</span>'}</td>
   </tr>`;
@@ -319,6 +327,8 @@ function bindUI() {
   document.querySelectorAll('#statusSeg button').forEach(b => b.onclick = () => saveStatus(b.dataset.st));
   $('#zoomIn').onclick = () => setZoom(zoomFactor + 0.15);
   $('#zoomOut').onclick = () => setZoom(zoomFactor - 0.15);
+  $('#ingBtn').onclick = doIngest;
+  $('#mSearch').oninput = renderManage;
   $('#themeBtn').onclick = toggleTheme;
   $('#toggleLeft').onclick = () => togglePane('hide-left');
   $('#toggleRight').onclick = () => togglePane('hide-right');
@@ -355,4 +365,69 @@ async function saveStatus(status) {
   current.status = status;
   const p = PAPERS.find(x => x.id === current.id); if (p) p.status = status;
   renderSidebar();
+}
+
+// ====== 管理页 ======
+function renderManage() {
+  let list = PAPERS.slice();
+  const kw = (($('#mSearch') && $('#mSearch').value) || '').trim().toLowerCase();
+  if (kw) list = list.filter(p => (p.title + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(kw));
+  list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));   // 最近添加在前
+  $('#mCount').textContent = `共 ${list.length}`;
+  $('#mList').innerHTML = list.map(p => `
+    <div class="m-item">
+      <div class="m-item-main" data-id="${p.id}">
+        <div class="m-item-title">${p.title}</div>
+        <div class="m-item-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span> · ${p.type} · 添加 ${fmtTime(p.created_at)}${p.source !== 'seed' ? ' <span class="m-tag">采集</span>' : ''}</div>
+      </div>
+      <button class="m-del" data-id="${p.id}" title="删除">🗑</button>
+    </div>`).join('') || '<div class="placeholder">没有匹配的论文。</div>';
+  document.querySelectorAll('#mList .m-item-main').forEach(el => el.onclick = () => openPaper(PAPERS.find(x => x.id === el.dataset.id)));
+  document.querySelectorAll('#mList .m-del').forEach(b => b.onclick = () => deletePaper(b.dataset.id));
+}
+
+async function doIngest() {
+  const sources = [];
+  if ($('#srcArxiv').checked) sources.push('arxiv');
+  if ($('#srcS2').checked) sources.push('semanticscholar');
+  const query = $('#ingQuery').value.trim();
+  if (!query) { $('#ingLog').textContent = '请填写检索方向'; return; }
+  if (!sources.length) { $('#ingLog').textContent = '请至少选一个数据源'; return; }
+  const btn = $('#ingBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = '采集中…';
+  $('#ingLog').textContent = '正在采集，请稍候（数量越多越久；深度分类更慢）…';
+  try {
+    const r = await fetch('/api/ingest', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query, sources, years: $('#ingYears').value.trim(),
+        max: parseInt($('#ingMax').value) || 10,
+        minRelevance: parseFloat($('#ingRel').value),
+        deep: $('#ingDeep').checked
+      })
+    });
+    const j = await r.json();
+    $('#ingLog').textContent = j.output || j.error || '(无输出)';
+    await reloadPapers();
+    renderManage();
+  } catch (e) {
+    $('#ingLog').textContent = '失败: ' + e;
+  } finally {
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+
+async function reloadPapers() {
+  PAPERS = await (await fetch('/api/papers')).json();
+  buildYearFilters();
+  renderSidebar();
+  renderHome();
+}
+
+async function deletePaper(id) {
+  const p = PAPERS.find(x => x.id === id);
+  if (!confirm(`删除《${p ? p.title : id}》？此操作不可撤销。`)) return;
+  await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  PAPERS = PAPERS.filter(x => x.id !== id);
+  if (current && current.id === id) { current = null; }
+  renderManage(); renderHome(); renderSidebar();
 }
