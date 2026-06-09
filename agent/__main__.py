@@ -36,6 +36,11 @@ def main():
 
     se = sub.add_parser("search", help="第一阶段：仅返回候选(不下载)")
     _add_search_args(se)
+    se.add_argument("--queries", default="", help="JSON 数组，直接指定检索词(跳过扩展)")
+
+    ex = sub.add_parser("expand", help="仅生成扩展检索词(JSON→stdout)")
+    ex.add_argument("--query", required=True)
+    ex.add_argument("--expand-n", type=int, default=6)
 
     isel = sub.add_parser("ingest-selected", help="第二阶段：从 stdin 读勾选候选并入库")
     isel.add_argument("--deep", action="store_true")
@@ -58,10 +63,14 @@ def main():
         srcs = [s.strip() for s in args.sources.split(",") if s.strip()]
         pipeline.ingest(args.query, srcs, _years(args.years), args.max, args.min_relevance,
                         args.explain, args.deep, args.expand, args.expand_n)
+    elif args.cmd == "expand":
+        sys.stdout.write(json.dumps(llm.expand_queries(args.query, args.expand_n), ensure_ascii=False))
+        sys.stdout.flush()
     elif args.cmd == "search":
         srcs = [s.strip() for s in args.sources.split(",") if s.strip()]
+        qs = json.loads(args.queries) if args.queries.strip() else None
         cands = pipeline.search(args.query, srcs, _years(args.years), args.max,
-                                args.min_relevance, args.expand, args.expand_n)
+                                args.min_relevance, args.expand, args.expand_n, qs)
         sys.stdout.write(json.dumps(cands, ensure_ascii=False))
         sys.stdout.flush()
     elif args.cmd == "ingest-selected":

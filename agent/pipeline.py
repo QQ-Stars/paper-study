@@ -102,9 +102,9 @@ def _p(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n=6):
+def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n=6, queries=None):
     """第一阶段：扩展→多源收集→去重→LLM分类打分。返回候选(不下载PDF)。"""
-    queries = llm.expand_queries(direction, expand_n) if expand else [direction]
+    queries = queries if queries else (llm.expand_queries(direction, expand_n) if expand else [direction])
     _p("STAGE::expand")
     _p("QUERIES::" + json.dumps(queries, ensure_ascii=False))
     seen = {}
