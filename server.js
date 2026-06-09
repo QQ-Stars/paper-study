@@ -29,6 +29,8 @@ const resolvePdfById = (id) => {
   for (const dir of dirs) { const f = path.join(dir, id + '.pdf'); if (fs.existsSync(f)) return f; }
   return null;
 };
+const pyExe = () => { const w = path.join(ROOT, '.venv', 'Scripts', 'python.exe'); return fs.existsSync(w) ? w : 'python'; };
+const spawnAgent = (args, opts = {}) => spawn(pyExe(), ['-m', 'agent', ...args], { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }, ...opts });
 
 // ---- 设置（模型/数据源），存 data/settings.json（gitignore），Python Agent 也读它 ----
 const SETTINGS_PATH = path.join(ROOT, 'data', 'settings.json');
@@ -93,11 +95,52 @@ const server = http.createServer(async (req, res) => {
       if (b.deep) args.push('--deep');
       if (b.expand) args.push('--expand');
       let out = '';
-      const child = spawn(py, args, { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+      const child = spawn(py, args, { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
       child.stdout.on('data', d => out += d.toString());
       child.stderr.on('data', d => out += d.toString());
       child.on('error', e => send(res, 200, JSON.stringify({ ok: false, output: String(e) }), MIME['.json']));
       child.on('close', code => send(res, 200, JSON.stringify({ ok: code === 0, code, output: out }), MIME['.json']));
+      return;
+    }
+    // 生成扩展检索词（可编辑）
+    if (p === '/api/expand' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      let out = ''; const ch = spawnAgent(['expand', '--query', String(b.query || ''), '--expand-n', String(b.expandN || 6)]);
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => send(res, 200, JSON.stringify({ ok: false, error: String(e) }), MIME['.json']));
+      ch.on('close', () => { let qs = []; try { qs = JSON.parse(out); } catch (e) {} send(res, 200, JSON.stringify({ ok: true, queries: qs }), MIME['.json']); });
+      return;
+    }
+    // 第一阶段：流式检索候选（NDJSON：progress... + 最终 result）
+    if (p === '/api/search' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const sources = (Array.isArray(b.sources) ? b.sources : []).filter(s => ['semanticscholar', 'arxiv', 'openalex', 'dblp'].includes(s));
+      if (!b.query || !sources.length) return send(res, 400, JSON.stringify({ ok: false, error: '缺少检索方向或数据源' }), MIME['.json']);
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const args = ['search', '--query', String(b.query), '--sources', sources.join(','), '--years', String(b.years || '2024-2026'),
+        '--max', String(Math.min(parseInt(b.max) || 10, 60)), '--min-relevance', String(b.minRelevance == null ? 0 : b.minRelevance)];
+      if (b.expand) args.push('--expand');
+      if (Array.isArray(b.queries) && b.queries.length) args.push('--queries', JSON.stringify(b.queries));
+      let out = ''; const ch = spawnAgent(args);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e), candidates: [] }); res.end(); });
+      ch.on('close', code => { let c = []; try { c = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0, candidates: c }); res.end(); });
+      return;
+    }
+    // 第二阶段：流式入库勾选（NDJSON）
+    if (p === '/api/ingest-selected' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const cands = Array.isArray(b.candidates) ? b.candidates : [];
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const args = ['ingest-selected']; if (b.deep) args.push('--deep');
+      let added = 0; const ch = spawnAgent(args);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (!l.trim()) return; const m = /^INGESTED::(\d+)/.exec(l); if (m) added = +m[1]; emit({ type: 'progress', line: l }); }));
+      ch.on('error', e => { emit({ type: 'done', ok: false, error: String(e) }); res.end(); });
+      ch.on('close', code => { emit({ type: 'done', ok: code === 0, added }); res.end(); });
+      ch.stdin.write(JSON.stringify(cands)); ch.stdin.end();
       return;
     }
     if (p === '/api/settings' && req.method === 'GET') {
@@ -127,7 +170,7 @@ const server = http.createServer(async (req, res) => {
       const pyWin = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
       const py = fs.existsSync(pyWin) ? pyWin : 'python';
       let out = '';
-      const child = spawn(py, ['-m', 'agent', 'ping'], { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+      const child = spawn(py, ['-m', 'agent', 'ping'], { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
       child.stdout.on('data', d => out += d.toString());
       child.stderr.on('data', d => out += d.toString());
       child.on('error', e => send(res, 200, JSON.stringify({ ok: false, output: String(e) }), MIME['.json']));
