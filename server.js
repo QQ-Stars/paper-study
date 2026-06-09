@@ -83,6 +83,24 @@ const server = http.createServer(async (req, res) => {
       try { const f = path.join(PDFS_DIR, id + '.pdf'); if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {}
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
+    if (p === '/api/paper/get' && req.method === 'GET') {
+      const row = dbapi.getPaper(safeBase(u.searchParams.get('id')));
+      return send(res, 200, JSON.stringify(row || null), MIME['.json']);
+    }
+    if (p === '/api/paper/add' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      if (!b.title || !String(b.title).trim()) return send(res, 400, JSON.stringify({ ok: false, error: '标题不能为空' }), MIME['.json']);
+      try { const id = dbapi.addPaper(b); return send(res, 200, JSON.stringify({ ok: true, id }), MIME['.json']); }
+      catch (e) { return send(res, 500, JSON.stringify({ ok: false, error: String(e.message || e) }), MIME['.json']); }
+    }
+    if (p === '/api/paper/update' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const id = safeBase(b.id);
+      if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }), MIME['.json']);
+      const { id: _omit, ...fields } = b;
+      try { const changes = dbapi.updatePaper(id, fields); return send(res, 200, JSON.stringify({ ok: true, changes }), MIME['.json']); }
+      catch (e) { return send(res, 500, JSON.stringify({ ok: false, error: String(e.message || e) }), MIME['.json']); }
+    }
     if (p === '/api/ingest' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
       const sources = (Array.isArray(b.sources) ? b.sources : []).filter(s => ['semanticscholar', 'arxiv', 'openalex', 'dblp'].includes(s));

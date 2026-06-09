@@ -337,6 +337,11 @@ function bindUI() {
   $('#ingestSelBtn').onclick = ingestSelected;
   $('#mSearch').oninput = renderManage;
   $('#mSort').onchange = renderManage;
+  $('#manualAddBtn').onclick = () => openPaperModal(null);
+  $('#pmClose').onclick = closePaperModal;
+  $('#pmCancel').onclick = closePaperModal;
+  $('#pmSave').onclick = savePaperModal;
+  $('#paperModal').onclick = (e) => { if (e.target.id === 'paperModal') closePaperModal(); };
   $('#setSaveBtn').onclick = saveSettings;
   $('#setTestBtn').onclick = testLLM;
   document.querySelectorAll('.ib-opts .src-chip').forEach(c => c.onclick = () => c.classList.toggle('active'));
@@ -409,12 +414,14 @@ function renderManage() {
       <span class="mi-status status-dot ${p.status}" data-id="${p.id}" title="点击切换学习状态（当前：${p.status}）"></span>
       <div class="m-item-main" data-id="${p.id}">
         <div class="m-item-title">${p.title}</div>
-        <div class="m-item-meta">${meta.join(' · ')}${p.source !== 'seed' ? ' <span class="m-tag">采集</span>' : ''}</div>
+        <div class="m-item-meta">${meta.join(' · ')}${p.source === 'manual' ? ' <span class="m-tag manual">手动</span>' : (p.source !== 'seed' ? ' <span class="m-tag">采集</span>' : '')}</div>
       </div>
+      <button class="m-edit" data-id="${p.id}" title="编辑">✎</button>
       <button class="m-del" data-id="${p.id}" title="删除">🗑</button>
     </div>`;
   }).join('') || '<div class="placeholder">没有匹配的论文。</div>';
   document.querySelectorAll('#mList .m-item-main').forEach(el => el.onclick = () => openPaper(PAPERS.find(x => x.id === el.dataset.id)));
+  document.querySelectorAll('#mList .m-edit').forEach(b => b.onclick = () => openPaperModal(b.dataset.id));
   document.querySelectorAll('#mList .m-del').forEach(b => b.onclick = () => deletePaper(b.dataset.id));
   document.querySelectorAll('#mList .mi-status').forEach(s => s.onclick = () => cyclePaperStatus(s.dataset.id));
 }
@@ -426,6 +433,47 @@ async function cyclePaperStatus(id) {
   p.status = next;
   if (current && current.id === id) setStatusUI(next);
   renderManage(); renderSidebar(); updateSummary();
+}
+
+// ====== 手动添加 / 编辑论文 ======
+const MTYPES = ['检测', '缓解·解码', '缓解·训练', '机制', '评测', '定义', '其他'];
+const MTOPICS = ['知识-视觉冲突', '多图', '多物体', '通用物体', '语言先验', '其他'];
+const PM_FIELDS = { title: 'pmTitleI', venue: 'pmVenue', year: 'pmYear', url: 'pmUrl', pdf_url: 'pmPdfUrl', pdf_path: 'pmPdfPath', tldr: 'pmTldr', abstract: 'pmAbstract', contribution: 'pmContribution' };
+function fillSelect(sel, opts, val) { sel.innerHTML = opts.map(o => `<option ${o === val ? 'selected' : ''}>${o}</option>`).join(''); }
+async function openPaperModal(id) {
+  $('#pmHint').textContent = '';
+  fillSelect($('#pmType'), MTYPES, '其他'); fillSelect($('#pmTopic'), MTOPICS, '其他');
+  Object.values(PM_FIELDS).forEach(k => $('#' + k).value = '');
+  if (id) {
+    $('#pmTitle').textContent = '编辑论文';
+    let row = null;
+    try { row = await (await fetch('/api/paper/get?id=' + encodeURIComponent(id))).json(); } catch (e) {}
+    if (!row) { alert('找不到该论文'); return; }
+    $('#pmId').value = row.id;
+    for (const [col, el] of Object.entries(PM_FIELDS)) $('#' + el).value = row[col] || '';
+    fillSelect($('#pmType'), MTYPES, row.type || '其他'); fillSelect($('#pmTopic'), MTOPICS, row.topic || '其他');
+  } else {
+    $('#pmTitle').textContent = '手动添加论文';
+    $('#pmId').value = '';
+  }
+  $('#paperModal').classList.remove('hidden');
+  setTimeout(() => $('#pmTitleI').focus(), 30);
+}
+function closePaperModal() { $('#paperModal').classList.add('hidden'); }
+async function savePaperModal() {
+  const title = $('#pmTitleI').value.trim();
+  if (!title) { $('#pmHint').textContent = '⚠ 标题不能为空'; return; }
+  const payload = { type: $('#pmType').value, topic: $('#pmTopic').value };
+  for (const [col, el] of Object.entries(PM_FIELDS)) payload[col] = $('#' + el).value.trim();
+  const id = $('#pmId').value;
+  const btn = $('#pmSave'); btn.disabled = true; $('#pmHint').textContent = '保存中…';
+  try {
+    if (id) payload.id = id;
+    const j = await (await fetch(id ? '/api/paper/update' : '/api/paper/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })).json();
+    if (!j.ok) { $('#pmHint').textContent = '失败: ' + (j.error || '未知错误'); return; }
+    closePaperModal(); await reloadPapers(); renderManage(); updateSummary();
+  } catch (e) { $('#pmHint').textContent = '失败: ' + e; }
+  finally { btn.disabled = false; }
 }
 
 // ====== 采集向导（R3：流式两阶段 + 动画）======

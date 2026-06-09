@@ -127,8 +127,39 @@
           <option value="citations">引用数</option>
           <option value="title">标题</option>
         </select>
+        <button id="manualAddBtn" class="mini primary lib-add" title="手动添加一篇论文（搜索为空时用）">✍️ 手动添加</button>
       </div>
       <div id="mList" class="m-list"></div>
+    </div>
+
+    <!-- 手动添加 / 编辑 论文 弹窗 -->
+    <div id="paperModal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-head"><span id="pmTitle">手动添加论文</span><button id="pmClose" class="modal-x" title="关闭">×</button></div>
+        <div class="modal-body">
+          <input type="hidden" id="pmId" />
+          <label class="pm-field"><span>标题 <b class="req">*</b></span><input id="pmTitleI" placeholder="论文标题" /></label>
+          <div class="pm-row">
+            <label class="pm-field"><span>会议 / 来源</span><input id="pmVenue" placeholder="如 CVPR / ICLR / arXiv" /></label>
+            <label class="pm-field sm"><span>年份</span><input id="pmYear" placeholder="2025" /></label>
+          </div>
+          <div class="pm-row">
+            <label class="pm-field"><span>方向</span><select id="pmType"></select></label>
+            <label class="pm-field"><span>主题</span><select id="pmTopic"></select></label>
+          </div>
+          <label class="pm-field"><span>链接 (URL)</span><input id="pmUrl" placeholder="https://…（论文主页 / arXiv abs）" /></label>
+          <label class="pm-field"><span>PDF 链接</span><input id="pmPdfUrl" placeholder="https://….pdf（可选）" /></label>
+          <label class="pm-field"><span>本地 PDF 路径</span><input id="pmPdfPath" placeholder="如 D:\papers\xxx.pdf（填了即可在&quot;阅读&quot;里打开）" /></label>
+          <label class="pm-field"><span>一句话总结 (TLDR)</span><input id="pmTldr" placeholder="可选" /></label>
+          <label class="pm-field"><span>摘要</span><textarea id="pmAbstract" rows="3" placeholder="可选"></textarea></label>
+          <label class="pm-field"><span>核心贡献</span><textarea id="pmContribution" rows="2" placeholder="可选"></textarea></label>
+        </div>
+        <div class="modal-foot">
+          <span id="pmHint" class="pm-hint"></span>
+          <button id="pmCancel" class="mini">取消</button>
+          <button id="pmSave" class="mini primary">保存</button>
+        </div>
+      </div>
     </div>
 
     <!-- 设置：折叠 -->
