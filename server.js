@@ -15,12 +15,18 @@ const PAPERS_DIR = path.resolve(ROOT, cfg.papersDir);
 const PDFS_DIR = path.join(ROOT, 'data', 'pdfs');   // 采集 Agent 下载的 PDF
 const PORT = process.env.PORT || cfg.port || 5173;
 
-// 优先用本地缓存(data/pdfs)，再回退到种子目录(../paper)
-const resolvePdf = (name) => {
-  for (const dir of [PDFS_DIR, PAPERS_DIR]) {
-    const f = path.join(dir, name);
-    if (fs.existsSync(f)) return f;
-  }
+const resolveDir = (d) => (path.isAbsolute(d) ? d : path.join(ROOT, d));
+// 按论文 id 解析本地 PDF：① DB 存的 pdf_path ② 按 slug 找（默认 data/pdfs 优先 → 自定义目录 → 种子 ../paper）
+const resolvePdfById = (id) => {
+  try {
+    const sp = dbapi.getPdfPath(id);
+    if (sp) { const abs = path.isAbsolute(sp) ? sp : path.join(ROOT, sp); if (fs.existsSync(abs)) return abs; }
+  } catch (e) {}
+  const custom = readSettings().pdfDir;
+  const dirs = [PDFS_DIR];
+  if (custom) dirs.push(resolveDir(custom));
+  dirs.push(PAPERS_DIR);
+  for (const dir of dirs) { const f = path.join(dir, id + '.pdf'); if (fs.existsSync(f)) return f; }
   return null;
 };
 
@@ -77,7 +83,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/ingest' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
-      const sources = (Array.isArray(b.sources) ? b.sources : []).filter(s => ['semanticscholar', 'arxiv'].includes(s));
+      const sources = (Array.isArray(b.sources) ? b.sources : []).filter(s => ['semanticscholar', 'arxiv', 'openalex', 'dblp'].includes(s));
       if (!b.query || !sources.length) return send(res, 400, JSON.stringify({ ok: false, error: '缺少检索方向或数据源' }), MIME['.json']);
       const pyWin = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
       const py = fs.existsSync(pyWin) ? pyWin : 'python';
@@ -101,7 +107,8 @@ const server = http.createServer(async (req, res) => {
         baseUrl: s.baseUrl || e.LLM_BASE_URL || '',
         model: s.model || e.LLM_MODEL || '',
         apiKeyTail: maskKey(s.apiKey || e.LLM_API_KEY), hasApiKey: !!(s.apiKey || e.LLM_API_KEY),
-        s2KeyTail: maskKey(s.s2ApiKey), hasS2Key: !!s.s2ApiKey
+        s2KeyTail: maskKey(s.s2ApiKey), hasS2Key: !!s.s2ApiKey,
+        pdfDir: s.pdfDir || ''
       }), MIME['.json']);
     }
     if (p === '/api/settings' && req.method === 'POST') {
@@ -112,6 +119,7 @@ const server = http.createServer(async (req, res) => {
       if (b.model !== undefined) s.model = b.model;
       if (b.apiKey) s.apiKey = b.apiKey;          // 非空才更新
       if (b.s2ApiKey) s.s2ApiKey = b.s2ApiKey;
+      if (b.pdfDir !== undefined) s.pdfDir = b.pdfDir.trim();
       writeSettings(s);
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
@@ -128,14 +136,14 @@ const server = http.createServer(async (req, res) => {
     }
     // ---- PDF 字节（绕过迅雷类下载器：路径不含 .pdf，由脚本 fetch 取字节）----
     if (p === '/pdfbytes') {
-      const f = resolvePdf(safeBase(u.searchParams.get('id')) + '.pdf');
+      const f = resolvePdfById(safeBase(u.searchParams.get('id')));
       if (!f) return send(res, 404, 'not found');
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': fs.statSync(f).size, 'Cache-Control': 'no-store' });
       return fs.createReadStream(f).pipe(res);
     }
     // ---- PDF 流式（原文直链，供“↗ 原文”用）----
     if (p.startsWith('/papers/')) {
-      const f = resolvePdf(safeBase(decodeURIComponent(p.slice('/papers/'.length))));
+      const f = resolvePdfById(safeBase(decodeURIComponent(p.slice('/papers/'.length))).replace(/\.pdf$/i, ''));
       if (!f) return send(res, 404, 'PDF not found');
       res.writeHead(200, { 'Content-Type': MIME[path.extname(f).toLowerCase()] || 'application/octet-stream' });
       return fs.createReadStream(f).pipe(res);

@@ -47,5 +47,6 @@ const setStatus = (id, status) => db.prepare(`
 `).run(id, status);
 
 const deletePaper = (id) => db.prepare('DELETE FROM papers WHERE id = ?').run(id);
+const getPdfPath = (id) => { const r = db.prepare('SELECT pdf_path FROM papers WHERE id = ?').get(id); return r ? r.pdf_path : null; };
 
-module.exports = { db, listPapers, getExplainer, getNote, setNote, setStatus, deletePaper };
+module.exports = { db, listPapers, getExplainer, getNote, setNote, setStatus, deletePaper, getPdfPath };

@@ -71,6 +71,8 @@
         <div class="opt-grp"><span class="opt-lab">数据源</span>
           <button type="button" class="src-chip active" data-src="arxiv">arXiv</button>
           <button type="button" class="src-chip" data-src="semanticscholar">Semantic Scholar</button>
+          <button type="button" class="src-chip" data-src="openalex">OpenAlex</button>
+          <button type="button" class="src-chip" data-src="dblp">DBLP</button>
         </div>
         <div class="opt-grp"><span class="opt-lab">年份</span><input id="ingYears" class="opt-input" value="2024-2026" /></div>
         <div class="opt-grp"><span class="opt-lab">数量</span><input id="ingMax" class="opt-input num" type="number" value="10" min="1" max="50" /></div>
@@ -138,6 +140,10 @@
               <input id="setS2Key" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
             <div class="set-tip" id="setS2Tip"></div>
             <div class="set-tip">· arXiv 无需 key（公开 API）<br>· 没有 S2 key 也能用，只是高峰期可能限流</div>
+            <div class="settings-sub" style="margin-top:20px">本地存储</div>
+            <div class="m-field"><label>PDF 下载目录（留空＝默认 data/pdfs）</label>
+              <input id="setPdfDir" placeholder="如 D:\\papers，留空用默认" /></div>
+            <div class="set-tip">本地查找顺序：默认 data/pdfs → 自定义目录 → 种子目录</div>
           </div>
         </div>
       </div>

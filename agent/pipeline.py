@@ -4,8 +4,10 @@ import math
 from . import db, llm, util, config, extract
 from .sources.semanticscholar import SemanticScholar
 from .sources.arxiv import Arxiv
+from .sources.openalex import OpenAlex
+from .sources.dblp import DBLP
 
-SOURCES = {"semanticscholar": SemanticScholar, "arxiv": Arxiv}
+SOURCES = {"semanticscholar": SemanticScholar, "arxiv": Arxiv, "openalex": OpenAlex, "dblp": DBLP}
 
 
 def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=False, expand=False, expand_n=6):
@@ -50,7 +52,7 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
                 try:
                     dest = config.PDF_DIR / f"{slug}.pdf"
                     util.download_pdf(stub.pdf_url, dest)
-                    pdf_path = f"data/pdfs/{slug}.pdf"
+                    pdf_path = str(dest)
                 except Exception:
                     pdf_path = None
             body = None
