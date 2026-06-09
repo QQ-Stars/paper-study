@@ -14,6 +14,8 @@ const md = (t) => (window.marked ? window.marked.parse(t || '') :
   '<pre>' + (t || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) + '</pre>');
 const EMPTY_HTML = '<div id="viewerEmpty" class="empty"><div class="empty-ico">📄</div><div class="empty-title">从左侧选择一篇论文</div><div class="empty-sub">建议从 ① HallusionBench 开始</div></div>';
 
+const normPapers = (arr) => { (arr || []).forEach(p => { p.venue = p.venue || '—'; p.type = p.type || ''; p.year = p.year || ''; p.topic = p.topic || ''; }); return arr || []; };
+
 // ====== PDF.js ======
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
 let pdfDoc = null, baseW = 600, zoomFactor = 1, renderToken = 0, io = null;
@@ -21,7 +23,7 @@ let pdfDoc = null, baseW = 600, zoomFactor = 1, renderToken = 0, io = null;
 // ====== 初始化 ======
 init();
 async function init() {
-  PAPERS = await (await fetch('/api/papers')).json();
+  PAPERS = normPapers(await (await fetch('/api/papers')).json());
   applyTheme(localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   if (localStorage.getItem('hide-left') === '1') $('#layout').classList.add('hide-left');
   if (localStorage.getItem('hide-right') === '1') $('#layout').classList.add('hide-right');
@@ -214,7 +216,7 @@ function renderSidebar() {
     h.textContent = y + ' · ' + list.filter(p => p.year === y).length + ' 篇';
     g.appendChild(h);
     list.filter(p => p.year === y)
-      .sort((a, b) => (a.order || 99) - (b.order || 99) || a.venue.localeCompare(b.venue))
+      .sort((a, b) => (a.order || 99) - (b.order || 99) || (a.venue || '').localeCompare(b.venue || ''))
       .forEach(p => g.appendChild(paperItem(p)));
     side.appendChild(g);
   });
@@ -530,7 +532,7 @@ async function ingestSelected() {
 }
 
 async function reloadPapers() {
-  PAPERS = await (await fetch('/api/papers')).json();
+  PAPERS = normPapers(await (await fetch('/api/papers')).json());
   buildYearFilters();
   renderSidebar();
   renderHome();
