@@ -32,11 +32,37 @@ async function init() {
   buildDashShell();
   renderHome();
   bindUI();
+  initResizers();
   showView('home');
 }
 function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = $('#themeBtn'); if (b) b.textContent = t === 'dark' ? '☀️' : '🌙'; localStorage.setItem('theme', t); }
 function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); renderHome(); }
 function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); localStorage.setItem(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
+function initResizers() {
+  const layout = $('#layout');
+  const apply = (k, v) => document.documentElement.style.setProperty(k, v + 'px');
+  const lw = parseInt(localStorage.getItem('left-w'), 10); if (lw) apply('--left-w', lw);
+  const rw = parseInt(localStorage.getItem('right-w'), 10); if (rw) apply('--right-w', rw);
+  document.querySelectorAll('.gutter').forEach(g => {
+    g.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const side = g.dataset.side;
+      const rect = layout.getBoundingClientRect();
+      g.classList.add('dragging'); layout.classList.add('resizing');
+      const move = (ev) => {
+        const maxW = rect.width - 360;
+        if (side === 'left') { const w = Math.max(160, Math.min(Math.round(ev.clientX - rect.left), maxW)); apply('--left-w', w); localStorage.setItem('left-w', w); }
+        else { const w = Math.max(220, Math.min(Math.round(rect.right - ev.clientX), maxW)); apply('--right-w', w); localStorage.setItem('right-w', w); }
+      };
+      const up = () => {
+        g.classList.remove('dragging'); layout.classList.remove('resizing');
+        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+        if (pdfDoc && currentView === 'read') layoutPages(++renderToken);
+      };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    });
+  });
+}
 
 function buildYearFilters() {
   const years = [...new Set(PAPERS.map(p => p.year))].sort();
