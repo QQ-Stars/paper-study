@@ -32,5 +32,9 @@ MODEL = _S.get("model") or os.getenv("LLM_MODEL") or _model
 S2_API_KEY = _S.get("s2ApiKey") or os.getenv("S2_API_KEY", "")
 
 DB_PATH = os.getenv("DB_PATH") or str(ROOT / "data" / "app.db")
-PDF_DIR = ROOT / "data" / "pdfs"
+# PDF 下载目录：默认 data/pdfs；网页设置可自定义（相对路径相对项目根）
+_pd = _S.get("pdfDir")
+PDF_DIR = Path(_pd) if _pd else (ROOT / "data" / "pdfs")
+if not PDF_DIR.is_absolute():
+    PDF_DIR = ROOT / PDF_DIR
 PDF_DIR.mkdir(parents=True, exist_ok=True)

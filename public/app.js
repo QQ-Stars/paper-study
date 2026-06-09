@@ -473,6 +473,7 @@ async function loadSettings() {
     $('#setModel').value = s.model || '';
     $('#setApiKey').value = '';
     $('#setS2Key').value = '';
+    $('#setPdfDir').value = s.pdfDir || '';
     $('#setKeyTip').textContent = s.hasApiKey ? `当前已配置：${s.apiKeyTail}` : '⚠️ 未配置 API Key';
     $('#setS2Tip').textContent = s.hasS2Key ? `当前已配置：${s.s2KeyTail}` : '未配置（不填也能用，仅高峰可能限流）';
     const meta = $('#setSummaryMeta'); if (meta) meta.textContent = `${s.provider} · ${s.model || '—'}` + (s.hasApiKey ? '' : ' · ⚠ 未配置 Key');
@@ -490,7 +491,8 @@ async function saveSettings() {
   const body = {
     provider: $('#setProvider').value,
     baseUrl: $('#setBaseUrl').value.trim(),
-    model: $('#setModel').value.trim()
+    model: $('#setModel').value.trim(),
+    pdfDir: $('#setPdfDir').value.trim()
   };
   if ($('#setApiKey').value.trim()) body.apiKey = $('#setApiKey').value.trim();
   if ($('#setS2Key').value.trim()) body.s2ApiKey = $('#setS2Key').value.trim();
