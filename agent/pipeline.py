@@ -1,7 +1,9 @@
 """采集流水线：发现 → 去重 → LLM分类 → (下载开放PDF) → 入库 → (可选讲解)。"""
 import json
 import math
+import sys
 from . import db, llm, util, config, extract
+from .models import PaperStub
 from .sources.semanticscholar import SemanticScholar
 from .sources.arxiv import Arxiv
 from .sources.openalex import OpenAlex
@@ -92,4 +94,105 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
             print(f"  ! 跳过: {stub.title[:44]} -> {ex}")
     con.close()
     print(f"\n========== 完成：候选 {found} · 新增 {added} · 跳过 {skipped} ==========")
+    return added
+
+
+# ============ 两阶段流程（R3）：进度走 stderr，结果走 stdout ============
+def _p(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n=6):
+    """第一阶段：扩展→多源收集→去重→LLM分类打分。返回候选(不下载PDF)。"""
+    queries = llm.expand_queries(direction, expand_n) if expand else [direction]
+    _p("STAGE::expand")
+    _p("QUERIES::" + json.dumps(queries, ensure_ascii=False))
+    seen = {}
+    per = max(3, math.ceil(limit * 1.5 / max(1, len(queries))))
+    _p("STAGE::search")
+    for sname in sources:
+        if sname not in SOURCES:
+            continue
+        src = SOURCES[sname]()
+        for q in queries:
+            try:
+                for stub in src.search(q, years, per):
+                    key = stub.arxiv_id or db.title_norm(stub.title)
+                    if key and key not in seen:
+                        seen[key] = stub
+            except Exception as e:
+                _p(f"SRCERR::{sname}::{e}")
+    _p(f"FOUND::{len(seen)}")
+    _p("STAGE::classify")
+    con = db.connect()
+    cands, i, cap = [], 0, limit * 3
+    for stub in seen.values():
+        if len(cands) >= limit or i >= cap:
+            break
+        i += 1
+        tn = db.title_norm(stub.title)
+        in_lib = db.exists(con, arxiv_id=stub.arxiv_id, title_norm_v=tn)
+        try:
+            attrs = llm.classify(stub, direction)
+        except Exception as e:
+            _p(f"CLSERR::{e}")
+            continue
+        _p(f"CLASSIFIED::{i}::{stub.title[:48]}")
+        if min_rel and attrs.relevance is not None and attrs.relevance < min_rel and not in_lib:
+            continue
+        cands.append({
+            **stub.model_dump(),
+            "type": attrs.type, "topic": attrs.topic, "task": attrs.task,
+            "models": attrs.models, "datasets": attrs.datasets,
+            "contribution": attrs.contribution, "llm_tldr": attrs.tldr, "tags": attrs.tags,
+            "relevance": attrs.relevance, "in_library": in_lib,
+        })
+    con.close()
+    _p(f"DONE::{len(cands)}")
+    return cands
+
+
+def ingest_candidates(cands, deep=False):
+    """第二阶段：对用户勾选的候选下载PDF+入库（属性已在第一阶段算好）。"""
+    con = db.connect()
+    added = 0
+    for c in cands:
+        tn = db.title_norm(c.get("title", ""))
+        if db.exists(con, arxiv_id=c.get("arxiv_id"), title_norm_v=tn):
+            _p(f"DUP::{c.get('title','')[:46]}")
+            continue
+        try:
+            stub = PaperStub(**{k: c.get(k) for k in PaperStub.model_fields if k in c})
+            slug = util.make_slug(stub)
+            pdf_path = None
+            if stub.pdf_url:
+                try:
+                    dest = config.PDF_DIR / f"{slug}.pdf"
+                    util.download_pdf(stub.pdf_url, dest)
+                    pdf_path = str(dest)
+                except Exception:
+                    pdf_path = None
+            row = {
+                "id": slug, "source": stub.source, "source_id": stub.source_id,
+                "arxiv_id": stub.arxiv_id, "doi": stub.doi, "s2_id": stub.s2_id,
+                "title": stub.title, "title_norm": tn,
+                "authors": json.dumps(stub.authors, ensure_ascii=False),
+                "venue": stub.venue, "year": stub.year, "abstract": stub.abstract,
+                "tldr": stub.tldr or c.get("llm_tldr"), "citations": stub.citations,
+                "s2_fields": json.dumps(stub.fields, ensure_ascii=False),
+                "url": stub.url, "pdf_url": stub.pdf_url, "pdf_path": pdf_path,
+                "type": c.get("type"), "topic": c.get("topic"), "task": c.get("task"),
+                "models": json.dumps(c.get("models") or [], ensure_ascii=False),
+                "datasets": json.dumps(c.get("datasets") or [], ensure_ascii=False),
+                "contribution": c.get("contribution"),
+                "tags": json.dumps(c.get("tags") or [], ensure_ascii=False),
+                "relevance": c.get("relevance"), "extracted_by": config.MODEL,
+            }
+            db.insert_paper(con, row)
+            added += 1
+            _p(f"ADDED::{stub.title[:48]}")
+        except Exception as e:
+            _p(f"SKIP::{e}")
+    con.close()
+    _p(f"INGESTED::{added}")
     return added
