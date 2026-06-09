@@ -34,6 +34,7 @@
       <div class="progress"><div id="progressBar"></div></div>
       <span id="progressSummary" class="summary"></span>
     </div>
+    <button id="settingsBtn" class="iconbtn" title="模型与数据源设置">⚙</button>
     <button id="themeBtn" class="iconbtn" title="切换深色/浅色">🌙</button>
   </header>
 
@@ -162,14 +163,13 @@
       </div>
     </div>
 
-    <!-- 设置：折叠 -->
-    <details class="set-box" id="setBox">
-      <summary class="set-sum">
-        <span class="set-sum-t">⚙ 模型与数据源设置</span>
-        <span class="set-sum-m" id="setSummaryMeta">—</span>
-        <span class="set-chev">▾</span>
-      </summary>
-      <div class="set-body">
+  </section>
+
+  <!-- 设置弹窗（全局：顶栏 ⚙ 打开，任意页面可达，ESC 关闭） -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-head"><span>⚙ 模型与数据源设置<span id="setSummaryMeta" class="set-meta-inline">—</span></span><button id="setClose" class="modal-x" title="关闭">×</button></div>
+      <div class="modal-body">
         <div class="settings-cols">
           <div>
             <div class="settings-sub">大模型</div>
@@ -205,8 +205,8 @@
           </div>
         </div>
       </div>
-    </details>
-  </section>
+    </div>
+  </div>
 
   <!-- 阅读 -->
   <main id="layout" class="hidden">

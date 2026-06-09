@@ -66,7 +66,7 @@ function showView(v) {
   $('#manage').classList.toggle('hidden', v !== 'manage');
   $('#layout').classList.toggle('hidden', v !== 'read');
   if (v === 'home') renderHome();
-  if (v === 'manage') { renderManage(); loadSettings(); }
+  if (v === 'manage') renderManage();
   if (v === 'read' && !current) { $('#pdfScroll').innerHTML = EMPTY_HTML; }
 }
 function fmtTime(s) {
@@ -344,6 +344,10 @@ function bindUI() {
   $('#paperModal').onclick = (e) => { if (e.target.id === 'paperModal') closePaperModal(); };
   $('#setSaveBtn').onclick = saveSettings;
   $('#setTestBtn').onclick = testLLM;
+  $('#settingsBtn').onclick = openSettingsModal;
+  $('#setClose').onclick = closeSettingsModal;
+  $('#settingsModal').onclick = (e) => { if (e.target.id === 'settingsModal') closeSettingsModal(); };
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSettingsModal(); closePaperModal(); } });
   document.querySelectorAll('.ib-opts .src-chip').forEach(c => c.onclick = () => c.classList.toggle('active'));
   document.querySelectorAll('#libSrcFilter .fchip').forEach(c => c.onclick = () => {
     document.querySelectorAll('#libSrcFilter .fchip').forEach(x => x.classList.remove('active'));
@@ -631,3 +635,5 @@ async function saveSettings() {
   const h = $('#setHint'); h.textContent = '已保存 ✓（下次采集生效）'; setTimeout(() => h.textContent = '', 3000);
   loadSettings();
 }
+function openSettingsModal() { loadSettings(); $('#settingsModal').classList.remove('hidden'); }
+function closeSettingsModal() { $('#settingsModal').classList.add('hidden'); }
