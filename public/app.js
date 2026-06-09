@@ -328,7 +328,11 @@ function bindUI() {
   document.querySelectorAll('#statusSeg button').forEach(b => b.onclick = () => saveStatus(b.dataset.st));
   $('#zoomIn').onclick = () => setZoom(zoomFactor + 0.15);
   $('#zoomOut').onclick = () => setZoom(zoomFactor - 0.15);
-  $('#ingBtn').onclick = doIngest;
+  $('#ingSearchBtn').onclick = () => runSearch(null);
+  $('#ingEditBtn').onclick = editQueries;
+  $('#ingSearchWithBtn').onclick = () => runSearch(currentQueries());
+  $('#ingQueryAdd').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const a = currentQueries() || []; a.push(e.target.value.trim()); e.target.value = ''; renderQueryChips(a); } };
+  $('#ingestSelBtn').onclick = ingestSelected;
   $('#mSearch').oninput = renderManage;
   $('#mSort').onchange = renderManage;
   $('#setSaveBtn').onclick = saveSettings;
@@ -422,30 +426,107 @@ async function cyclePaperStatus(id) {
   renderManage(); renderSidebar(); updateSummary();
 }
 
-async function doIngest() {
-  const sources = [...document.querySelectorAll('.ib-opts .src-chip.active')].map(c => c.dataset.src);
-  const query = $('#ingQuery').value.trim();
-  const log = $('#ingLog'); log.classList.remove('hidden');
-  if (!query) { log.textContent = '请填写检索方向'; return; }
-  if (!sources.length) { log.textContent = '请至少选择一个数据源'; return; }
-  const btn = $('#ingBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = '采集中…';
-  log.textContent = '正在采集，请稍候（数量越多越久；深度分类更慢）…';
+// ====== 采集向导（R3：流式两阶段 + 动画）======
+let candidates = [];
+const currentQueries = () => { try { return JSON.parse($('#ingQueryChips').dataset.qs || '[]'); } catch (e) { return []; } };
+
+async function streamNDJSON(url, body, onEvent) {
+  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!resp.body || !resp.body.getReader) { const j = await resp.json().catch(() => ({})); onEvent({ type: 'result', candidates: j.candidates || [] }); return; }
+  const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+  for (; ;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+      if (line) { try { onEvent(JSON.parse(line)); } catch (e) {} }
+    }
+  }
+  if (buf.trim()) { try { onEvent(JSON.parse(buf.trim())); } catch (e) {} }
+}
+function setStage(name, cls) { const el = document.querySelector(`#ingStages .stage[data-st="${name}"]`); if (el) el.className = 'stage ' + cls; }
+function renderQueryChips(qs) {
+  const box = $('#ingQueryChips'); box.dataset.qs = JSON.stringify(qs);
+  box.innerHTML = qs.map((x, i) => `<span class="iq-chip">${x}<b class="iq-x" data-i="${i}">×</b></span>`).join('') || '<span class="placeholder">（无检索词）</span>';
+  document.querySelectorAll('#ingQueryChips .iq-x').forEach(b => b.onclick = () => { const a = currentQueries(); a.splice(+b.dataset.i, 1); renderQueryChips(a); });
+}
+async function editQueries() {
+  const q = $('#ingQuery').value.trim(); if (!q) { alert('请先填写检索方向'); return; }
+  $('#ingQueriesBox').classList.remove('hidden');
+  $('#ingQueryChips').innerHTML = '<span class="placeholder">生成中…</span>';
   try {
-    const r = await fetch('/api/ingest', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query, sources, years: $('#ingYears').value.trim(),
-        max: parseInt($('#ingMax').value) || 10,
-        minRelevance: parseFloat($('#ingRel').value),
-        deep: $('#ingDeep').checked, expand: $('#ingExpand').checked
-      })
+    const j = await (await fetch('/api/expand', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, expandN: 6 }) })).json();
+    renderQueryChips((j.queries && j.queries.length) ? j.queries : [q]);
+  } catch (e) { renderQueryChips([q]); }
+}
+function handleProgress(line) {
+  if (line.startsWith('STAGE::')) {
+    const s = line.slice(7);
+    if (s === 'search') { setStage('expand', 'done'); setStage('search', 'active'); }
+    else if (s === 'classify') { setStage('search', 'done'); setStage('classify', 'active'); }
+  } else if (line.startsWith('QUERIES::')) {
+    try { renderQueryChips(JSON.parse(line.slice(9))); $('#ingQueriesBox').classList.remove('hidden'); } catch (e) {}
+  } else if (line.startsWith('FOUND::')) { $('#stFound').textContent = ' ' + line.slice(7); }
+  else if (line.startsWith('CLASSIFIED::')) { $('#stCls').textContent = ' ' + line.split('::')[1]; }
+}
+async function runSearch(queries) {
+  const sources = [...document.querySelectorAll('.ib-opts .src-chip.active')].map(c => c.dataset.src);
+  const q = $('#ingQuery').value.trim();
+  if (!q) { alert('请填写检索方向'); return; }
+  if (!sources.length) { alert('请至少选择一个数据源'); return; }
+  candidates = [];
+  $('#candPanel').classList.add('hidden');
+  $('#ingStages').classList.remove('hidden');
+  setStage('expand', queries ? 'done' : 'active'); setStage('search', ''); setStage('classify', '');
+  $('#stFound').textContent = ''; $('#stCls').textContent = '';
+  const btn = $('#ingSearchBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = '检索中…';
+  try {
+    await streamNDJSON('/api/search', {
+      query: q, sources, years: $('#ingYears').value.trim(),
+      max: parseInt($('#ingMax').value) || 10, minRelevance: parseFloat($('#ingRel').value),
+      expand: queries ? false : $('#ingExpand').checked, queries: queries || null
+    }, (ev) => {
+      if (ev.type === 'progress') handleProgress(ev.line);
+      else if (ev.type === 'result') { candidates = ev.candidates || []; renderCandidates(); }
     });
-    const j = await r.json();
-    log.textContent = j.output || j.error || '(无输出)';
-    log.scrollTop = log.scrollHeight;
-    await reloadPapers(); renderManage();
-  } catch (e) { log.textContent = '失败: ' + e; }
+  } catch (e) { alert('检索失败: ' + e); }
   finally { btn.disabled = false; btn.textContent = old; }
+}
+function renderCandidates() {
+  setStage('expand', 'done'); setStage('search', 'done'); setStage('classify', 'done');
+  $('#candPanel').classList.remove('hidden');
+  const fresh = candidates.filter(c => !c.in_library).length;
+  $('#candCount').textContent = `找到 ${candidates.length} 篇 · ${fresh} 篇新`;
+  $('#candList').innerHTML = candidates.map((c, i) => {
+    const rel = c.relevance != null ? Math.round(c.relevance * 100) : 0;
+    return `<label class="cand ${c.in_library ? 'in-lib' : ''}">
+      <input type="checkbox" class="cand-ck" data-i="${i}" ${c.in_library ? 'disabled' : 'checked'} />
+      <div class="cand-main">
+        <div class="cand-title">${c.title}</div>
+        <div class="cand-meta"><span class="venue">${c.venue || '—'} ${c.year || ''}</span> · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
+      </div>
+      <div class="cand-rel" title="相关度 ${rel}%"><div class="cand-rel-track"><div class="cand-rel-bar" style="width:${rel}%"></div></div><span>${rel}</span></div>
+    </label>`;
+  }).join('') || '<div class="placeholder">没有匹配的候选。</div>';
+  $('#candSelAll').checked = true;
+  $('#candSelAll').onchange = () => document.querySelectorAll('#candList .cand-ck:not([disabled])').forEach(ck => ck.checked = $('#candSelAll').checked);
+}
+async function ingestSelected() {
+  const picks = [...document.querySelectorAll('#candList .cand-ck:checked')].map(ck => candidates[+ck.dataset.i]).filter(Boolean);
+  if (!picks.length) { alert('请勾选要入库的论文'); return; }
+  const log = $('#ingLog'); log.classList.remove('hidden'); log.textContent = `入库 ${picks.length} 篇中…`;
+  const btn = $('#ingestSelBtn'); btn.disabled = true;
+  try {
+    await streamNDJSON('/api/ingest-selected', { candidates: picks, deep: $('#ingDeep').checked }, (ev) => {
+      if (ev.type === 'progress') { log.textContent += '\n' + ev.line; log.scrollTop = log.scrollHeight; }
+      else if (ev.type === 'done') { log.textContent += `\n✅ 完成，新增 ${ev.added} 篇`; }
+    });
+    picks.forEach(p => p.in_library = true);
+    await reloadPapers(); renderCandidates(); renderManage();
+  } catch (e) { log.textContent = '失败: ' + e; }
+  finally { btn.disabled = false; }
 }
 
 async function reloadPapers() {

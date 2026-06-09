@@ -62,10 +62,10 @@
   <section id="manage" class="hidden">
     <!-- 采集命令条 -->
     <div class="ingest-bar">
-      <div class="ib-head"><span class="ib-title">采集新论文</span><span class="ib-tip">输入研究方向（中文 / 英文皆可），大模型自动扩展成多个精准检索词</span></div>
+      <div class="ib-head"><span class="ib-title">采集新论文</span><span class="ib-tip">输入方向 → 预览候选（含相关度/已在库）→ 勾选入库；中文/英文皆可，自动扩展检索词</span></div>
       <div class="ib-row">
         <input id="ingQuery" class="ib-input" placeholder="如：多模态大模型的幻觉检测与缓解" />
-        <button id="ingBtn" class="mini primary ib-btn">抓取并入库 →</button>
+        <button id="ingSearchBtn" class="mini primary ib-btn">检索 →</button>
       </div>
       <div class="ib-opts">
         <div class="opt-grp"><span class="opt-lab">数据源</span>
@@ -79,8 +79,35 @@
         <div class="opt-grp"><span class="opt-lab">相关度≥</span><input id="ingRel" class="opt-input num" type="number" value="0.5" min="0" max="1" step="0.1" /></div>
         <label class="opt-tog"><input type="checkbox" id="ingExpand" checked /> 智能扩展</label>
         <label class="opt-tog"><input type="checkbox" id="ingDeep" /> 深度分类</label>
+        <button id="ingEditBtn" class="linkbtn">✎ 编辑检索词</button>
       </div>
-      <pre id="ingLog" class="ing-log hidden"></pre>
+
+      <div id="ingQueriesBox" class="ing-queries hidden">
+        <div class="iq-head">检索词（点 × 删除，输入框回车添加）</div>
+        <div id="ingQueryChips" class="iq-chips"></div>
+        <div class="iq-bottom">
+          <input id="ingQueryAdd" class="iq-add" placeholder="+ 添加检索词后回车" />
+          <button id="ingSearchWithBtn" class="mini primary">用这些词检索 →</button>
+        </div>
+      </div>
+
+      <div id="ingStages" class="ing-stages hidden">
+        <div class="stage" data-st="expand"><span class="st-dot"></span>扩展检索词</div>
+        <div class="stage-line"></div>
+        <div class="stage" data-st="search"><span class="st-dot"></span>检索来源<b id="stFound"></b></div>
+        <div class="stage-line"></div>
+        <div class="stage" data-st="classify"><span class="st-dot"></span>分类打分<b id="stCls"></b></div>
+      </div>
+
+      <div id="candPanel" class="cand-panel hidden">
+        <div class="cand-head">
+          <span id="candCount" class="cand-count"></span>
+          <label class="cand-all"><input type="checkbox" id="candSelAll" checked /> 全选新论文</label>
+          <button id="ingestSelBtn" class="mini primary">入库选中 →</button>
+        </div>
+        <div id="candList" class="cand-list"></div>
+        <pre id="ingLog" class="ing-log hidden"></pre>
+      </div>
     </div>
 
     <!-- 库内论文 -->
