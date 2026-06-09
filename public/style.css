@@ -132,10 +132,17 @@ button{font-family:inherit}
 .ht-time{font-family:var(--font-mono);color:var(--ink-3);font-size:11px;white-space:nowrap}
 
 /* ============ 三栏阅读 ============ */
-#layout{display:grid;grid-template-columns:300px 1fr 420px;grid-template-rows:minmax(0,1fr);flex:1;min-height:0;overflow:hidden;transition:grid-template-columns .24s ease;animation:fade .4s ease}
-#layout.hide-left{grid-template-columns:0 1fr 420px}
-#layout.hide-right{grid-template-columns:300px 1fr 0}
-#layout.hide-left.hide-right{grid-template-columns:0 1fr 0}
+#layout{display:grid;grid-template-columns:var(--left-w,300px) 1fr var(--right-w,420px);grid-template-rows:minmax(0,1fr);flex:1;min-height:0;overflow:hidden;transition:grid-template-columns .24s ease;animation:fade .4s ease;position:relative}
+#layout.resizing{transition:none;user-select:none}
+#layout.hide-left{--left-w:0px}
+#layout.hide-right{--right-w:0px}
+#layout.hide-left.hide-right{--left-w:0px;--right-w:0px}
+.gutter{position:absolute;top:0;bottom:0;width:9px;z-index:6;cursor:col-resize;display:flex;align-items:center;justify-content:center;touch-action:none}
+.gutter::after{content:'';width:2px;height:100%;background:transparent;transition:background .15s}
+.gutter:hover::after,.gutter.dragging::after{background:var(--accent)}
+.gutter-left{left:calc(var(--left-w,300px) - 4px)}
+.gutter-right{right:calc(var(--right-w,420px) - 4px)}
+#layout.hide-left .gutter-left,#layout.hide-right .gutter-right{display:none}
 #layout.hide-left #sidebar{display:none}
 #layout.hide-right #panel{display:none}
 #sidebar{overflow-y:auto;min-height:0;background:var(--surface);border-right:1px solid var(--border);padding:10px}
@@ -261,7 +268,7 @@ button{font-family:inherit}
 .m-del{flex:0 0 auto;width:32px;height:32px;border:1px solid var(--border-2);background:transparent;border-radius:9px;cursor:pointer;font-size:13px;color:var(--ink-3);transition:.14s}
 .m-del:hover{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
 
-@media(max-width:1240px){#layout{grid-template-columns:256px 1fr 360px}}
+@media(max-width:1240px){:root{--left-w:256px;--right-w:360px}}
 
 /* ===== 管理页 v2 · 工作台布局 ===== */
 #manage{max-width:1300px;margin:0 auto;width:100%}
