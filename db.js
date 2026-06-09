@@ -49,4 +49,47 @@ const setStatus = (id, status) => db.prepare(`
 const deletePaper = (id) => db.prepare('DELETE FROM papers WHERE id = ?').run(id);
 const getPdfPath = (id) => { const r = db.prepare('SELECT pdf_path FROM papers WHERE id = ?').get(id); return r ? r.pdf_path : null; };
 
-module.exports = { db, listPapers, getExplainer, getNote, setNote, setStatus, deletePaper, getPdfPath };
+// ---- 手动添加 / 编辑 ----
+const getPaper = (id) => db.prepare('SELECT * FROM papers WHERE id = ?').get(id);
+
+const EDITABLE = ['title', 'venue', 'year', 'type', 'topic', 'url', 'pdf_url', 'pdf_path', 'tldr', 'abstract', 'contribution', 'authors', 'relevance', 'order_no'];
+
+const slugId = (title) => {
+  const base = String(title || 'paper').toLowerCase()
+    .replace(/[^a-z0-9一-龥]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'paper';
+  return 'manual-' + base + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+};
+
+const addPaper = (f) => {
+  if (!f || !f.title || !String(f.title).trim()) throw new Error('标题不能为空');
+  const id = slugId(f.title);
+  const authors = Array.isArray(f.authors) ? JSON.stringify(f.authors) : (f.authors || null);
+  db.prepare(`INSERT INTO papers
+    (id, source, title, venue, year, abstract, tldr, url, pdf_url, pdf_path, type, topic, contribution, authors, created_at, updated_at)
+    VALUES (@id,'manual',@title,@venue,@year,@abstract,@tldr,@url,@pdf_url,@pdf_path,@type,@topic,@contribution,@authors, datetime('now'), datetime('now'))`)
+    .run({
+      id, title: String(f.title).trim(),
+      venue: f.venue || null, year: f.year ? String(f.year) : null,
+      abstract: f.abstract || null, tldr: f.tldr || null,
+      url: f.url || null, pdf_url: f.pdf_url || null, pdf_path: f.pdf_path || null,
+      type: f.type || '其他', topic: f.topic || '其他',
+      contribution: f.contribution || null, authors
+    });
+  return id;
+};
+
+const updatePaper = (id, f) => {
+  const cols = [], vals = { id };
+  for (const k of EDITABLE) {
+    if (f && Object.prototype.hasOwnProperty.call(f, k)) {
+      let v = f[k];
+      if (k === 'authors' && Array.isArray(v)) v = JSON.stringify(v);
+      if (v === '') v = null;
+      cols.push(`${k} = @${k}`); vals[k] = v;
+    }
+  }
+  if (!cols.length) return 0;
+  return db.prepare(`UPDATE papers SET ${cols.join(', ')}, updated_at = datetime('now') WHERE id = @id`).run(vals).changes;
+};
+
+module.exports = { db, listPapers, getExplainer, getNote, setNote, setStatus, deletePaper, getPdfPath, getPaper, addPaper, updatePaper };
