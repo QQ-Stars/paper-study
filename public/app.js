@@ -86,15 +86,27 @@ function initResizers() {
 }
 
 function buildYearFilters() {
-  const years = [...new Set(PAPERS.map(p => p.year))].sort();
   const box = $('#yearFilters'); box.innerHTML = '';
-  ['all', ...years].forEach(y => {
-    const b = document.createElement('button');
-    b.className = 'chip-btn' + (y === 'all' ? ' active' : '');
-    b.textContent = y === 'all' ? '全部' : y;
-    b.onclick = () => { yearFilter = y; [...box.children].forEach(c => c.classList.remove('active')); b.classList.add('active'); refresh(); };
-    box.appendChild(b);
-  });
+  // 动态从库内论文取年份；只保留合法四位年份（丢掉空/异常），升序
+  const years = [...new Set(PAPERS.map(p => p.year))].filter(y => /^\d{4}$/.test(y)).sort();
+  if (years.length <= 6) {
+    // 年份不多：chips（保持原样，且保留当前选中）
+    ['all', ...years].forEach(y => {
+      const b = document.createElement('button');
+      b.className = 'chip-btn' + (yearFilter === y ? ' active' : '');
+      b.textContent = y === 'all' ? '全部' : y;
+      b.onclick = () => { yearFilter = y; [...box.children].forEach(c => c.classList.remove('active')); b.classList.add('active'); refresh(); };
+      box.appendChild(b);
+    });
+  } else {
+    // 年份过多：折叠成下拉，永不超出导航栏（全部 + 年份新→旧）
+    const sel = document.createElement('select');
+    sel.className = 'year-select';
+    sel.innerHTML = ['all', ...years.slice().reverse()]
+      .map(y => `<option value="${y}" ${yearFilter === y ? 'selected' : ''}>${y === 'all' ? '全部年份' : y + ' 年'}</option>`).join('');
+    sel.onchange = () => { yearFilter = sel.value; refresh(); };
+    box.appendChild(sel);
+  }
 }
 
 function updateSummary() {
