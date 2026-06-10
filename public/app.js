@@ -382,6 +382,7 @@ function bindUI() {
   $('#ingSearchWithBtn').onclick = () => runSearch(currentQueries());
   $('#ingQueryAdd').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const a = currentQueries() || []; a.push(e.target.value.trim()); e.target.value = ''; renderQueryChips(a); } };
   $('#ingestSelBtn').onclick = ingestSelected;
+  $('#verifyVenueBtn').onclick = verifyVenues;
   $('#mSearch').oninput = renderManage;
   $('#mSort').onchange = renderManage;
   $('#manualAddBtn').onclick = () => openPaperModal(null);
@@ -602,11 +603,15 @@ function renderCandidates() {
   $('#candCount').textContent = `找到 ${candidates.length} 篇 · ${fresh} 篇新`;
   $('#candList').innerHTML = candidates.map((c, i) => {
     const rel = c.relevance != null ? Math.round(c.relevance * 100) : 0;
+    const vv = c._verify;
+    const vb = vv ? (vv.matched
+      ? `<b class="vbadge ok" title="权威来源：${vv.source_of_truth}">✓已核实${vv.changed ? '·已更正' : ''}</b>`
+      : `<b class="vbadge miss" title="${vv.note || ''}">仅预印本</b>`) : '';
     return `<label class="cand ${c.in_library ? 'in-lib' : ''}">
       <input type="checkbox" class="cand-ck" data-i="${i}" ${c.in_library ? 'disabled' : 'checked'} />
       <div class="cand-main">
         <div class="cand-title">${c.title}</div>
-        <div class="cand-meta"><span class="venue">${c.venue || '—'} ${c.year || ''}</span> · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
+        <div class="cand-meta"><span class="venue">${c.venue || '—'} ${c.year || ''}</span>${vb ? ' ' + vb : ''} · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
       </div>
       <div class="cand-rel" title="相关度 ${rel}%"><div class="cand-rel-track"><div class="cand-rel-bar" style="width:${rel}%"></div></div><span>${rel}</span></div>
     </label>`;
@@ -628,6 +633,29 @@ async function ingestSelected() {
     await reloadPapers(); renderCandidates(); renderManage();
   } catch (e) { log.textContent = '失败: ' + e; }
   finally { btn.disabled = false; }
+}
+async function verifyVenues() {
+  if (!candidates.length) { alert('请先检索出候选论文'); return; }
+  const log = $('#ingLog'); log.classList.remove('hidden'); log.textContent = '核实会议中（查 Semantic Scholar / DBLP 权威库，非 LLM 臆测）…';
+  const btn = $('#verifyVenueBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = '核实中…';
+  try {
+    await streamNDJSON('/api/verify-venue', { candidates }, (ev) => {
+      if (ev.type === 'progress') { log.textContent += '\n' + ev.line; log.scrollTop = log.scrollHeight; }
+      else if (ev.type === 'result') {
+        const vs = ev.verifications || [];
+        vs.forEach((v, i) => {
+          if (!candidates[i]) return;
+          candidates[i]._verify = v;
+          if (v.matched) { candidates[i].venue = v.venue; if (v.year) candidates[i].year = v.year; }
+        });
+        renderCandidates();
+        const hit = vs.filter(v => v.matched).length, chg = vs.filter(v => v.changed).length;
+        log.textContent += `\n✅ 核实完成：${hit}/${vs.length} 篇查到正式发表，其中 ${chg} 篇会议被更正（入库即用更正后的会议）`;
+        log.scrollTop = log.scrollHeight;
+      }
+    });
+  } catch (e) { log.textContent = '失败: ' + e; }
+  finally { btn.disabled = false; btn.textContent = old; }
 }
 
 async function reloadPapers() {
