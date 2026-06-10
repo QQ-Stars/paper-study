@@ -383,6 +383,7 @@ function bindUI() {
   $('#ingQueryAdd').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const a = currentQueries() || []; a.push(e.target.value.trim()); e.target.value = ''; renderQueryChips(a); } };
   $('#ingestSelBtn').onclick = ingestSelected;
   $('#verifyVenueBtn').onclick = verifyVenues;
+  document.querySelectorAll('#candPanel .vsrc-chip').forEach(c => c.onclick = () => c.classList.toggle('active'));
   $('#mSearch').oninput = renderManage;
   $('#mSort').onchange = renderManage;
   $('#manualAddBtn').onclick = () => openPaperModal(null);
@@ -601,12 +602,14 @@ function renderCandidates() {
   $('#candPanel').classList.remove('hidden');
   const fresh = candidates.filter(c => !c.in_library).length;
   $('#candCount').textContent = `找到 ${candidates.length} 篇 · ${fresh} 篇新`;
+  const SRC_SHORT = { dblp: 'DBLP', semanticscholar: 'S2', openalex: 'OpenAlex' };
   $('#candList').innerHTML = candidates.map((c, i) => {
     const rel = c.relevance != null ? Math.round(c.relevance * 100) : 0;
     const vv = c._verify;
-    const vb = vv ? (vv.matched
-      ? `<b class="vbadge ok" title="权威来源：${vv.source_of_truth}">✓已核实${vv.changed ? '·已更正' : ''}</b>`
-      : `<b class="vbadge miss" title="${vv.note || ''}">仅预印本</b>`) : '';
+    const vb = vv ? (
+      vv.skipped ? `<b class="vbadge src" title="${vv.note || ''}">源自${SRC_SHORT[vv.source_of_truth] || vv.source_of_truth}</b>`
+        : vv.matched ? `<b class="vbadge ok" title="权威来源：${SRC_SHORT[vv.source_of_truth] || vv.source_of_truth}">✓已核实${vv.changed ? '·已更正' : ''}</b>`
+          : `<b class="vbadge miss" title="${vv.note || ''}">仅预印本</b>`) : '';
     return `<label class="cand ${c.in_library ? 'in-lib' : ''}">
       <input type="checkbox" class="cand-ck" data-i="${i}" ${c.in_library ? 'disabled' : 'checked'} />
       <div class="cand-main">
@@ -636,21 +639,25 @@ async function ingestSelected() {
 }
 async function verifyVenues() {
   if (!candidates.length) { alert('请先检索出候选论文'); return; }
-  const log = $('#ingLog'); log.classList.remove('hidden'); log.textContent = '核实会议中（查 Semantic Scholar / DBLP 权威库，非 LLM 臆测）…';
+  const sources = [...document.querySelectorAll('#candPanel .vsrc-chip.active')].map(c => c.dataset.vsrc);
+  if (!sources.length) { alert('请至少选择一个核实源'); return; }
+  const log = $('#ingLog'); log.classList.remove('hidden'); log.textContent = `核实会议中（查 ${sources.join(' / ')} 权威库，非 LLM 臆测；本就来自所选源的会跳过）…`;
   const btn = $('#verifyVenueBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = '核实中…';
   try {
-    await streamNDJSON('/api/verify-venue', { candidates }, (ev) => {
+    await streamNDJSON('/api/verify-venue', { candidates, sources }, (ev) => {
       if (ev.type === 'progress') { log.textContent += '\n' + ev.line; log.scrollTop = log.scrollHeight; }
       else if (ev.type === 'result') {
         const vs = ev.verifications || [];
         vs.forEach((v, i) => {
           if (!candidates[i]) return;
           candidates[i]._verify = v;
-          if (v.matched) { candidates[i].venue = v.venue; if (v.year) candidates[i].year = v.year; }
+          if (v.matched && !v.skipped) { candidates[i].venue = v.venue; if (v.year) candidates[i].year = v.year; }
         });
         renderCandidates();
-        const hit = vs.filter(v => v.matched).length, chg = vs.filter(v => v.changed).length;
-        log.textContent += `\n✅ 核实完成：${hit}/${vs.length} 篇查到正式发表，其中 ${chg} 篇会议被更正（入库即用更正后的会议）`;
+        const hit = vs.filter(v => v.matched && !v.skipped).length;
+        const skp = vs.filter(v => v.skipped).length;
+        const chg = vs.filter(v => v.changed).length;
+        log.textContent += `\n✅ 核实完成：${hit} 篇查到正式发表（${chg} 篇会议更正）` + (skp ? `；${skp} 篇本就源自所选权威源，已跳过` : '');
         log.scrollTop = log.scrollHeight;
       }
     });

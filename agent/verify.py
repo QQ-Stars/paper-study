@@ -1,16 +1,19 @@
-"""会议核实：查权威学术 API（Semantic Scholar / DBLP）拿论文真实发表会议，而非 LLM 臆测。
-- 优先 S2 按 arxiv_id/doi/s2_id 精确查 → 拿 publicationVenue / venue。
-- 标题精确匹配兜底（S2 search）。
-- DBLP 按标题兜底（CS 会议名最干净）。
-- 查不到正式发表记录 → 保留原值并标注"未找到"，绝不编造。
+"""会议核实：查权威学术库（可选 DBLP / Semantic Scholar / OpenAlex）拿论文真实发表会议，而非 LLM 臆测。
+- 可指定核实源及优先级（sources，按先后顺序逐个查，命中即止）。
+- 候选若本就来自所选权威源之一 → 已是权威数据，跳过不查（数据源==核实源就没必要核实）。
+- 查不到正式发表记录 → 保留原值并标"仅预印本"，绝不编造。
 """
 import sys
 from . import util, config
 from .sources.dblp import DBLP
+from .sources.openalex import OpenAlex
 
 S2_PAPER = "https://api.semanticscholar.org/graph/v1/paper/"
 S2_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search"
 S2_FIELDS = "title,venue,year,publicationVenue,publicationDate,externalIds"
+
+AUTHORITIES = ["dblp", "semanticscholar", "openalex"]   # arxiv 不是会议权威（预印本服务器）
+SRC_LABEL = {"dblp": "DBLP", "semanticscholar": "Semantic Scholar", "openalex": "OpenAlex"}
 
 ACR = ["CVPR", "ICCV", "ECCV", "NeurIPS", "ICML", "ICLR", "ACL", "EMNLP", "NAACL",
        "COLING", "AAAI", "IJCAI", "WACV", "BMVC", "SIGGRAPH", "KDD", "TPAMI", "TMLR", "JMLR"]
@@ -57,6 +60,56 @@ def _is_preprint(v):
     return (not n) or ("arxiv" in n) or (n == "corr")
 
 
+# ---------- 各权威源单篇查询：命中返回 (venue, year)，否则 None ----------
+def _lk_dblp(c):
+    title = c.get("title", "")
+    if not title:
+        return None
+    for stub in DBLP().search(title, None, 5):
+        if _norm(stub.title) == _norm(title) and stub.venue and not _is_preprint(stub.venue):
+            return (_abbrev(stub.venue), stub.year)
+    return None
+
+
+def _lk_openalex(c):
+    title = c.get("title", "")
+    if not title:
+        return None
+    for stub in OpenAlex().search(title, None, 5):
+        if _norm(stub.title) == _norm(title) and stub.venue and not _is_preprint(stub.venue):
+            return (_abbrev(stub.venue), stub.year)
+    return None
+
+
+def _lk_s2(c):
+    j = None
+    if c.get("arxiv_id"):
+        j = _s2_get("arXiv:" + str(c["arxiv_id"]))
+    if not j and c.get("doi"):
+        j = _s2_get("DOI:" + str(c["doi"]))
+    if not j and c.get("s2_id"):
+        j = _s2_get(str(c["s2_id"]))
+    title = c.get("title", "")
+    if not j and title:
+        try:
+            data = util.get(S2_SEARCH, params={"query": title, "fields": S2_FIELDS, "limit": 3},
+                            headers=_s2_headers()).json().get("data") or []
+            for cand in data:
+                if _norm(cand.get("title")) == _norm(title):
+                    j = cand
+                    break
+        except Exception:
+            pass
+    if j:
+        pv = (j.get("publicationVenue") or {})
+        v = (pv.get("name") or j.get("venue") or "").strip()
+        if v and not _is_preprint(v):
+            pd = str(j.get("publicationDate") or "")
+            yr = pd[:4] if pd[:4].isdigit() else (str(j.get("year")) if j.get("year") else None)
+            return (_abbrev(v), yr)
+    return None
+
+
 def _s2_get(pid):
     try:
         return util.get(S2_PAPER + pid, params={"fields": S2_FIELDS}, headers=_s2_headers()).json()
@@ -64,78 +117,51 @@ def _s2_get(pid):
         return None
 
 
-def _venue_from_s2(j):
-    pv = (j.get("publicationVenue") or {})
-    name = pv.get("name") or j.get("venue") or ""
-    return name.strip()
+LOOKUPS = {"dblp": _lk_dblp, "semanticscholar": _lk_s2, "openalex": _lk_openalex}
 
 
-def verify_one(c):
-    title = c.get("title", "")
+def verify_one(c, sources):
     orig = c.get("venue")
-    venue, year, src, matched = orig, c.get("year"), "none", False
-
-    # 1) DBLP 优先（CS 会议人工策展：会把 arXiv 条目与会议条目分开，跳过预印本条目即得准确「会议+发表年」）
-    if title:
+    cand_src = (c.get("source") or "").strip()
+    # 候选本就来自所选权威源之一 → 已权威，无需核实
+    if cand_src in sources:
+        return {"venue": orig, "year": c.get("year"), "matched": True, "skipped": True,
+                "source_of_truth": cand_src, "changed": False, "orig_venue": orig,
+                "note": f"数据源即权威源（{SRC_LABEL.get(cand_src, cand_src)}），无需核实"}
+    # 按所选源优先级逐个查，命中即止
+    for s in sources:
+        fn = LOOKUPS.get(s)
+        if not fn:
+            continue
         try:
-            for stub in DBLP().search(title, None, 5):
-                if _norm(stub.title) == _norm(title) and stub.venue and not _is_preprint(stub.venue):
-                    venue, year, src, matched = _abbrev(stub.venue), (stub.year or year), "dblp", True
-                    break
+            r = fn(c)
         except Exception:
-            pass
-
-    # 2) Semantic Scholar 兜底（按 arxiv_id/doi/s2_id 精确，再标题精确匹配）
-    if not matched:
-        j = None
-        if c.get("arxiv_id"):
-            j = _s2_get("arXiv:" + str(c["arxiv_id"]))
-        if not j and c.get("doi"):
-            j = _s2_get("DOI:" + str(c["doi"]))
-        if not j and c.get("s2_id"):
-            j = _s2_get(str(c["s2_id"]))
-        if not j and title:
-            try:
-                data = util.get(S2_SEARCH, params={"query": title, "fields": S2_FIELDS, "limit": 3},
-                                headers=_s2_headers()).json().get("data") or []
-                for cand in data:
-                    if _norm(cand.get("title")) == _norm(title):
-                        j = cand
-                        break
-            except Exception:
-                pass
-        if j:
-            v = _venue_from_s2(j)
-            if v and not _is_preprint(v):
-                venue, src, matched = _abbrev(v), "semanticscholar", True
-                pd = str(j.get("publicationDate") or "")
-                if pd[:4].isdigit():
-                    year = pd[:4]
-                elif j.get("year"):
-                    year = str(j.get("year"))
-
-    changed = matched and _norm(venue) != _norm(orig)
-    return {
-        "venue": venue, "year": year, "matched": matched, "source_of_truth": src,
-        "changed": changed, "orig_venue": orig,
-        "note": "" if matched else "权威库未找到正式发表记录（可能确为预印本）",
-    }
+            r = None
+        if r:
+            venue = r[0] or orig
+            return {"venue": venue, "year": (r[1] or c.get("year")), "matched": True, "skipped": False,
+                    "source_of_truth": s, "changed": (_norm(venue) != _norm(orig)), "orig_venue": orig, "note": ""}
+    return {"venue": orig, "year": c.get("year"), "matched": False, "skipped": False,
+            "source_of_truth": "none", "changed": False, "orig_venue": orig,
+            "note": "所选权威库未找到正式发表记录（可能确为预印本）"}
 
 
-def verify_venues(cands):
+def verify_venues(cands, sources=None):
     """对候选逐个核实真实发表会议。进度→stderr，结果(与输入同序)→stdout。"""
+    sources = [s for s in (sources or ["dblp", "semanticscholar"]) if s in AUTHORITIES] or ["dblp", "semanticscholar"]
     _p("STAGE::verify")
+    _p("SOURCES::" + ",".join(sources))
     _p(f"TOTAL::{len(cands)}")
     out = []
     for i, c in enumerate(cands):
         try:
-            res = verify_one(c)
+            res = verify_one(c, sources)
         except Exception as e:
-            res = {"venue": c.get("venue"), "year": c.get("year"), "matched": False,
+            res = {"venue": c.get("venue"), "year": c.get("year"), "matched": False, "skipped": False,
                    "source_of_truth": "none", "changed": False, "orig_venue": c.get("venue"),
                    "note": f"核实出错: {e}", "error": True}
         out.append(res)
-        tag = res["source_of_truth"] if res["matched"] else "miss"
+        tag = ("skip:" + res["source_of_truth"]) if res.get("skipped") else (res["source_of_truth"] if res["matched"] else "miss")
         _p(f"VERIFIED::{i + 1}::{res['venue'] or '?'}::{tag}")
     _p(f"DONE::{len(out)}")
     return out

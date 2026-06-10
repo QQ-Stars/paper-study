@@ -45,7 +45,8 @@ def main():
     isel = sub.add_parser("ingest-selected", help="第二阶段：从 stdin 读勾选候选并入库")
     isel.add_argument("--deep", action="store_true")
 
-    sub.add_parser("verify-venue", help="会议核实：查 S2/DBLP 权威库（stdin 读候选JSON，结果→stdout）")
+    vv = sub.add_parser("verify-venue", help="会议核实：查权威库（stdin 读候选JSON，结果→stdout）")
+    vv.add_argument("--sources", default="dblp,semanticscholar", help="核实源(优先级顺序): dblp,semanticscholar,openalex")
 
     sub.add_parser("ping", help="测试大模型连通性")
     sub.add_parser("purge", help="删除采集来的论文（保留 seed 种子 38 篇）")
@@ -87,7 +88,8 @@ def main():
         if raw[:1] == "﻿":          # 剥离可能的 UTF-8 BOM
             raw = raw[1:]
         cands = json.loads(raw) if raw.strip() else []
-        res = verify.verify_venues(cands)
+        srcs = [s.strip() for s in args.sources.split(",") if s.strip()]
+        res = verify.verify_venues(cands, srcs)
         sys.stdout.write(json.dumps(res, ensure_ascii=False))
         sys.stdout.flush()
 
