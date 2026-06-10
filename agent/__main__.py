@@ -48,6 +48,10 @@ def main():
     vv = sub.add_parser("verify-venue", help="会议核实：查权威库（stdin 读候选JSON，结果→stdout）")
     vv.add_argument("--sources", default="dblp,semanticscholar", help="核实源(优先级顺序): dblp,semanticscholar,openalex")
 
+    exp = sub.add_parser("explain", help="为已入库论文生成讲解(LLM)，写入 papers.explainer，md→stdout")
+    exp.add_argument("--id", required=True, help="论文 id (slug)")
+    exp.add_argument("--deep", action="store_true", help="读取本地PDF正文(更准，更慢)")
+
     sub.add_parser("ping", help="测试大模型连通性")
     sub.add_parser("purge", help="删除采集来的论文（保留 seed 种子 38 篇）")
 
@@ -92,6 +96,9 @@ def main():
         res = verify.verify_venues(cands, srcs)
         sys.stdout.write(json.dumps(res, ensure_ascii=False))
         sys.stdout.flush()
+    elif args.cmd == "explain":
+        from . import explain
+        explain.explain_paper(args.id, args.deep)
 
 
 if __name__ == "__main__":

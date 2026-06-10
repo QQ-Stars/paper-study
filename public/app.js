@@ -2,6 +2,7 @@
 let PAPERS = [];
 let current = null;
 let curNoteText = '';
+let curHasExplainer = false;
 let yearFilter = 'all';
 let q = '';
 let currentView = 'home';
@@ -304,7 +305,7 @@ async function openPaper(p) {
   setStatusUI(p.status || '未开始');
   // 讲解
   const ex = await (await fetch('/api/explainer?id=' + encodeURIComponent(p.id))).text();
-  $('#explainerView').innerHTML = md(ex); $('#explainerView').scrollTop = 0;
+  setExplainer(ex);
   // 笔记
   curNoteText = await (await fetch('/api/note?id=' + encodeURIComponent(p.id))).text();
   $('#noteEdit').value = curNoteText;
@@ -313,6 +314,48 @@ async function openPaper(p) {
   showNoteMode('preview');
   // PDF
   renderPdf(p.id);
+}
+
+// ====== 论文讲解（载入 + LLM 自动生成）======
+const EX_EMPTY = '*(暂无讲解)*';
+function setExplainer(text) {
+  const real = text && text.trim() && text.trim() !== EX_EMPTY;
+  curHasExplainer = !!real;
+  $('#explainerView').innerHTML = real ? md(text)
+    : '<div class="placeholder">这篇还没有讲解。点上方「✨ 生成讲解」，让大模型结合你的研究方向写一份。</div>';
+  $('#explainerView').scrollTop = 0;
+  const btn = $('#genExplainerBtn');
+  if (btn) { btn.disabled = false; btn.textContent = real ? '✨ 重新生成' : '✨ 生成讲解'; }
+  const hint = $('#genHint'); if (hint) hint.textContent = '';
+}
+async function generateExplainer() {
+  if (!current) { alert('请先在左侧选择一篇论文'); return; }
+  if (curHasExplainer && !confirm('已有讲解，重新生成会覆盖当前内容（手写讲解也会被替换）。确定继续？')) return;
+  const btn = $('#genExplainerBtn'), view = $('#explainerView'), hint = $('#genHint');
+  const deep = $('#genDeep').checked, pid = current.id;
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '生成中…';
+  hint.textContent = deep ? '读 PDF 正文，约 20~60 秒…' : '约 10~40 秒…';
+  view.innerHTML = '<div class="ex-progress"><span class="ex-spinner"></span><span class="ex-log" id="exLog">正在准备…</span></div>';
+  const STAGE = { load: '读取论文信息', pdf: '读取 PDF 正文', generate: '大模型撰写讲解中' };
+  const setLog = (t) => { const el = document.getElementById('exLog'); if (el) el.textContent = t; };
+  const fail = (msg) => { view.innerHTML = '<div class="placeholder">生成失败：' + msg + '<br>可在顶栏 ⚙ 检查模型与密钥后重试。</div>'; btn.disabled = false; btn.textContent = old; hint.textContent = ''; };
+  try {
+    await streamNDJSON('/api/explain', { id: pid, deep }, (ev) => {
+      if (ev.type === 'progress') {
+        const m = /^STAGE::(\w+)/.exec(ev.line);
+        if (m && STAGE[m[1]]) setLog(STAGE[m[1]] + '…');
+        else if (ev.line.startsWith('PDFMISS::')) setLog('未找到本地 PDF，改用摘要生成…');
+        else if (ev.line.startsWith('PDFERR::')) setLog('PDF 读取失败，改用摘要…');
+      } else if (ev.type === 'result') {
+        if (!current || current.id !== pid) return;       // 用户已切换论文，丢弃
+        if (ev.ok && ev.markdown && ev.markdown.trim()) {
+          setExplainer(ev.markdown);
+          hint.textContent = '✅ 已生成并保存';
+          setTimeout(() => { const h = $('#genHint'); if (h && h.textContent.startsWith('✅')) h.textContent = ''; }, 4000);
+        } else { fail(ev.error || '模型返回为空'); }
+      }
+    });
+  } catch (e) { if (current && current.id === pid) fail(String(e)); }
 }
 
 // ====== PDF.js 渲染（懒加载 + 缩放）======
@@ -382,6 +425,7 @@ function bindUI() {
     const k = th.dataset.sort; if (homeSort.key === k) homeSort.dir *= -1; else homeSort = { key: k, dir: 1 }; renderHome();
   });
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dataset.tab));
+  $('#genExplainerBtn').onclick = generateExplainer;
   $('#btnEdit').onclick = () => { setSegActive('#tab-note .seg-sm', $('#btnEdit')); showNoteMode('edit'); $('#noteEdit').focus(); };
   $('#btnPreview').onclick = () => { $('#notePreview').innerHTML = md($('#noteEdit').value) || ''; setSegActive('#tab-note .seg-sm', $('#btnPreview')); showNoteMode('preview'); };
   $('#btnSave').onclick = saveNote;
