@@ -176,6 +176,21 @@ const server = http.createServer(async (req, res) => {
       ch.stdin.write(JSON.stringify(cands)); ch.stdin.end();
       return;
     }
+    // 自动生成论文讲解（LLM）：NDJSON 流，progress... + 最终 result.markdown（同时已写入 DB）
+    if (p === '/api/explain' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const id = safeBase(b.id);
+      if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }), MIME['.json']);
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const args = ['explain', '--id', id]; if (b.deep) args.push('--deep');
+      let out = '', err = ''; const ch = spawnAgent(args);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (l.trim()) { err += l + '\n'; emit({ type: 'progress', line: l }); } }));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e) }); res.end(); });
+      ch.on('close', code => { emit({ type: 'result', ok: code === 0 && !!out.trim(), markdown: out, error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '生成失败') }); res.end(); });
+      return;
+    }
     if (p === '/api/settings' && req.method === 'GET') {
       const s = readSettings(), e = readEnv();
       return send(res, 200, JSON.stringify({

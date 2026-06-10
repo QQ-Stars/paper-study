@@ -262,6 +262,11 @@
       </div>
 
       <div id="tab-explainer" class="tabpane active">
+        <div class="ex-toolbar">
+          <button id="genExplainerBtn" class="mini primary" disabled>✨ 生成讲解</button>
+          <label class="ex-deep" title="让大模型读取本地PDF正文前几页，讲解更准确但更慢"><input type="checkbox" id="genDeep"> 读PDF正文</label>
+          <span id="genHint" class="hint"></span>
+        </div>
         <div id="explainerView" class="markdown">
           <div class="placeholder">选择论文后，这里显示详细讲解。</div>
         </div>

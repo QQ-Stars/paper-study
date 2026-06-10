@@ -80,6 +80,48 @@ def expand_queries(direction: str, n: int = 6) -> list:
         return [direction]
 
 
+EXPLAINER_SYSTEM = (
+    "你是一位资深的多模态大模型(MLLM)研究者，正在帮一位中文母语的研究生精读论文。"
+    "请根据给定论文信息，写一份**中文 Markdown 讲解**：让 AI 小白也能读懂，但要专业、准确、不灌水。\n"
+    "结构（严格用二级标题 ##，顺序如下）：\n"
+    "1. 开头用一行引用块 `> …` 一句话点明：这篇论文做了什么、为什么值得读。\n"
+    "2. `## 研究问题`：它针对哪种幻觉 / 哪个痛点？把动机讲清楚。\n"
+    "3. `## 方法`：核心做法，分点讲；遇到公式或模块，先说直觉再说细节，别堆术语。\n"
+    "4. `## 关键结论`：主要实验发现（数据集 / 指标 / 相对提升，知道才写）。\n"
+    "5. `## 与我的研究方向的关系`：**全文最重要的一节**。结合下方「我的研究方向」，"
+    "判断这篇是竞品、可借鉴的上游、还是能直接当 baseline；尤其指出它**没覆盖到的空白**"
+    "（那正是我的机会）。要具体、有取舍判断，别说套话。\n"
+    "6. `## 可借鉴点`：方法、思路或实验设计里我能直接拿来用的点，分点列。\n"
+    "硬性要求：只输出 Markdown 正文（不要用 ``` 把整体包起来）；忠于给定信息，"
+    "**信息不足时宁可写“原文未提供”，绝不臆造**数据、指标或会议名。"
+)
+
+
+def generate_explainer(paper: dict, direction: str = "", fulltext: str = None) -> str:
+    """为一篇论文生成「科学方法论讲解」markdown，并把它对齐到 direction（我的研究方向）。"""
+    direction = direction or config.RESEARCH_DIRECTION
+    info = (
+        f"# 我的研究方向\n{direction}\n\n"
+        f"# 论文信息\n"
+        f"标题: {paper.get('title', '')}\n"
+        f"会议/年份: {paper.get('venue') or '未知'} {paper.get('year') or ''}\n"
+        f"作者: {paper.get('authors_str') or '原文未提供'}\n"
+        f"已标注类型/主题: {paper.get('type') or '?'} / {paper.get('topic') or '?'}\n"
+        f"已标注核心贡献: {paper.get('contribution') or '原文未提供'}\n"
+        f"TLDR: {paper.get('tldr') or '原文未提供'}\n"
+        f"摘要: {paper.get('abstract') or '原文未提供'}\n"
+    )
+    if fulltext:
+        info += f"\n# 论文正文片段(节选，供你提取方法/实验细节)\n{fulltext[:14000]}\n"
+    resp = client().chat.completions.create(
+        model=config.MODEL,
+        messages=[{"role": "system", "content": EXPLAINER_SYSTEM},
+                  {"role": "user", "content": info}],
+        temperature=0.5,
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+
 def ping() -> str:
     """连通性自检：返回模型回复的一小段文本。"""
     resp = client().chat.completions.create(
