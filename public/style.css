@@ -357,6 +357,9 @@ button{font-family:inherit}
 .cand-title{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cand-meta{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .inlib-tag{color:var(--ok)}
+.vbadge{font-family:var(--font-mono);font-size:9.5px;padding:1px 5px;border-radius:5px;font-weight:600;white-space:nowrap}
+.vbadge.ok{background:rgba(63,125,91,.16);color:var(--ok)}
+.vbadge.miss{background:var(--surface-3);color:var(--ink-3)}
 .cand-rel{flex:0 0 auto;display:flex;align-items:center;gap:7px;width:86px}
 .cand-rel-track{flex:1;height:5px;background:var(--surface-3);border-radius:99px;overflow:hidden}
 .cand-rel-bar{height:100%;background:var(--accent);border-radius:99px;transition:width .5s}

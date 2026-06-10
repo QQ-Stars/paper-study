@@ -161,6 +161,20 @@ const server = http.createServer(async (req, res) => {
       ch.stdin.write(JSON.stringify(cands)); ch.stdin.end();
       return;
     }
+    // 会议核实：查 S2/DBLP 权威库（NDJSON：progress... + 最终 result.verifications）
+    if (p === '/api/verify-venue' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const cands = Array.isArray(b.candidates) ? b.candidates : [];
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      let out = ''; const ch = spawnAgent(['verify-venue']);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e), verifications: [] }); res.end(); });
+      ch.on('close', code => { let v = []; try { v = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0, verifications: v }); res.end(); });
+      ch.stdin.write(JSON.stringify(cands)); ch.stdin.end();
+      return;
+    }
     if (p === '/api/settings' && req.method === 'GET') {
       const s = readSettings(), e = readEnv();
       return send(res, 200, JSON.stringify({
