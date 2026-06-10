@@ -38,21 +38,37 @@ async function init() {
 function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = $('#themeBtn'); if (b) b.textContent = t === 'dark' ? '☀️' : '🌙'; localStorage.setItem('theme', t); }
 function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); renderHome(); }
 function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); localStorage.setItem(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
+const MIN_VIEWER = 320; // 中间 PDF 区最小宽度，任何时候都保留
 function initResizers() {
   const layout = $('#layout');
   const apply = (k, v) => document.documentElement.style.setProperty(k, v + 'px');
-  const lw = parseInt(localStorage.getItem('left-w'), 10); if (lw) apply('--left-w', lw);
-  const rw = parseInt(localStorage.getItem('right-w'), 10); if (rw) apply('--right-w', rw);
+  // 载入时校验持久化宽度：单边夹值 + 保证两侧之和给中间 PDF 留 ≥MIN_VIEWER，否则整体复位默认（修复历史异常拖拽值把布局挤坏的问题）
+  let lw = parseInt(localStorage.getItem('left-w'), 10) || 0;
+  let rw = parseInt(localStorage.getItem('right-w'), 10) || 0;
+  if (lw) lw = Math.max(160, lw);
+  if (rw) rw = Math.max(220, rw);
+  if ((lw || 300) + (rw || 420) > window.innerWidth - MIN_VIEWER) {
+    localStorage.removeItem('left-w'); localStorage.removeItem('right-w');
+    document.documentElement.style.removeProperty('--left-w'); document.documentElement.style.removeProperty('--right-w');
+  } else {
+    if (lw) { apply('--left-w', lw); localStorage.setItem('left-w', lw); }
+    if (rw) { apply('--right-w', rw); localStorage.setItem('right-w', rw); }
+  }
   document.querySelectorAll('.gutter').forEach(g => {
+    const side = g.dataset.side;
+    const key = side === 'left' ? 'left-w' : 'right-w';
+    const cssVar = side === 'left' ? '--left-w' : '--right-w';
     g.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      const side = g.dataset.side;
       const rect = layout.getBoundingClientRect();
+      const otherEl = side === 'left' ? $('#panel') : $('#sidebar');
+      const otherW = otherEl ? otherEl.getBoundingClientRect().width : 0;
+      const maxW = Math.max(200, Math.round(rect.width - otherW - MIN_VIEWER)); // 保证中间 PDF 不被挤没
       g.classList.add('dragging'); layout.classList.add('resizing');
       const move = (ev) => {
-        const maxW = rect.width - 360;
-        if (side === 'left') { const w = Math.max(160, Math.min(Math.round(ev.clientX - rect.left), maxW)); apply('--left-w', w); localStorage.setItem('left-w', w); }
-        else { const w = Math.max(220, Math.min(Math.round(rect.right - ev.clientX), maxW)); apply('--right-w', w); localStorage.setItem('right-w', w); }
+        const raw = side === 'left' ? (ev.clientX - rect.left) : (rect.right - ev.clientX);
+        const w = Math.max(side === 'left' ? 160 : 220, Math.min(Math.round(raw), maxW));
+        apply(cssVar, w); localStorage.setItem(key, w);
       };
       const up = () => {
         g.classList.remove('dragging'); layout.classList.remove('resizing');
@@ -60,6 +76,11 @@ function initResizers() {
         if (pdfDoc && currentView === 'read') layoutPages(++renderToken);
       };
       window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    });
+    g.addEventListener('dblclick', () => { // 双击复位默认宽度
+      document.documentElement.style.removeProperty(cssVar);
+      localStorage.removeItem(key);
+      if (pdfDoc && currentView === 'read') layoutPages(++renderToken);
     });
   });
 }
