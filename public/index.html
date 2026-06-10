@@ -103,8 +103,14 @@
       <div id="candPanel" class="cand-panel hidden">
         <div class="cand-head">
           <span id="candCount" class="cand-count"></span>
+          <div class="vsrc-group" title="选择会议核实的权威源（按顺序优先；候选若本就来自所选源则跳过）">
+            <span class="vsrc-label">核实源</span>
+            <button type="button" class="vsrc-chip active" data-vsrc="dblp">DBLP</button>
+            <button type="button" class="vsrc-chip active" data-vsrc="semanticscholar">S2</button>
+            <button type="button" class="vsrc-chip" data-vsrc="openalex">OpenAlex</button>
+          </div>
+          <button id="verifyVenueBtn" class="mini" title="查所选权威库，核实真实发表会议">✓ 核实会议</button>
           <label class="cand-all"><input type="checkbox" id="candSelAll" checked /> 全选新论文</label>
-          <button id="verifyVenueBtn" class="mini" title="查 Semantic Scholar / DBLP 权威库，核实真实发表会议">✓ 核实会议</button>
           <button id="ingestSelBtn" class="mini primary">入库选中 →</button>
         </div>
         <div id="candList" class="cand-list"></div>

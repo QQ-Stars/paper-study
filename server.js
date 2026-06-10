@@ -167,7 +167,8 @@ const server = http.createServer(async (req, res) => {
       const cands = Array.isArray(b.candidates) ? b.candidates : [];
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
       const emit = (o) => res.write(JSON.stringify(o) + '\n');
-      let out = ''; const ch = spawnAgent(['verify-venue']);
+      const vsources = (Array.isArray(b.sources) ? b.sources : ['dblp', 'semanticscholar']).filter(s => ['dblp', 'semanticscholar', 'openalex'].includes(s));
+      let out = ''; const ch = spawnAgent(['verify-venue', '--sources', vsources.join(',') || 'dblp,semanticscholar']);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
       ch.stdout.on('data', d => out += d.toString());
       ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e), verifications: [] }); res.end(); });

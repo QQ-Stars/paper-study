@@ -360,6 +360,12 @@ button{font-family:inherit}
 .vbadge{font-family:var(--font-mono);font-size:9.5px;padding:1px 5px;border-radius:5px;font-weight:600;white-space:nowrap}
 .vbadge.ok{background:rgba(63,125,91,.16);color:var(--ok)}
 .vbadge.miss{background:var(--surface-3);color:var(--ink-3)}
+.vbadge.src{background:rgba(91,115,135,.14);color:var(--ink-2)}
+.vsrc-group{display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap}
+.vsrc-label{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em}
+.vsrc-chip{font-size:11px;padding:3px 9px;border:1px solid var(--border-2);border-radius:999px;background:var(--surface);color:var(--ink-3);cursor:pointer;font-family:var(--font-sans);transition:.12s}
+.vsrc-chip:hover{border-color:var(--ink-3)}
+.vsrc-chip.active{background:var(--accent-soft);border-color:transparent;color:var(--accent-ink);font-weight:600}
 .cand-rel{flex:0 0 auto;display:flex;align-items:center;gap:7px;width:86px}
 .cand-rel-track{flex:1;height:5px;background:var(--surface-3);border-radius:99px;overflow:hidden}
 .cand-rel-bar{height:100%;background:var(--accent);border-radius:99px;transition:width .5s}
