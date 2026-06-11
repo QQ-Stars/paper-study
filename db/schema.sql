@@ -58,6 +58,12 @@ CREATE TABLE IF NOT EXISTS notes (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- ========== 收藏 ==========
+CREATE TABLE IF NOT EXISTS favorites (
+  paper_id   TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- ========== 论文向量(可选, 语义检索) ==========
 CREATE TABLE IF NOT EXISTS paper_vectors (
   paper_id  TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,

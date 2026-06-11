@@ -4,6 +4,7 @@ let current = null;
 let curNoteText = '';
 let curHasExplainer = false;
 let yearFilter = 'all';
+let favOnly = false;
 let q = '';
 let currentView = 'home';
 let homeSort = { key: 'year', dir: 1 };
@@ -145,6 +146,7 @@ function buildDashShell() {
       <div class="kpi-rows">
         <div><span>顶会发表</span><b id="kpiPub">0</b></div>
         <div><span>arXiv 预印</span><b id="kpiArxiv">0</b></div>
+        <div><span>★ 收藏</span><b id="kpiFav">0</b></div>
         <div><span>2024 / 25 / 26</span><b id="kpiYears">0 / 0 / 0</b></div>
       </div>
     </div>
@@ -160,13 +162,14 @@ function buildDashShell() {
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 function renderHome() {
-  let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter));
+  let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter) && (!favOnly || p.favorite));
   if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(k)); }
 
   // 表格
   list.sort(cmpHome);
-  $('#homeBody').innerHTML = list.map(rowHTML).join('');
-  document.querySelectorAll('#homeBody tr').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
+  $('#homeBody').innerHTML = list.map(rowHTML).join('') || `<tr><td colspan="9" class="empty-row">${favOnly ? '还没有收藏的论文。在阅读界面点「☆ 收藏」即可。' : '没有匹配的论文。'}</td></tr>`;
+  document.querySelectorAll('#homeBody tr[data-id]').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
+  document.querySelectorAll('#homeBody .fav-star').forEach(s => s.onclick = (e) => { e.stopPropagation(); toggleFavorite(s.dataset.id); });
   document.querySelectorAll('#homeTable th[data-sort]').forEach(th => {
     const base = th.dataset.label || th.textContent.replace(/[▲▼]/g, '').trim();
     th.dataset.label = base;
@@ -183,9 +186,10 @@ function renderHome() {
     const yc = (yr) => list.filter(p => p.year === yr).length;
     const pct = total ? Math.round(done / total * 100) : 0;
     $('#kpiTotal').textContent = total;
-    $('#kpiSub').textContent = '篇论文 ' + (yearFilter === 'all' ? '· 全部' : '· ' + yearFilter);
+    $('#kpiSub').textContent = '篇论文 ' + (favOnly ? '· ★收藏' : (yearFilter === 'all' ? '· 全部' : '· ' + yearFilter));
     $('#kpiPub').textContent = pub;
     $('#kpiArxiv').textContent = total - pub;
+    $('#kpiFav').textContent = list.filter(p => p.favorite).length;
     $('#kpiYears').textContent = `${yc('2024')} / ${yc('2025')} / ${yc('2026')}`;
 
     const dirOrder = [['检测', '#bd5b3a'], ['缓解', '#3f7d5b'], ['机制', '#5b7387'], ['评测', '#b07a2e'], ['定义/其他', '#9a8b72']];
@@ -253,7 +257,7 @@ function rowHTML(p) {
   const order = p.order ? `<span class="ht-order">${p.order}</span>` : `<span class="ht-order none">·</span>`;
   return `<tr data-id="${p.id}">
     <td>${order}</td>
-    <td class="ht-title">${p.title}</td>
+    <td class="ht-title"><span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${p.title}</td>
     <td><span class="venue v-${p.venue}">${p.venue}</span></td>
     <td>${p.year}</td>
     <td>${p.type}</td>
@@ -267,7 +271,7 @@ function rowHTML(p) {
 // ====== 阅读视图：左侧列表 ======
 function renderSidebar() {
   const side = $('#sidebar'); side.innerHTML = '';
-  let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter));
+  let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter) && (!favOnly || p.favorite));
   if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + (p.topic || '') + ' ' + (p.type || '')).toLowerCase().includes(k)); }
   const years = [...new Set(list.map(p => p.year))].sort();
   years.forEach(y => {
@@ -288,8 +292,9 @@ function paperItem(p) {
   d.onclick = () => openPaper(p);
   const order = p.order ? `<span class="order-badge">${p.order}</span>` : '';
   d.innerHTML =
-    `<div class="pi-top">${order}<div class="pi-title">${p.title}</div><span class="status-dot ${p.status}" title="${p.status}"></span></div>
+    `<div class="pi-top">${order}<div class="pi-title">${p.title}</div><span class="fav-star ${p.favorite ? 'on' : ''}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span><span class="status-dot ${p.status}" title="${p.status}"></span></div>
      <div class="pi-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span><span class="dir">${p.type}${p.topic ? ' · ' + p.topic : ''}</span></div>`;
+  d.querySelector('.fav-star').onclick = (e) => { e.stopPropagation(); toggleFavorite(p.id); };
   return d;
 }
 
@@ -303,6 +308,7 @@ async function openPaper(p) {
   $('#pdfDocTitle').textContent = `${p.title} · ${p.venue} ${p.year}`;
   $('#pdfOpen').href = p.pdf_url || ('/papers/' + encodeURIComponent(p.file));
   setStatusUI(p.status || '未开始');
+  setFavoriteUI(p);
   // 讲解
   const ex = await (await fetch('/api/explainer?id=' + encodeURIComponent(p.id))).text();
   setExplainer(ex);
@@ -431,6 +437,8 @@ function bindUI() {
   $('#btnSave').onclick = saveNote;
   $('#noteEdit').onblur = () => { if ($('#noteEdit').value !== curNoteText) saveNote(); };
   document.querySelectorAll('#statusSeg button').forEach(b => b.onclick = () => saveStatus(b.dataset.st));
+  $('#favBtn').onclick = () => { if (current) toggleFavorite(current.id); };
+  $('#favFilter').onclick = toggleFavFilter;
   $('#zoomIn').onclick = () => setZoom(zoomFactor + 0.15);
   $('#zoomOut').onclick = () => setZoom(zoomFactor - 0.15);
   $('#ingSearchBtn').onclick = () => runSearch(null);
@@ -525,11 +533,13 @@ function renderManage() {
         <div class="m-item-title">${p.title}</div>
         <div class="m-item-meta">${meta.join(' · ')}${p.source === 'manual' ? ' <span class="m-tag manual">手动</span>' : (p.source !== 'seed' ? ' <span class="m-tag">采集</span>' : '')}</div>
       </div>
+      <button class="m-fav ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</button>
       <button class="m-edit" data-id="${p.id}" title="编辑">✎</button>
       <button class="m-del" data-id="${p.id}" title="删除">🗑</button>
     </div>`;
   }).join('') || '<div class="placeholder">没有匹配的论文。</div>';
   document.querySelectorAll('#mList .m-item-main').forEach(el => el.onclick = () => openPaper(PAPERS.find(x => x.id === el.dataset.id)));
+  document.querySelectorAll('#mList .m-fav').forEach(b => b.onclick = () => toggleFavorite(b.dataset.id));
   document.querySelectorAll('#mList .m-edit').forEach(b => b.onclick = () => openPaperModal(b.dataset.id));
   document.querySelectorAll('#mList .m-del').forEach(b => b.onclick = () => deletePaper(b.dataset.id));
   document.querySelectorAll('#mList .mi-status').forEach(s => s.onclick = () => cyclePaperStatus(s.dataset.id));
@@ -542,6 +552,29 @@ async function cyclePaperStatus(id) {
   p.status = next;
   if (current && current.id === id) setStatusUI(next);
   renderManage(); renderSidebar(); updateSummary();
+}
+
+// ====== 收藏 ======
+function setFavoriteUI(p) {
+  const btn = $('#favBtn'); if (!btn) return;
+  const on = !!(p && p.favorite);
+  btn.classList.toggle('on', on);
+  btn.textContent = on ? '★ 已收藏' : '☆ 收藏';
+}
+async function toggleFavorite(id) {
+  const p = PAPERS.find(x => x.id === id); if (!p) return;
+  const next = p.favorite ? 0 : 1;
+  p.favorite = next;                                   // 乐观更新，先动 UI
+  if (current && current.id === id) setFavoriteUI(p);
+  renderSidebar(); if (currentView === 'home') renderHome(); if (currentView === 'manage') renderManage();
+  try {
+    await fetch('/api/favorite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, favorite: !!next }) });
+  } catch (e) { p.favorite = next ? 0 : 1; if (current && current.id === id) setFavoriteUI(p); renderSidebar(); }
+}
+function toggleFavFilter() {
+  favOnly = !favOnly;
+  const b = $('#favFilter'); b.classList.toggle('on', favOnly); b.textContent = favOnly ? '★ 收藏' : '☆ 收藏';
+  refresh();
 }
 
 // ====== 手动添加 / 编辑论文 ======

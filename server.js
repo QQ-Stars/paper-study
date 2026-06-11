@@ -76,6 +76,11 @@ const server = http.createServer(async (req, res) => {
       dbapi.setStatus(safeBase(b.id), b.status);
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
+    if (p === '/api/favorite' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      dbapi.setFavorite(safeBase(b.id), !!b.favorite);
+      return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
+    }
     if (p === '/api/delete' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
       const id = safeBase(b.id);

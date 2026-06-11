@@ -22,10 +22,12 @@ const listPapers = () => db.prepare(`
          p.pdf_url, p.url, p.tldr, p.contribution, p.citations, p.created_at, p.source,
          p.order_no                  AS "order",
          COALESCE(g.status,'未开始') AS status,
-         CASE WHEN n.content IS NOT NULL AND length(n.content) > 0 THEN 1 ELSE 0 END AS hasNote
+         CASE WHEN n.content IS NOT NULL AND length(n.content) > 0 THEN 1 ELSE 0 END AS hasNote,
+         CASE WHEN f.paper_id IS NOT NULL THEN 1 ELSE 0 END AS favorite
   FROM papers p
-  LEFT JOIN progress g ON g.paper_id = p.id
-  LEFT JOIN notes    n ON n.paper_id = p.id
+  LEFT JOIN progress  g ON g.paper_id = p.id
+  LEFT JOIN notes     n ON n.paper_id = p.id
+  LEFT JOIN favorites f ON f.paper_id = p.id
   ORDER BY p.year, COALESCE(p.order_no, 999), p.venue
 `).all();
 
@@ -45,6 +47,10 @@ const setStatus = (id, status) => db.prepare(`
   INSERT INTO progress(paper_id, status, updated_at) VALUES(?, ?, datetime('now'))
   ON CONFLICT(paper_id) DO UPDATE SET status = excluded.status, updated_at = datetime('now')
 `).run(id, status);
+
+const setFavorite = (id, fav) => fav
+  ? db.prepare(`INSERT INTO favorites(paper_id, created_at) VALUES(?, datetime('now')) ON CONFLICT(paper_id) DO NOTHING`).run(id)
+  : db.prepare('DELETE FROM favorites WHERE paper_id = ?').run(id);
 
 const deletePaper = (id) => db.prepare('DELETE FROM papers WHERE id = ?').run(id);
 const getPdfPath = (id) => { const r = db.prepare('SELECT pdf_path FROM papers WHERE id = ?').get(id); return r ? r.pdf_path : null; };
@@ -92,4 +98,4 @@ const updatePaper = (id, f) => {
   return db.prepare(`UPDATE papers SET ${cols.join(', ')}, updated_at = datetime('now') WHERE id = @id`).run(vals).changes;
 };
 
-module.exports = { db, listPapers, getExplainer, getNote, setNote, setStatus, deletePaper, getPdfPath, getPaper, addPaper, updatePaper };
+module.exports = { db, listPapers, getExplainer, getNote, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper };

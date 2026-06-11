@@ -18,6 +18,7 @@
   --ink:#211e18; --ink-2:#6e675a; --ink-3:#a49d8e;
   --accent:#b65331; --accent-ink:#9d4324; --accent-soft:#f3e6dc;
   --ok:#3f7d5b; --ok-soft:#e7f1ea; --warn:#b07a2e; --warn-soft:#f6ecdb; --idle:#c6c0b4; --idle-soft:#efece6;
+  --star:#dca230;
   --font-sans:Schibsted,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
   --font-mono:'Plex Mono',ui-monospace,"PingFang SC",monospace;
   --font-display:Fraunces,Georgia,"Songti SC",serif;
@@ -34,6 +35,7 @@ html[data-theme=dark]{
   --ink:#ece7db; --ink-2:#a39b8a; --ink-3:#6f6857;
   --accent:#d97a52; --accent-ink:#e48a60; --accent-soft:#2e2015;
   --ok:#5bae81; --ok-soft:#1c2a22; --warn:#d2a24e; --warn-soft:#2a2316; --idle:#4a4638; --idle-soft:#23211a;
+  --star:#e8b552;
   --ring:0 0 0 3px var(--accent-soft);
   --shadow-sm:0 1px 2px rgba(0,0,0,.4);
   --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 38px -16px rgba(0,0,0,.7);
@@ -224,11 +226,11 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 #panel{background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;min-width:0;min-height:0}
 #panelHead{padding:18px 20px 14px;border-bottom:1px solid var(--border)}
 .paper-title{font-family:var(--font-display);font-size:18px;font-weight:600;margin-bottom:14px;line-height:1.32;letter-spacing:-.01em}
-.status-row{display:flex;align-items:center;gap:10px;margin-bottom:13px}
+.status-row{display:flex;align-items:center;gap:10px;margin-bottom:13px;flex-wrap:wrap}
 .status-label{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.1em}
 .hidden-sel{display:none}
-.seg{display:inline-flex;background:var(--surface-2);border-radius:9px;padding:3px;gap:2px}
-.seg button{border:0;background:transparent;padding:6px 13px;border-radius:7px;font-size:12.5px;cursor:pointer;color:var(--ink-2);font-weight:500;transition:.15s}
+.seg{display:inline-flex;background:var(--surface-2);border-radius:9px;padding:3px;gap:2px;flex-shrink:0}
+.seg button{border:0;background:transparent;padding:6px 13px;border-radius:7px;font-size:12.5px;cursor:pointer;color:var(--ink-2);font-weight:500;transition:.15s;white-space:nowrap}
 .seg button:hover{color:var(--ink)}
 .seg button.active{background:var(--surface);color:var(--ink);box-shadow:var(--shadow-sm)}
 #statusSeg button.active[data-st=已理解]{color:var(--ok)}
@@ -255,6 +257,25 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .ex-spinner{width:17px;height:17px;border:2.5px solid var(--accent-soft);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex:0 0 auto}
 .ex-log{font-family:var(--font-mono);font-size:12px;color:var(--ink-2)}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* ============ 收藏 ★ ============ */
+.fav-chip{display:inline-flex;align-items:center;gap:4px;font-family:var(--font-sans)!important;flex:0 0 auto}
+.fav-chip.on{background:color-mix(in srgb,var(--star) 18%,transparent);border-color:var(--star);color:var(--star)}
+/* 阅读栏的收藏按钮 */
+.fav-btn{margin-left:auto;padding:6px 13px;border:1px solid var(--border-2);background:transparent;border-radius:999px;font-size:12px;cursor:pointer;color:var(--ink-2);transition:.15s;white-space:nowrap;font-family:var(--font-sans)}
+.fav-btn:hover{border-color:var(--star);color:var(--star)}
+.fav-btn.on{background:color-mix(in srgb,var(--star) 16%,transparent);border-color:transparent;color:var(--star);font-weight:600}
+/* 表格 / 侧栏内联星：未收藏时淡出，悬停行才显形；已收藏常亮金色 */
+.fav-star{cursor:pointer;color:var(--ink-3);font-size:13px;opacity:0;transition:opacity .14s,transform .14s;flex:0 0 auto;user-select:none}
+.ht-title .fav-star{margin-right:7px}
+#homeTable tbody tr:hover .fav-star,.paper-item:hover .fav-star{opacity:.5}
+.fav-star.on{color:var(--star);opacity:1}
+.fav-star:hover{transform:scale(1.25);opacity:1}
+/* 管理列表星按钮 */
+.m-fav{flex:0 0 auto;width:32px;height:32px;border:1px solid var(--border-2);background:transparent;border-radius:9px;cursor:pointer;font-size:14px;color:var(--ink-3);transition:.14s}
+.m-fav:hover{border-color:var(--star);color:var(--star)}
+.m-fav.on{color:var(--star);border-color:transparent;background:color-mix(in srgb,var(--star) 14%,transparent)}
+.empty-row{text-align:center;color:var(--ink-3);padding:34px 18px!important;font-size:13px}
 #noteEdit{width:100%;height:calc(100% - 44px);border:1px solid var(--border-2);border-radius:12px;padding:15px;font-family:var(--font-mono);font-size:12.5px;line-height:1.75;resize:none;outline:none;background:var(--bg);color:var(--ink)}
 #noteEdit:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 
