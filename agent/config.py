@@ -31,6 +31,10 @@ BASE_URL = _S.get("baseUrl") or os.getenv("LLM_BASE_URL") or _base
 MODEL = _S.get("model") or os.getenv("LLM_MODEL") or _model
 S2_API_KEY = _S.get("s2ApiKey") or os.getenv("S2_API_KEY", "")
 
+# 研究主题（宽泛方向）。分类时大模型据此 + 库中已有类别给论文归类；为空则用本次检索词。
+# 让本工具不绑定某一领域：换个主题即可研究任意方向。可在网页 ⚙ 设置里改。
+RESEARCH_THEME = _S.get("researchTheme") or os.getenv("RESEARCH_THEME") or ""
+
 # 生成讲解读 PDF 全文时的安全上限（字符）。默认覆盖绝大多数会议论文(8~20页)全文；
 # 仅为防超长综述撑爆模型上下文而设，可经 settings.json: explainMaxChars 调整。
 EXPLAIN_MAX_CHARS = int(_S.get("explainMaxChars") or os.getenv("EXPLAIN_MAX_CHARS") or 120000)

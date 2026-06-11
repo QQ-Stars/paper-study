@@ -183,6 +183,11 @@
     <div class="modal-card wide">
       <div class="modal-head"><span>⚙ 模型与数据源设置<span id="setSummaryMeta" class="set-meta-inline">—</span></span><button id="setClose" class="modal-x" title="关闭">×</button></div>
       <div class="modal-body">
+        <div class="settings-theme">
+          <div class="settings-sub">研究主题 · 决定采集分类与相关度</div>
+          <input id="setTheme" class="theme-input" placeholder="如：多模态大模型的幻觉检测与缓解" />
+          <div class="set-tip">采集时大模型会优先把论文归入库中<b>已有的研究方向</b>，都不合适才新建——换个主题即可研究任意方向。留空则用每次检索词。</div>
+        </div>
         <div class="settings-cols">
           <div>
             <div class="settings-sub">大模型</div>

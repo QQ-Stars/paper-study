@@ -223,7 +223,8 @@ const server = http.createServer(async (req, res) => {
         model: s.model || e.LLM_MODEL || '',
         apiKeyTail: maskKey(s.apiKey || e.LLM_API_KEY), hasApiKey: !!(s.apiKey || e.LLM_API_KEY),
         s2KeyTail: maskKey(s.s2ApiKey), hasS2Key: !!s.s2ApiKey,
-        pdfDir: s.pdfDir || ''
+        pdfDir: s.pdfDir || '',
+        researchTheme: s.researchTheme || ''
       }), MIME['.json']);
     }
     if (p === '/api/settings' && req.method === 'POST') {
@@ -235,6 +236,7 @@ const server = http.createServer(async (req, res) => {
       if (b.apiKey) s.apiKey = b.apiKey;          // 非空才更新
       if (b.s2ApiKey) s.s2ApiKey = b.s2ApiKey;
       if (b.pdfDir !== undefined) s.pdfDir = b.pdfDir.trim();
+      if (b.researchTheme !== undefined) s.researchTheme = b.researchTheme.trim();
       writeSettings(s);
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }

@@ -25,6 +25,16 @@ def exists(con, arxiv_id=None, title_norm_v=None) -> bool:
     return False
 
 
+def known_categories(con):
+    """库中已有的研究方向(type)与子主题(topic)，按使用频次降序——给大模型当“可复用类别表”。"""
+    def col(name):
+        rows = con.execute(
+            f"SELECT {name} FROM papers WHERE {name} IS NOT NULL AND TRIM({name})!='' "
+            f"GROUP BY {name} ORDER BY COUNT(*) DESC, {name}").fetchall()
+        return [r[0] for r in rows]
+    return col("type"), col("topic")
+
+
 def insert_paper(con, row: dict):
     cols = ",".join(row.keys())
     ph = ",".join(["?"] * len(row))
