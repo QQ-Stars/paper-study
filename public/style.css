@@ -300,6 +300,10 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .markdown ul,.markdown ol{padding-left:22px}.markdown li{margin:.25em 0}
 .markdown hr{border:0;border-top:1px solid var(--border);margin:1.4em 0}
 .markdown strong{color:var(--ink);font-weight:600}
+/* KaTeX 公式：行间公式可横向滚动，不撑破栏宽 */
+.markdown .katex{font-size:1.03em}
+.markdown .katex-display{overflow-x:auto;overflow-y:hidden;padding:6px 2px;margin:.7em 0}
+.markdown .katex-display>.katex{white-space:nowrap}
 
 /* ============ 管理页 ============ */
 #manage{flex:1;min-height:0;overflow-y:auto;padding:26px 34px 48px;animation:fade .4s ease}
