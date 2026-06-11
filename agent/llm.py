@@ -122,6 +122,37 @@ def generate_explainer(paper: dict, fulltext: str = None) -> str:
     return (resp.choices[0].message.content or "").strip()
 
 
+TRANSLATE_SYSTEM = (
+    "你是专业的学术论文翻译，把用户给的英文论文片段（Markdown 格式）翻译成**简体中文**。\n"
+    "- 完整、忠实、准确地翻译所有正文文字，术语专业地道、符合中文论文表达；"
+    "**不要漏译、不要概括删减、不要加译者注或额外说明**。\n"
+    "- **保留原 Markdown 结构**：标题层级(#)、列表、表格、加粗/斜体、代码块、引用块原样保留，只翻译其中的自然语言文字。\n"
+    "- 专有名词、模型/数据集/方法名、缩写(如 LLaVA、POPE、Transformer、CVPR)保留英文；"
+    "行内变量、数学符号、公式（如 `$\\alpha$`、logits）保持原样不译。\n"
+    "- 图表标题(如 Figure 3 / Table 2)：保留编号，翻译其说明文字。\n"
+    "- 只输出译文本身，不要任何前后缀说明，不要用 ``` 把整体包起来。"
+)
+
+
+def translate_md(chunk: str) -> str:
+    """把一段英文论文 Markdown 译成中文（保留结构）。失败重试一次。"""
+    last = None
+    for _ in range(2):
+        try:
+            resp = client().chat.completions.create(
+                model=config.MODEL,
+                messages=[{"role": "system", "content": TRANSLATE_SYSTEM},
+                          {"role": "user", "content": chunk}],
+                temperature=0.2,
+            )
+            out = (resp.choices[0].message.content or "").strip()
+            if out:
+                return out
+        except Exception as e:
+            last = e
+    raise RuntimeError(f"翻译失败: {last or '空响应'}")
+
+
 def ping() -> str:
     """连通性自检：返回模型回复的一小段文本。"""
     resp = client().chat.completions.create(

@@ -35,6 +35,10 @@ const getExplainer = (id) => {
   const r = db.prepare('SELECT explainer FROM papers WHERE id = ?').get(id);
   return r && r.explainer ? r.explainer : null;
 };
+const getTranslation = (id) => {
+  const r = db.prepare('SELECT content FROM translations WHERE paper_id = ?').get(id);
+  return r && r.content ? r.content : null;
+};
 const getNote = (id) => {
   const r = db.prepare('SELECT content FROM notes WHERE paper_id = ?').get(id);
   return r ? r.content : '';
@@ -98,4 +102,4 @@ const updatePaper = (id, f) => {
   return db.prepare(`UPDATE papers SET ${cols.join(', ')}, updated_at = datetime('now') WHERE id = @id`).run(vals).changes;
 };
 
-module.exports = { db, listPapers, getExplainer, getNote, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper };
+module.exports = { db, listPapers, getExplainer, getTranslation, getNote, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper };

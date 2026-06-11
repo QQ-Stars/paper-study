@@ -64,6 +64,13 @@ CREATE TABLE IF NOT EXISTS favorites (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- ========== 全文翻译（中文 markdown，LLM 生成，跳过参考文献） ==========
+CREATE TABLE IF NOT EXISTS translations (
+  paper_id   TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+  content    TEXT NOT NULL DEFAULT '',
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- ========== 论文向量(可选, 语义检索) ==========
 CREATE TABLE IF NOT EXISTS paper_vectors (
   paper_id  TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,

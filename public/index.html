@@ -261,6 +261,7 @@
         <select id="statusSel" class="hidden-sel"><option>未开始</option><option>学习中</option><option>已理解</option></select>
         <div class="tabs seg seg-tabs">
           <button class="tab active" data-tab="explainer">论文讲解</button>
+          <button class="tab" data-tab="trans">译文</button>
           <button class="tab" data-tab="note">我的笔记</button>
         </div>
       </div>
@@ -273,6 +274,16 @@
         </div>
         <div id="explainerView" class="markdown">
           <div class="placeholder">选择论文后，这里显示详细讲解。</div>
+        </div>
+      </div>
+
+      <div id="tab-trans" class="tabpane">
+        <div class="ex-toolbar">
+          <button id="genTransBtn" class="mini primary" disabled>🌐 翻译全文</button>
+          <span id="transHint" class="hint"></span>
+        </div>
+        <div id="transView" class="markdown">
+          <div class="placeholder">选择论文后，点「🌐 翻译全文」生成中文翻译——读取 PDF 全文、自动跳过参考文献，分段翻译（较慢，约 1~3 分钟）。</div>
         </div>
       </div>
 
