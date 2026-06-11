@@ -39,6 +39,13 @@ RESEARCH_THEME = _S.get("researchTheme") or os.getenv("RESEARCH_THEME") or ""
 # 仅为防超长综述撑爆模型上下文而设，可经 settings.json: explainMaxChars 调整。
 EXPLAIN_MAX_CHARS = int(_S.get("explainMaxChars") or os.getenv("EXPLAIN_MAX_CHARS") or 120000)
 
+# 语义检索的嵌入模型（本地 model2vec 静态嵌入，纯 numpy，无需 GPU/torch/onnx）。
+# 默认多语种 → 中文 query 可直接匹配英文论文。可在 settings.json: embedModel 换。
+EMBED_MODEL = _S.get("embedModel") or os.getenv("EMBED_MODEL") or "minishlab/potion-multilingual-128M"
+# 模型下载缓存目录（留在项目内，符合“只装项目内”）。
+MODEL_DIR = ROOT / ".models"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
 DB_PATH = os.getenv("DB_PATH") or str(ROOT / "data" / "app.db")
 # PDF 下载目录：默认 data/pdfs；网页设置可自定义（相对路径相对项目根）
 _pd = _S.get("pdfDir")

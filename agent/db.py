@@ -35,6 +35,14 @@ def known_categories(con):
     return col("type"), col("topic")
 
 
+def ensure_vectors_table(con):
+    # 自带建表，避免 agent 先于 node 应用新 schema 时找不到表
+    con.execute("""CREATE TABLE IF NOT EXISTS paper_vectors (
+        paper_id TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+        dim      INTEGER,
+        vector   BLOB)""")
+
+
 def insert_paper(con, row: dict):
     cols = ",".join(row.keys())
     ph = ",".join(["?"] * len(row))

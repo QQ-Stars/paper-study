@@ -167,8 +167,12 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
 
 
 def ingest_candidates(cands, deep=False):
-    """第二阶段：对用户勾选的候选下载PDF+入库（属性已在第一阶段算好）。"""
+    """第二阶段：对用户勾选的候选下载PDF+入库（属性多在第一阶段算好）。
+    若候选未带分类（如「相似论文」推荐来的），入库时现场补一次 LLM 分类，保持库内类别一致。"""
     con = db.connect()
+    kt, kp = db.known_categories(con)           # 已有研究方向/主题，供大模型复用
+    kt, kp = list(kt), list(kp)
+    theme = config.RESEARCH_THEME or ""
     added = 0
     for c in cands:
         tn = db.title_norm(c.get("title", ""))
@@ -177,6 +181,24 @@ def ingest_candidates(cands, deep=False):
             continue
         try:
             stub = PaperStub(**{k: c.get(k) for k in PaperStub.model_fields if k in c})
+            ctype, ctopic, ctask = c.get("type"), c.get("topic"), c.get("task")
+            cmodels, cdatasets = c.get("models") or [], c.get("datasets") or []
+            ccontrib, ctldr, ctags = c.get("contribution"), c.get("llm_tldr"), c.get("tags") or []
+            crel = c.get("relevance")
+            if not (ctype and str(ctype).strip()):       # 推荐/外部候选缺分类 → 现做
+                try:
+                    a = llm.classify(stub, theme, known_types=kt, known_topics=kp, theme=theme)
+                    ctype, ctopic, ctask = a.type, a.topic, a.task
+                    cmodels, cdatasets = a.models, a.datasets
+                    ccontrib, ctldr, ctags = a.contribution, a.tldr, a.tags
+                    crel = a.relevance
+                    if a.type and a.type not in kt:
+                        kt.append(a.type)
+                    if a.topic and a.topic not in kp:
+                        kp.append(a.topic)
+                    _p(f"CLASSIFIED::{stub.title[:46]}")
+                except Exception as e:
+                    _p(f"CLSERR::{e}")
             slug = util.make_slug(stub)
             pdf_path = None
             if stub.pdf_url:
@@ -192,15 +214,15 @@ def ingest_candidates(cands, deep=False):
                 "title": stub.title, "title_norm": tn,
                 "authors": json.dumps(stub.authors, ensure_ascii=False),
                 "venue": stub.venue, "year": stub.year, "abstract": stub.abstract,
-                "tldr": stub.tldr or c.get("llm_tldr"), "citations": stub.citations,
+                "tldr": stub.tldr or ctldr, "citations": stub.citations,
                 "s2_fields": json.dumps(stub.fields, ensure_ascii=False),
                 "url": stub.url, "pdf_url": stub.pdf_url, "pdf_path": pdf_path,
-                "type": c.get("type"), "topic": c.get("topic"), "task": c.get("task"),
-                "models": json.dumps(c.get("models") or [], ensure_ascii=False),
-                "datasets": json.dumps(c.get("datasets") or [], ensure_ascii=False),
-                "contribution": c.get("contribution"),
-                "tags": json.dumps(c.get("tags") or [], ensure_ascii=False),
-                "relevance": c.get("relevance"), "extracted_by": config.MODEL,
+                "type": ctype, "topic": ctopic, "task": ctask,
+                "models": json.dumps(cmodels, ensure_ascii=False),
+                "datasets": json.dumps(cdatasets, ensure_ascii=False),
+                "contribution": ccontrib,
+                "tags": json.dumps(ctags, ensure_ascii=False),
+                "relevance": crel, "extracted_by": config.MODEL,
             }
             db.insert_paper(con, row)
             added += 1

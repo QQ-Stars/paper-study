@@ -4,6 +4,11 @@ let current = null;
 let curNoteText = '';
 let curHasExplainer = false;
 let curHasTranslation = false;
+let simCands = [];           // 当前论文的「相似论文」候选
+let simSeedId = null;        // 这批相似论文对应的种子论文 id
+let semActive = false;       // 语义检索开关
+let semRank = null;          // Map(paper_id → 相似度分)，null=未检索
+let semBusy = false;
 let yearFilter = 'all';
 let favOnly = false;
 let q = '';
@@ -15,6 +20,8 @@ let chProgress = null, chDir = null, chVenue = null;
 const $ = (s) => document.querySelector(s);
 const md = (t) => (window.marked ? window.marked.parse(t || '') :
   '<pre>' + (t || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) + '</pre>');
+const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const normTitle = (s) => (s || '').toLowerCase().replace(/[^a-z0-9一-龥]+/g, '');  // 同 db.title_norm
 // 渲染 markdown 到元素，并用 KaTeX 把 $...$ / $$...$$ 公式排版出来（讲解/译文/笔记共用）
 function renderMd(el, text) {
   el.innerHTML = md(text);
@@ -181,11 +188,15 @@ const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValu
 
 function renderHome() {
   let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter) && (!favOnly || p.favorite));
-  if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(k)); }
+  const sem = semActive && semRank;
+  if (sem) list = list.filter(p => semRank.has(p.id));
+  else if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(k)); }
 
-  // 表格
-  list.sort(cmpHome);
-  $('#homeBody').innerHTML = list.map(rowHTML).join('') || `<tr><td colspan="9" class="empty-row">${favOnly ? '还没有收藏的论文。在阅读界面点「☆ 收藏」即可。' : '没有匹配的论文。'}</td></tr>`;
+  // 表格（语义检索时按相似度排序，否则按列排序）
+  if (sem) list.sort((a, b) => semRank.get(b.id) - semRank.get(a.id));
+  else list.sort(cmpHome);
+  const emptyMsg = sem ? '语义检索没有命中（试试换种说法）。' : (favOnly ? '还没有收藏的论文。在阅读界面点「☆ 收藏」即可。' : '没有匹配的论文。');
+  $('#homeBody').innerHTML = list.map(rowHTML).join('') || `<tr><td colspan="9" class="empty-row">${emptyMsg}</td></tr>`;
   document.querySelectorAll('#homeBody tr[data-id]').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
   document.querySelectorAll('#homeBody .fav-star').forEach(s => s.onclick = (e) => { e.stopPropagation(); toggleFavorite(s.dataset.id); });
   document.querySelectorAll('#homeTable th[data-sort]').forEach(th => {
@@ -277,11 +288,16 @@ function cmpHome(a, b) {
   if (va < vb) return -d; if (va > vb) return d;
   return (a.year + '').localeCompare(b.year + '') || ((a.order || 99) - (b.order || 99));
 }
+function semScoreBadge(id) {
+  if (!(semActive && semRank && semRank.has(id))) return '';
+  const pct = Math.max(0, Math.min(100, Math.round(semRank.get(id) * 100)));
+  return `<span class="sem-score" title="语义相关度 ${pct}%">${pct}</span>`;
+}
 function rowHTML(p) {
   const order = p.order ? `<span class="ht-order">${p.order}</span>` : `<span class="ht-order none">·</span>`;
   return `<tr data-id="${p.id}">
     <td>${order}</td>
-    <td class="ht-title"><span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${p.title}</td>
+    <td class="ht-title">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${p.title}</td>
     <td><span class="venue v-${p.venue}">${p.venue}</span></td>
     <td>${p.year}</td>
     <td>${p.type}</td>
@@ -296,18 +312,31 @@ function rowHTML(p) {
 function renderSidebar() {
   const side = $('#sidebar'); side.innerHTML = '';
   let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter) && (!favOnly || p.favorite));
-  if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + (p.topic || '') + ' ' + (p.type || '')).toLowerCase().includes(k)); }
-  const years = [...new Set(list.map(p => p.year))].sort();
-  years.forEach(y => {
+  const sem = semActive && semRank;
+  if (sem) list = list.filter(p => semRank.has(p.id));
+  else if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + (p.topic || '') + ' ' + (p.type || '')).toLowerCase().includes(k)); }
+  if (sem) {
+    // 语义检索：扁平单组，按相似度降序
+    list.sort((a, b) => semRank.get(b.id) - semRank.get(a.id));
     const g = document.createElement('div'); g.className = 'year-group';
     const h = document.createElement('div'); h.className = 'year-head';
-    h.textContent = y + ' · ' + list.filter(p => p.year === y).length + ' 篇';
+    h.textContent = '🔮 语义结果 · ' + list.length + ' 篇';
     g.appendChild(h);
-    list.filter(p => p.year === y)
-      .sort((a, b) => (a.order || 99) - (b.order || 99) || (a.venue || '').localeCompare(b.venue || ''))
-      .forEach(p => g.appendChild(paperItem(p)));
+    list.forEach(p => g.appendChild(paperItem(p)));
     side.appendChild(g);
-  });
+  } else {
+    const years = [...new Set(list.map(p => p.year))].sort();
+    years.forEach(y => {
+      const g = document.createElement('div'); g.className = 'year-group';
+      const h = document.createElement('div'); h.className = 'year-head';
+      h.textContent = y + ' · ' + list.filter(p => p.year === y).length + ' 篇';
+      g.appendChild(h);
+      list.filter(p => p.year === y)
+        .sort((a, b) => (a.order || 99) - (b.order || 99) || (a.venue || '').localeCompare(b.venue || ''))
+        .forEach(p => g.appendChild(paperItem(p)));
+      side.appendChild(g);
+    });
+  }
   updateSummary();
 }
 function paperItem(p) {
@@ -317,7 +346,7 @@ function paperItem(p) {
   const order = p.order ? `<span class="order-badge">${p.order}</span>` : '';
   d.innerHTML =
     `<div class="pi-top">${order}<div class="pi-title">${p.title}</div><span class="fav-star ${p.favorite ? 'on' : ''}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span><span class="status-dot ${p.status}" title="${p.status}"></span></div>
-     <div class="pi-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span><span class="dir">${p.type}${p.topic ? ' · ' + p.topic : ''}</span></div>`;
+     <div class="pi-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span><span class="dir">${p.type}${p.topic ? ' · ' + p.topic : ''}</span>${semScoreBadge(p.id)}</div>`;
   d.querySelector('.fav-star').onclick = (e) => { e.stopPropagation(); toggleFavorite(p.id); };
   return d;
 }
@@ -345,6 +374,8 @@ async function openPaper(p) {
   if (curNoteText.trim()) renderMd($('#notePreview'), curNoteText);
   else $('#notePreview').innerHTML = '<div class="placeholder">还没有笔记。点「编辑」开始记，或在对话里让我「记录」。</div>';
   showNoteMode('preview');
+  // 相似论文（按需查找，切论文时清空）
+  resetSimilar();
   // PDF
   renderPdf(p.id);
 }
@@ -431,6 +462,86 @@ async function generateTranslation() {
   } catch (e) { if (current && current.id === pid) fail(String(e)); }
 }
 
+// ====== 相似论文推荐（S2 Recommendations）======
+function resetSimilar() {
+  simCands = []; simSeedId = null;
+  const v = $('#simView'); if (v) v.innerHTML = '<div class="placeholder">点上方「🔗 找相似论文」，按 Semantic Scholar 的内容相似度，找出与这篇最相近的一批论文——可一键收录入库。</div>';
+  const btn = $('#findSimBtn'); if (btn) { btn.disabled = false; btn.textContent = '🔗 找相似论文'; }
+  const h = $('#simHint'); if (h) h.textContent = '';
+}
+async function findSimilar() {
+  if (!current) { alert('请先在左侧选择一篇论文'); return; }
+  const btn = $('#findSimBtn'), view = $('#simView'), hint = $('#simHint'), pid = current.id;
+  btn.disabled = true; btn.textContent = '查找中…'; hint.textContent = '正在向 Semantic Scholar 查询…';
+  view.innerHTML = '<div class="ex-progress"><span class="ex-spinner"></span><span class="ex-log" id="simLog">正在准备…</span></div>';
+  const setLog = (t) => { const el = document.getElementById('simLog'); if (el) el.textContent = t; };
+  try {
+    await streamNDJSON('/api/recommend', { id: pid, limit: 16 }, (ev) => {
+      if (ev.type === 'progress') {
+        const ln = ev.line;
+        if (ln.startsWith('STAGE::resolve')) setLog('定位这篇论文…');
+        else if (ln.startsWith('STAGE::recommend')) setLog('查询相似论文…');
+        else { const f = /^FOUND::(\d+)/.exec(ln); if (f) setLog(`找到 ${f[1]} 篇，整理中…`); }
+      } else if (ev.type === 'result') {
+        if (!current || current.id !== pid) return;          // 用户已切换论文，丢弃
+        hint.textContent = '';
+        if (ev.ok && (ev.candidates || []).length) {
+          simCands = ev.candidates; simSeedId = pid; renderSimList();
+          btn.disabled = false; btn.textContent = '🔗 重新查找';
+        } else {
+          btn.disabled = false; btn.textContent = '🔗 重新查找';
+          const msg = !ev.ok
+            ? (ev.error === 'no_s2_id' ? '这篇在 Semantic Scholar 上没有匹配记录（多为预印本或手动添加）。' : ('查询失败：' + (ev.error || '未知')))
+            : 'Semantic Scholar 暂时没有给出相似论文（可能这篇太新或尚未被收录）。';
+          view.innerHTML = '<div class="placeholder">' + esc(msg) + '</div>';
+        }
+      }
+    });
+  } catch (e) {
+    if (current && current.id === pid) { view.innerHTML = '<div class="placeholder">查询失败：' + esc(String(e)) + '</div>'; btn.disabled = false; btn.textContent = '🔗 找相似论文'; hint.textContent = ''; }
+  }
+}
+function renderSimList() {
+  const view = $('#simView');
+  const fresh = simCands.filter(c => !c.in_library).length;
+  const head = `<div class="sim-head">为本篇找到 <b>${simCands.length}</b> 篇相似论文 · ${fresh} 篇不在库 <span class="sim-src">来源 Semantic Scholar</span></div>`;
+  view.innerHTML = head + simCands.map((c, i) => {
+    const cite = c.citations != null ? `${c.citations} 引` : '';
+    const snip = c.tldr || c.abstract || '';
+    const tl = snip ? `<div class="sim-tldr">${esc(snip)}</div>` : '';
+    const act = c.in_library
+      ? `<button class="sim-btn open" data-i="${i}">在库·打开</button>`
+      : `<button class="sim-btn add" data-i="${i}">+ 收录</button>`;
+    const link = c.url ? `<a class="sim-ext" href="${esc(c.url)}" target="_blank" rel="noopener" title="在 Semantic Scholar 打开">↗</a>` : '';
+    return `<div class="sim-item ${c.in_library ? 'in-lib' : ''}">
+      <div class="sim-main">
+        <div class="sim-title">${esc(c.title)}</div>
+        <div class="sim-meta"><span class="venue v-${esc(c.venue || '')}">${esc(c.venue || '—')} ${esc(c.year || '')}</span>${cite ? ' · ' + cite : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
+        ${tl}
+      </div>
+      <div class="sim-actions">${act}${link}</div>
+    </div>`;
+  }).join('');
+  view.querySelectorAll('.sim-btn.add').forEach(b => b.onclick = () => addSimPaper(+b.dataset.i, b));
+  view.querySelectorAll('.sim-btn.open').forEach(b => b.onclick = () => {
+    const c = simCands[+b.dataset.i];
+    const pp = PAPERS.find(x => (c.arxiv_id && x.arxiv_id === c.arxiv_id) || normTitle(x.title) === normTitle(c.title));
+    if (pp) openPaper(pp); else alert('这篇已在库，但未能定位到列表项，试试刷新。');
+  });
+}
+async function addSimPaper(i, btn) {
+  const c = simCands[i]; if (!c) return;
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '收录中…';
+  try {
+    await streamNDJSON('/api/ingest-selected', { candidates: [c], deep: false }, (ev) => {
+      if (ev.type === 'progress' && /^CLASSIFIED::/.test(ev.line)) btn.textContent = '分类中…';
+    });
+    c.in_library = true;
+    await reloadPapers();
+    if (current && simSeedId === current.id) renderSimList();   // in_library 状态刷新
+  } catch (e) { btn.disabled = false; btn.textContent = old; alert('收录失败: ' + e); }
+}
+
 // ====== PDF.js 渲染（懒加载 + 缩放）======
 async function renderPdf(id) {
   const token = ++renderToken;
@@ -492,7 +603,9 @@ function setZoom(f) { zoomFactor = Math.min(3, Math.max(0.5, f)); if (pdfDoc) la
 
 // ====== 交互绑定 ======
 function bindUI() {
-  $('#search').oninput = (e) => { q = e.target.value.trim(); refresh(); };
+  $('#search').oninput = (e) => { q = e.target.value.trim(); if (semActive) { if (!q) { semRank = null; refresh(); } } else refresh(); };
+  $('#search').onkeydown = (e) => { if (e.key === 'Enter' && semActive) { e.preventDefault(); runSemSearch(q); } };
+  $('#semToggle').onclick = toggleSem;
   document.querySelectorAll('.viewnav button').forEach(b => b.onclick = () => showView(b.dataset.view));
   document.querySelectorAll('#homeTable th[data-sort]').forEach(th => th.onclick = () => {
     const k = th.dataset.sort; if (homeSort.key === k) homeSort.dir *= -1; else homeSort = { key: k, dir: 1 }; renderHome();
@@ -500,6 +613,7 @@ function bindUI() {
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dataset.tab));
   $('#genExplainerBtn').onclick = generateExplainer;
   $('#genTransBtn').onclick = generateTranslation;
+  $('#findSimBtn').onclick = findSimilar;
   $('#btnEdit').onclick = () => { setSegActive('#tab-note .seg-sm', $('#btnEdit')); showNoteMode('edit'); $('#noteEdit').focus(); };
   $('#btnPreview').onclick = () => { renderMd($('#notePreview'), $('#noteEdit').value); setSegActive('#tab-note .seg-sm', $('#btnPreview')); showNoteMode('preview'); };
   $('#btnSave').onclick = saveNote;
@@ -525,6 +639,7 @@ function bindUI() {
   $('#paperModal').onclick = (e) => { if (e.target.id === 'paperModal') closePaperModal(); };
   $('#setSaveBtn').onclick = saveSettings;
   $('#setTestBtn').onclick = testLLM;
+  $('#reindexBtn').onclick = reindexAll;
   $('#settingsBtn').onclick = openSettingsModal;
   $('#setClose').onclick = closeSettingsModal;
   $('#settingsModal').onclick = (e) => { if (e.target.id === 'settingsModal') closeSettingsModal(); };
@@ -643,6 +758,55 @@ function toggleFavFilter() {
   favOnly = !favOnly;
   const b = $('#favFilter'); b.classList.toggle('on', favOnly); b.textContent = favOnly ? '★ 收藏' : '☆ 收藏';
   refresh();
+}
+
+// ====== 语义检索（本地嵌入 + 余弦排序）======
+function toggleSem() {
+  semActive = !semActive;
+  const b = $('#semToggle'); b.classList.toggle('on', semActive); b.textContent = semActive ? '🔮 语义 ✓' : '🔮 语义';
+  const s = $('#search'); s.placeholder = semActive ? '语义检索：一句话/中文描述，回车…' : '搜索…';
+  semRank = null;
+  if (semActive) { s.focus(); if (q) runSemSearch(q); else refresh(); }
+  else refresh();
+}
+async function runSemSearch(query) {
+  query = (query || '').trim();
+  if (!query) { semRank = null; refresh(); return; }
+  if (semBusy) return;
+  semBusy = true;
+  const sum = $('#progressSummary');
+  const tick = (t) => { if (sum) sum.textContent = t; };
+  tick('🔮 语义检索中…');
+  try {
+    await streamNDJSON('/api/semsearch', { query, k: 60 }, (ev) => {
+      if (ev.type === 'progress') {
+        if (ev.line.startsWith('STAGE::model')) tick('🔮 载入模型（首次需下载，请稍候）…');
+        else if (ev.line.startsWith('STAGE::index')) tick('🔮 首次建立语义索引…');
+        else if (ev.line.startsWith('STAGE::query')) tick('🔮 匹配中…');
+      } else if (ev.type === 'result') {
+        if (ev.ok) { semRank = new Map((ev.results || []).map(r => [r.id, r.score])); refresh(); }
+        else { updateSummary(); alert('语义检索失败：' + (ev.error || '未知') + '\n（首次使用需联网下载嵌入模型；可在 ⚙ 重建语义索引重试）'); }
+      }
+    });
+  } catch (e) { updateSummary(); alert('语义检索失败：' + e); }
+  finally { semBusy = false; }
+}
+async function reindexAll() {
+  const btn = $('#reindexBtn'), hint = $('#reindexHint');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '重建中…';
+  hint.textContent = '首次会下载嵌入模型，请稍候…';
+  try {
+    await streamNDJSON('/api/embed', { scope: 'all' }, (ev) => {
+      if (ev.type === 'progress') {
+        if (ev.line.startsWith('STAGE::model')) hint.textContent = '载入模型（首次需下载）…';
+        else { const m = /^PROG::(\d+)::(\d+)/.exec(ev.line); if (m) hint.textContent = `向量化 ${m[1]} / ${m[2]}…`; }
+      } else if (ev.type === 'result') {
+        if (ev.ok) { hint.textContent = `✅ 已索引 ${ev.indexed} 篇`; semRank = null; }
+        else hint.textContent = '失败：' + (ev.error || '未知');
+      }
+    });
+  } catch (e) { hint.textContent = '失败：' + e; }
+  finally { btn.disabled = false; btn.textContent = old; }
 }
 
 // ====== 手动添加 / 编辑论文 ======
