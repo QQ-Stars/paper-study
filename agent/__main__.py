@@ -55,6 +55,17 @@ def main():
     tr = sub.add_parser("translate", help="全文翻译(LLM)：PDF→去参考文献→分块译中文，写入 translations，md→stdout")
     tr.add_argument("--id", required=True, help="论文 id (slug)")
 
+    rc = sub.add_parser("recommend", help="相似论文推荐(S2 Recommendations)：据库内一篇 → 候选JSON→stdout")
+    rc.add_argument("--id", required=True, help="作为种子的库内论文 id")
+    rc.add_argument("--limit", type=int, default=14)
+
+    em = sub.add_parser("embed", help="建立/更新论文向量索引(本地嵌入)")
+    em.add_argument("--scope", choices=["all", "missing"], default="missing")
+
+    ss = sub.add_parser("semsearch", help="语义检索：--query 任意中/英自然语言 → 排序结果JSON→stdout")
+    ss.add_argument("--query", required=True)
+    ss.add_argument("--k", type=int, default=30)
+
     sub.add_parser("ping", help="测试大模型连通性")
     sub.add_parser("purge", help="删除采集来的论文（保留 seed 种子 38 篇）")
 
@@ -105,6 +116,15 @@ def main():
     elif args.cmd == "translate":
         from . import translate
         translate.translate_paper(args.id)
+    elif args.cmd == "recommend":
+        from . import recommend
+        recommend.recommend_paper(args.id, args.limit)
+    elif args.cmd == "embed":
+        from . import embed
+        embed.reindex(args.scope)
+    elif args.cmd == "semsearch":
+        from . import embed
+        embed.semsearch(args.query, args.k)
 
 
 if __name__ == "__main__":

@@ -46,10 +46,10 @@
 > 顶会覆盖已由 S2/arXiv 解决；本阶段做"补全"与"更聪明的找"。
 
 - ☑ `sources/openalex.py` + `sources/dblp.py`：多源检索 + 跨源去重（arxiv_id/标题归一）
-- ☐ **语义检索**：`agent/embed.py` 论文向量（SPECTER2/自算）+ 近邻检索（faiss/sqlite-vss）
-- ☐ 相似论文推荐（Semantic Scholar Recommendations API）
+- ☑ **语义检索** `agent/embed.py`：本地 **model2vec** 静态嵌入（纯 numpy/tokenizers，无 torch/onnx，多语种→中文 query 直接匹配英文论文）→ 向量存 `paper_vectors` → 余弦暴力排序。顶栏「🔮 语义」开关，结果带相关度徽标；新论文检索时自动补索引，⚙ 可全量重建
+- ☑ **相似论文推荐** `agent/recommend.py`：S2 Recommendations API（`forpaper/{ARXIV|DOI|paperId}`，`from=all-cs`）→ 阅读页「相似论文」tab 一键找相近论文，标注是否在库，可直接收录（收录时现做分类，保持库内类别一致）
 - ☐ 本地 PDF 批量导入（扫描文件夹 → 抽取 → 分类 → 入库）
-- **交付**：一个方向一网打尽，且能"按语义找相似/相关论文"。
+- **交付**：✅ 能"按语义找相似/相关论文"——阅读时顺藤摸瓜，检索时按大意/中文找。剩本地 PDF 批量导入。
 
 ## P5 · 后台任务 + 定时 + 网页触发  ☐
 - ☐ `ingest_jobs` 表 + Python worker（轮询执行）
@@ -73,5 +73,5 @@
 ---
 
 ## 当前焦点
-P1–P3.5 均已交付（数据库、采集 Agent、多源、讲解、翻译、会议核实、收藏、UI 重设计）。
-**下一步**：P4 语义检索 / 相似论文推荐 · 本地 PDF 批量导入。
+P1–P3.5 全交付；P4 已完成**语义检索（本地嵌入）**与**相似论文推荐（S2）**。
+**下一步**：P4 最后一项 **本地 PDF 批量导入**（扫描文件夹→抽取→分类→入库），随后进入 P5 后台任务。

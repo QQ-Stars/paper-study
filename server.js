@@ -215,6 +215,48 @@ const server = http.createServer(async (req, res) => {
       ch.on('close', code => { emit({ type: 'result', ok: code === 0 && !!out.trim(), markdown: out, error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '翻译失败') }); res.end(); });
       return;
     }
+    // 相似论文推荐（S2 Recommendations）：NDJSON 流，progress… + 最终 result.candidates
+    if (p === '/api/recommend' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const id = safeBase(b.id);
+      if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }), MIME['.json']);
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const limit = String(Math.min(parseInt(b.limit) || 14, 40));
+      let out = ''; const ch = spawnAgent(['recommend', '--id', id, '--limit', limit]);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e), candidates: [] }); res.end(); });
+      ch.on('close', code => { let r = {}; try { r = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0 && r.ok !== false, candidates: r.candidates || [], error: r.error || '' }); res.end(); });
+      return;
+    }
+    // 语义索引：建立/更新论文向量（NDJSON 流，progress… + 最终 result）
+    if (p === '/api/embed' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const scope = b.scope === 'all' ? 'all' : 'missing';
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      let out = ''; const ch = spawnAgent(['embed', '--scope', scope]);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e) }); res.end(); });
+      ch.on('close', code => { let r = {}; try { r = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0 && r.ok !== false, indexed: r.indexed || 0, total: r.total || 0, error: r.error || '' }); res.end(); });
+      return;
+    }
+    // 语义检索（NDJSON：首次可能先下载模型+建索引，故走流式给进度）
+    if (p === '/api/semsearch' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const query = String(b.query || '').slice(0, 500);
+      if (!query.trim()) return send(res, 400, JSON.stringify({ ok: false, error: '缺少查询' }), MIME['.json']);
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      let out = ''; const ch = spawnAgent(['semsearch', '--query', query, '--k', String(Math.min(parseInt(b.k) || 60, 200))]);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e), results: [] }); res.end(); });
+      ch.on('close', code => { let r = {}; try { r = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0 && r.ok !== false, results: r.results || [], error: r.error || '' }); res.end(); });
+      return;
+    }
     if (p === '/api/settings' && req.method === 'GET') {
       const s = readSettings(), e = readEnv();
       return send(res, 200, JSON.stringify({

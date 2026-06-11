@@ -1,6 +1,8 @@
 # 依赖（装在项目内）
 node_modules/
 .venv/
+# 本地嵌入模型缓存（model2vec/HF，体积大，一次性下载）
+.models/
 
 # Python 缓存
 __pycache__/

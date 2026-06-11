@@ -32,6 +32,7 @@
         <input id="search" type="text" placeholder="搜索…" />
       </div>
       <div id="yearFilters" class="chips"></div>
+      <button id="semToggle" class="chip-btn sem-chip" title="语义检索：用大意或中文描述找论文（本地嵌入，跨语言）">🔮 语义</button>
       <button id="favFilter" class="chip-btn fav-chip" title="只看收藏">☆ 收藏</button>
     </div>
     <div class="progress-wrap">
@@ -220,6 +221,12 @@
             <div class="m-field"><label>PDF 下载目录（留空＝默认 data/pdfs）</label>
               <input id="setPdfDir" placeholder="如 D:\\papers，留空用默认" /></div>
             <div class="set-tip">本地查找顺序：默认 data/pdfs → 自定义目录 → 种子目录</div>
+            <div class="settings-sub" style="margin-top:20px">语义检索 🔮</div>
+            <div class="set-actions">
+              <button id="reindexBtn" class="mini">重建语义索引</button>
+              <span id="reindexHint" class="hint"></span>
+            </div>
+            <div class="set-tip">用本地嵌入模型把全库论文向量化，即可在顶栏「🔮 语义」用大意/中文描述检索（跨语言）。新采集的论文检索时会自动补索引；换嵌入模型后可在此全量重建。</div>
           </div>
         </div>
       </div>
@@ -271,6 +278,7 @@
           <button class="tab active" data-tab="explainer">论文讲解</button>
           <button class="tab" data-tab="trans">译文</button>
           <button class="tab" data-tab="note">我的笔记</button>
+          <button class="tab" data-tab="similar">相似论文</button>
         </div>
       </div>
 
@@ -306,6 +314,16 @@
         </div>
         <textarea id="noteEdit" placeholder="在这里记笔记（支持 Markdown）。也可以在对话里对我说「记录」。" style="display:none"></textarea>
         <div id="notePreview" class="markdown"></div>
+      </div>
+
+      <div id="tab-similar" class="tabpane">
+        <div class="ex-toolbar">
+          <button id="findSimBtn" class="mini primary" disabled>🔗 找相似论文</button>
+          <span id="simHint" class="hint"></span>
+        </div>
+        <div id="simView">
+          <div class="placeholder">点上方「🔗 找相似论文」，按 Semantic Scholar 的内容相似度，找出与这篇最相近的一批论文——可一键收录入库。</div>
+        </div>
       </div>
     </section>
     <div class="gutter gutter-left" data-side="left" title="拖动调整列表宽度"></div>
