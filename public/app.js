@@ -138,7 +138,7 @@ function fmtTime(s) {
 // ====== 总览 Dashboard ======
 function buildDashShell() {
   $('#dash').innerHTML = `
-    <div class="chart-card">
+    <div class="chart-card kpi">
       <div class="chart-title">概况</div>
       <div class="kpi-big" id="kpiTotal">0</div>
       <div class="kpi-sub" id="kpiSub">篇论文</div>
@@ -205,7 +205,7 @@ function renderHome() {
 
 function updateCharts(d) {
   if (!window.echarts || !chProgress) return;
-  const text = cssVar('--text'), t2 = cssVar('--text-2'), t3 = cssVar('--text-3');
+  const text = cssVar('--ink'), t2 = cssVar('--ink-2'), t3 = cssVar('--ink-3');
   const surf = cssVar('--surface'), ok = cssVar('--ok'), warn = cssVar('--warn'), idle = cssVar('--idle');
   chProgress.setOption({
     animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
@@ -260,7 +260,7 @@ function rowHTML(p) {
     <td>${p.topic || ''}</td>
     <td class="ht-time">${fmtTime(p.created_at)}</td>
     <td><span class="ht-status ${p.status}">${p.status}</span></td>
-    <td class="ht-note">${p.hasNote ? '✍️' : '<span style="color:#cbd0d8">·</span>'}</td>
+    <td class="ht-note">${p.hasNote ? '✍️' : '<span style="color:var(--ink-3)">·</span>'}</td>
   </tr>`;
 }
 
@@ -322,7 +322,7 @@ function setExplainer(text) {
   const real = text && text.trim() && text.trim() !== EX_EMPTY;
   curHasExplainer = !!real;
   $('#explainerView').innerHTML = real ? md(text)
-    : '<div class="placeholder">这篇还没有讲解。点上方「✨ 生成讲解」，让大模型结合你的研究方向写一份。</div>';
+    : '<div class="placeholder">这篇还没有讲解。点上方「✨ 生成讲解」，让大模型精读后写一份结构化讲解。</div>';
   $('#explainerView').scrollTop = 0;
   const btn = $('#genExplainerBtn');
   if (btn) { btn.disabled = false; btn.textContent = real ? '✨ 重新生成' : '✨ 生成讲解'; }
@@ -334,9 +334,9 @@ async function generateExplainer() {
   const btn = $('#genExplainerBtn'), view = $('#explainerView'), hint = $('#genHint');
   const deep = $('#genDeep').checked, pid = current.id;
   btn.disabled = true; const old = btn.textContent; btn.textContent = '生成中…';
-  hint.textContent = deep ? '读 PDF 正文，约 20~60 秒…' : '约 10~40 秒…';
+  hint.textContent = deep ? '通读 PDF 全文，约 30~90 秒…' : '约 10~40 秒…';
   view.innerHTML = '<div class="ex-progress"><span class="ex-spinner"></span><span class="ex-log" id="exLog">正在准备…</span></div>';
-  const STAGE = { load: '读取论文信息', pdf: '读取 PDF 正文', generate: '大模型撰写讲解中' };
+  const STAGE = { load: '读取论文信息', pdf: '读取 PDF 全文', generate: '大模型撰写讲解中' };
   const setLog = (t) => { const el = document.getElementById('exLog'); if (el) el.textContent = t; };
   const fail = (msg) => { view.innerHTML = '<div class="placeholder">生成失败：' + msg + '<br>可在顶栏 ⚙ 检查模型与密钥后重试。</div>'; btn.disabled = false; btn.textContent = old; hint.textContent = ''; };
   try {
@@ -514,7 +514,7 @@ function renderManage() {
   list.sort(cmp);
   $('#mCount').textContent = `共 ${list.length}`;
   $('#mList').innerHTML = list.map(p => {
-    const meta = [`<span class="venue">${p.venue} ${p.year}</span>`, p.type];
+    const meta = [`<span class="venue v-${p.venue}">${p.venue} ${p.year}</span>`, p.type];
     if (p.topic) meta.push(p.topic);
     if (p.relevance != null) meta.push('rel ' + p.relevance);
     if (p.citations != null) meta.push(p.citations + ' cite');
@@ -670,7 +670,7 @@ function renderCandidates() {
       <input type="checkbox" class="cand-ck" data-i="${i}" ${c.in_library ? 'disabled' : 'checked'} />
       <div class="cand-main">
         <div class="cand-title">${c.title}</div>
-        <div class="cand-meta"><span class="venue">${c.venue || '—'} ${c.year || ''}</span>${vb ? ' ' + vb : ''} · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
+        <div class="cand-meta"><span class="venue v-${c.venue || ''}">${c.venue || '—'} ${c.year || ''}</span>${vb ? ' ' + vb : ''} · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
       </div>
       <div class="cand-rel" title="相关度 ${rel}%"><div class="cand-rel-track"><div class="cand-rel-bar" style="width:${rel}%"></div></div><span>${rel}</span></div>
     </label>`;

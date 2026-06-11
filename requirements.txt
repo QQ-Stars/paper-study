@@ -6,3 +6,4 @@ pydantic>=2.5
 python-dotenv>=1.0
 tenacity>=8.2
 pymupdf>=1.24
+pymupdf4llm>=0.0.17        # PDF→Markdown（保留标题/表格/双栏顺序），写讲解通读全文用

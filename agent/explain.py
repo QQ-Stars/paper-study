@@ -50,16 +50,21 @@ def explain_paper(pid: str, deep: bool = False) -> str:
     if deep:
         pdf = _find_pdf(r)
         if pdf:
-            _p(f"STAGE::pdf::读取正文 {pdf.name}")
             try:
-                fulltext = extract.first_pages(pdf, 8, r.get("abstract"))
+                pages = extract.page_count(pdf)
+            except Exception:
+                pages = "?"
+            _p(f"STAGE::pdf::读取 PDF 全文（共 {pages} 页）…")
+            try:
+                fulltext = extract.full_text(pdf, r.get("abstract"), config.EXPLAIN_MAX_CHARS)
+                _p(f"PDFOK::已读取全文 {len(fulltext)} 字")
             except Exception as e:
                 _p(f"PDFERR::{e}（改用摘要生成）")
         else:
             _p("PDFMISS::未找到本地PDF，改用摘要 / TLDR 生成")
 
     _p("STAGE::generate::调用大模型撰写讲解…")
-    md = llm.generate_explainer(r, config.RESEARCH_DIRECTION, fulltext)
+    md = llm.generate_explainer(r, fulltext)
     if not md:
         con.close()
         _p("ERR::模型返回为空")

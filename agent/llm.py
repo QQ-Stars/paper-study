@@ -87,21 +87,18 @@ EXPLAINER_SYSTEM = (
     "1. 开头用一行引用块 `> …` 一句话点明：这篇论文做了什么、为什么值得读。\n"
     "2. `## 研究问题`：它针对哪种幻觉 / 哪个痛点？把动机讲清楚。\n"
     "3. `## 方法`：核心做法，分点讲；遇到公式或模块，先说直觉再说细节，别堆术语。\n"
-    "4. `## 关键结论`：主要实验发现（数据集 / 指标 / 相对提升，知道才写）。\n"
-    "5. `## 与我的研究方向的关系`：**全文最重要的一节**。结合下方「我的研究方向」，"
-    "判断这篇是竞品、可借鉴的上游、还是能直接当 baseline；尤其指出它**没覆盖到的空白**"
-    "（那正是我的机会）。要具体、有取舍判断，别说套话。\n"
-    "6. `## 可借鉴点`：方法、思路或实验设计里我能直接拿来用的点，分点列。\n"
+    "4. `## 关键结论`：主要实验发现（数据集 / 指标 / 相对提升 / 消融，知道才写）。\n"
+    "5. `## 可借鉴点`：方法、思路或实验设计里值得直接拿来用的点，分点列。\n"
     "硬性要求：只输出 Markdown 正文（不要用 ``` 把整体包起来）；忠于给定信息，"
-    "**信息不足时宁可写“原文未提供”，绝不臆造**数据、指标或会议名。"
+    "**信息不足时宁可写“原文未提供”，绝不臆造**数据、指标或会议名。\n"
+    "公式：本讲解**不支持 LaTeX 渲染**，不要输出 `\\begin{cases}`、`$$…$$`、`\\[...\\]` 这类公式块；"
+    "需要时用一句话讲清直觉，符号用行内 `代码`（如 `logit_新 = (1+α)·logit(原) − α·logit(失真)`）。"
 )
 
 
-def generate_explainer(paper: dict, direction: str = "", fulltext: str = None) -> str:
-    """为一篇论文生成「科学方法论讲解」markdown，并把它对齐到 direction（我的研究方向）。"""
-    direction = direction or config.RESEARCH_DIRECTION
+def generate_explainer(paper: dict, fulltext: str = None) -> str:
+    """为一篇论文生成「科学方法论讲解」markdown。"""
     info = (
-        f"# 我的研究方向\n{direction}\n\n"
         f"# 论文信息\n"
         f"标题: {paper.get('title', '')}\n"
         f"会议/年份: {paper.get('venue') or '未知'} {paper.get('year') or ''}\n"
@@ -112,7 +109,10 @@ def generate_explainer(paper: dict, direction: str = "", fulltext: str = None) -
         f"摘要: {paper.get('abstract') or '原文未提供'}\n"
     )
     if fulltext:
-        info += f"\n# 论文正文片段(节选，供你提取方法/实验细节)\n{fulltext[:14000]}\n"
+        info += (
+            "\n# 论文全文（已为你抽取，请据此精读，提取真实的方法细节、实验设置与具体数据）\n"
+            f"{fulltext}\n"
+        )
     resp = client().chat.completions.create(
         model=config.MODEL,
         messages=[{"role": "system", "content": EXPLAINER_SYSTEM},
