@@ -210,15 +210,9 @@ function renderHome() {
     $('#kpiFav').textContent = list.filter(p => p.favorite).length;
     $('#kpiYears').textContent = `${yc('2024')} / ${yc('2025')} / ${yc('2026')}`;
 
-    const dirOrder = [['检测', '#bd5b3a'], ['缓解', '#3f7d5b'], ['机制', '#5b7387'], ['评测', '#b07a2e'], ['定义/其他', '#9a8b72']];
-    const dirBucket = (t) => t.includes('检测') ? '检测' : t.includes('缓解') ? '缓解' : t.includes('机制') ? '机制' : t.includes('Bench') ? '评测' : '定义/其他';
-    const dc = {}; list.forEach(p => dc[dirBucket(p.type)] = (dc[dirBucket(p.type)] || 0) + 1);
-    const dirItems = dirOrder.map(([k, c]) => ({ name: k, value: dc[k] || 0, color: c }));
-
-    const vOrder = [['CV', '#bd5b3a'], ['ML', '#5b7387'], ['NLP', '#3f7d5b'], ['AAAI', '#b07a2e'], ['arXiv', '#8a5a5a']];
-    const vBucket = (v) => ['CVPR', 'ICCV', 'ECCV'].includes(v) ? 'CV' : ['ICLR', 'ICML', 'NeurIPS'].includes(v) ? 'ML' : ['ACL', 'EMNLP'].includes(v) ? 'NLP' : v === 'AAAI' ? 'AAAI' : 'arXiv';
-    const vc = {}; list.forEach(p => vc[vBucket(p.venue)] = (vc[vBucket(p.venue)] || 0) + 1);
-    const vItems = vOrder.map(([k, c]) => ({ name: k, value: vc[k] || 0, color: c }));
+    // 数据驱动：按库中实际的研究方向(type 的顶层，"缓解·解码"归"缓解")与实际会议分组，与领域无关
+    const dirItems = topGroups(list, p => (p.type || '').split('·')[0], 7);
+    const vItems = topGroups(list, p => p.venue, 7);
 
     updateCharts({ done, ing, idle, pct, dirItems, vItems });
   }
@@ -251,6 +245,18 @@ function updateCharts(d) {
   chVenue.setOption(barOption(d.vItems, t2, t3));
 }
 
+// 把任意维度按出现次数分组，取前 max-1 个，其余并入「其他」（始终末位、灰色）。与具体领域无关。
+function topGroups(list, keyFn, max = 7) {
+  const counts = {};
+  list.forEach(p => { const k = ((keyFn(p) || '') + '').trim() || '其他'; counts[k] = (counts[k] || 0) + 1; });
+  let other = counts['其他'] || 0; delete counts['其他'];
+  let entries = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const cap = other ? max - 1 : max;
+  if (entries.length > cap) { other += entries.slice(cap - 1).reduce((s, [, v]) => s + v, 0); entries = entries.slice(0, cap - 1); }
+  if (other) entries.push(['其他', other]);
+  const palette = ['#bd5b3a', '#3f7d5b', '#5b7387', '#b07a2e', '#8a5a5a', '#6f8f6a', '#9a8b72'];
+  return entries.map(([name, value], i) => ({ name, value, color: name === '其他' ? '#9a8b72' : palette[i % palette.length] }));
+}
 function barOption(items, t2, t3) {
   const labels = items.map(i => i.name).reverse();
   const data = items.map(i => ({ value: i.value, itemStyle: { color: i.color, borderRadius: [0, 5, 5, 0] } })).reverse();
@@ -842,6 +848,7 @@ async function loadSettings() {
     $('#setApiKey').value = '';
     $('#setS2Key').value = '';
     $('#setPdfDir').value = s.pdfDir || '';
+    if ($('#setTheme')) $('#setTheme').value = s.researchTheme || '';
     $('#setKeyTip').textContent = s.hasApiKey ? `当前已配置：${s.apiKeyTail}` : '⚠️ 未配置 API Key';
     $('#setS2Tip').textContent = s.hasS2Key ? `当前已配置：${s.s2KeyTail}` : '未配置（不填也能用，仅高峰可能限流）';
     const meta = $('#setSummaryMeta'); if (meta) meta.textContent = `${s.provider} · ${s.model || '—'}` + (s.hasApiKey ? '' : ' · ⚠ 未配置 Key');
@@ -860,7 +867,8 @@ async function saveSettings() {
     provider: $('#setProvider').value,
     baseUrl: $('#setBaseUrl').value.trim(),
     model: $('#setModel').value.trim(),
-    pdfDir: $('#setPdfDir').value.trim()
+    pdfDir: $('#setPdfDir').value.trim(),
+    researchTheme: $('#setTheme') ? $('#setTheme').value.trim() : ''
   };
   if ($('#setApiKey').value.trim()) body.apiKey = $('#setApiKey').value.trim();
   if ($('#setS2Key').value.trim()) body.s2ApiKey = $('#setS2Key').value.trim();

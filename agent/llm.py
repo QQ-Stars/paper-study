@@ -3,7 +3,7 @@ import json
 from openai import OpenAI
 from pydantic import ValidationError
 from . import config
-from .models import PaperAttributes, TYPES, TOPICS
+from .models import PaperAttributes
 
 _client = None
 
@@ -15,24 +15,38 @@ def client():
     return _client
 
 
-SYSTEM = (
-    "你是论文分析助手。根据给定论文信息判断其研究属性，并**只输出一个 JSON 对象**。\n"
-    f"- type：必须从 {TYPES} 里选最贴切的一个\n"
-    f"- topic：必须从 {TOPICS} 里选最贴切的一个（都不符则填\"其他\"）\n"
-    "- task：任务简述（可空）\n"
-    "- models：用到的模型名数组\n"
-    "- datasets：用到的数据集数组\n"
-    "- contribution：一句话核心贡献\n"
-    "- tldr：三句话以内速览\n"
-    "- tags：关键词数组\n"
-    "- relevance：与“检索方向”的相关度，0~1 小数\n"
-    "JSON 键固定为：type, topic, task, models, datasets, contribution, tldr, tags, relevance"
-)
+def _cats(cats, empty):
+    cats = [c for c in (cats or []) if c and str(c).strip()]
+    return "、".join(cats) if cats else empty
 
 
-def classify(stub, query: str = "", fulltext: str = None) -> PaperAttributes:
+def _classify_system(known_types, known_topics, theme):
+    """动态分类提示：让大模型优先复用库中已有类别，没有再新建——使工具不绑定具体领域。"""
+    return (
+        f"你是论文分析助手。本论文库的研究主题是：{theme or '（未指定，请据论文自行归纳）'}。\n"
+        "根据给定论文信息判断其研究属性，并**只输出一个 JSON 对象**。\n"
+        "- type（研究方向/类型）：**先看能否归入库中已有类别**——"
+        f"{_cats(known_types, '（库中暂无，请自拟一个简短类别）')}；"
+        "能贴切归入就直接用其中之一；确实都不合适时，才**新建**一个简短(2~6字)的新类别。\n"
+        "- topic（更细的子主题）：同样**优先复用**已有——"
+        f"{_cats(known_topics, '（库中暂无，请自拟）')}；都不合适才新建简短子主题。\n"
+        "- task：任务简述（可空）\n"
+        "- models：用到的模型名数组\n"
+        "- datasets：用到的数据集数组\n"
+        "- contribution：一句话核心贡献\n"
+        "- tldr：三句话以内速览\n"
+        "- tags：关键词数组\n"
+        "- relevance：与研究主题的相关度，0~1 小数\n"
+        "复用已有类别能让分布图整洁；务必沿用相同措辞(别把“缓解”又写成“缓解方法”)。\n"
+        "JSON 键固定为：type, topic, task, models, datasets, contribution, tldr, tags, relevance"
+    )
+
+
+def classify(stub, query: str = "", fulltext: str = None,
+             known_types=None, known_topics=None, theme: str = "") -> PaperAttributes:
+    sysmsg = _classify_system(known_types, known_topics, theme or query)
     info = (
-        f"检索方向: {query}\n"
+        f"研究主题: {theme or query}\n"
         f"标题: {stub.title}\n"
         f"会议/年份: {stub.venue or ''} {stub.year or ''}\n"
         f"摘要: {stub.abstract or ''}\n"
@@ -45,7 +59,7 @@ def classify(stub, query: str = "", fulltext: str = None) -> PaperAttributes:
     for _ in range(3):
         resp = client().chat.completions.create(
             model=config.MODEL,
-            messages=[{"role": "system", "content": SYSTEM},
+            messages=[{"role": "system", "content": sysmsg},
                       {"role": "user", "content": info}],
             response_format={"type": "json_object"},
             temperature=0.2,

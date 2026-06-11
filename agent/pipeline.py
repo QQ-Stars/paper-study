@@ -38,6 +38,9 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
 
     # 3) 分类 + 相关性过滤 + 入库（用原始方向打分，最多采到 limit 篇）
     con = db.connect()
+    kt, kp = db.known_categories(con)           # 已有研究方向/主题，供大模型复用
+    kt, kp = list(kt), list(kp)
+    theme = config.RESEARCH_THEME or direction
     found, added, skipped, n_cls = len(seen), 0, 0, 0
     cap = limit * 3
     for stub in seen.values():
@@ -63,8 +66,12 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
                     body = extract.first_pages(config.ROOT / pdf_path, 8, stub.abstract)
                 except Exception:
                     body = None
-            attrs = llm.classify(stub, direction, body)
+            attrs = llm.classify(stub, direction, body, known_types=kt, known_topics=kp, theme=theme)
             n_cls += 1
+            if attrs.type and attrs.type not in kt:
+                kt.append(attrs.type)
+            if attrs.topic and attrs.topic not in kp:
+                kp.append(attrs.topic)
             if attrs.relevance is not None and attrs.relevance < min_rel:
                 skipped += 1
                 print(f"  - 相关度低({attrs.relevance:.2f}) 跳过: {stub.title[:48]}")
@@ -125,6 +132,9 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
     _p(f"FOUND::{len(seen)}")
     _p("STAGE::classify")
     con = db.connect()
+    kt, kp = db.known_categories(con)           # 已有研究方向/主题，供大模型复用；本批新建的也即时并入
+    kt, kp = list(kt), list(kp)
+    theme = config.RESEARCH_THEME or direction
     cands, i, cap = [], 0, limit * 3
     for stub in seen.values():
         if len(cands) >= limit or i >= cap:
@@ -133,10 +143,14 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
         tn = db.title_norm(stub.title)
         in_lib = db.exists(con, arxiv_id=stub.arxiv_id, title_norm_v=tn)
         try:
-            attrs = llm.classify(stub, direction)
+            attrs = llm.classify(stub, direction, known_types=kt, known_topics=kp, theme=theme)
         except Exception as e:
             _p(f"CLSERR::{e}")
             continue
+        if attrs.type and attrs.type not in kt:
+            kt.append(attrs.type)
+        if attrs.topic and attrs.topic not in kp:
+            kp.append(attrs.topic)
         _p(f"CLASSIFIED::{i}::{stub.title[:48]}")
         if min_rel and attrs.relevance is not None and attrs.relevance < min_rel and not in_lib:
             continue

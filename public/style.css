@@ -316,6 +316,10 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .m-field>input,.m-field>select,.m-search{width:100%;padding:9px 12px;border:1px solid var(--border-2);border-radius:10px;font-size:13px;background:var(--bg);color:var(--ink);outline:none;font-family:var(--font-sans);transition:.15s}
 .m-field>input:focus,.m-field>select:focus,.m-search:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .settings-card{max-width:1180px;margin-bottom:18px}
+.settings-theme{margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--border)}
+.theme-input{width:100%;padding:10px 13px;border:1px solid var(--border-2);border-radius:10px;font-size:14px;background:var(--bg);color:var(--ink);outline:none;font-family:var(--font-sans);transition:.15s}
+.theme-input:focus{border-color:var(--accent);box-shadow:var(--ring)}
+.settings-theme .set-tip{margin-top:8px}
 .settings-cols{display:grid;grid-template-columns:1fr 1fr;gap:26px}
 .settings-sub{font-family:var(--font-mono);font-size:10.5px;font-weight:500;color:var(--ink-2);margin-bottom:13px;text-transform:uppercase;letter-spacing:.1em}
 .m-row2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
