@@ -71,6 +71,10 @@ const server = http.createServer(async (req, res) => {
       if (!ex) { const f = path.join(PAPERS_DIR, id + '.md'); ex = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '*(暂无讲解)*'; }
       return send(res, 200, ex, MIME['.md']);
     }
+    if (p === '/api/translation' && req.method === 'GET') {
+      const t = dbapi.getTranslation(safeBase(u.searchParams.get('id')));
+      return send(res, 200, t || '', MIME['.md']);
+    }
     if (p === '/api/progress' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
       dbapi.setStatus(safeBase(b.id), b.status);
@@ -194,6 +198,20 @@ const server = http.createServer(async (req, res) => {
       ch.stdout.on('data', d => out += d.toString());
       ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e) }); res.end(); });
       ch.on('close', code => { emit({ type: 'result', ok: code === 0 && !!out.trim(), markdown: out, error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '生成失败') }); res.end(); });
+      return;
+    }
+    // 全文翻译（LLM，分块并发）：NDJSON 流，progress(TOTAL/CHUNK…) + 最终 result.markdown（已写入 DB）
+    if (p === '/api/translate' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const id = safeBase(b.id);
+      if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }), MIME['.json']);
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      let out = '', err = ''; const ch = spawnAgent(['translate', '--id', id]);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (l.trim()) { err += l + '\n'; emit({ type: 'progress', line: l }); } }));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e) }); res.end(); });
+      ch.on('close', code => { emit({ type: 'result', ok: code === 0 && !!out.trim(), markdown: out, error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '翻译失败') }); res.end(); });
       return;
     }
     if (p === '/api/settings' && req.method === 'GET') {

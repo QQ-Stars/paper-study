@@ -35,3 +35,15 @@ def insert_paper(con, row: dict):
 def set_explainer(con, pid: str, md: str):
     con.execute("UPDATE papers SET explainer=?, updated_at=datetime('now') WHERE id=?", (md, pid))
     con.commit()
+
+
+def set_translation(con, pid: str, md: str):
+    # 自带建表，避免 agent 先于 node 应用新 schema 时找不到表
+    con.execute("""CREATE TABLE IF NOT EXISTS translations (
+        paper_id   TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+        content    TEXT NOT NULL DEFAULT '',
+        updated_at TEXT DEFAULT (datetime('now')))""")
+    con.execute("""INSERT INTO translations(paper_id, content, updated_at) VALUES(?,?,datetime('now'))
+                   ON CONFLICT(paper_id) DO UPDATE SET content=excluded.content, updated_at=datetime('now')""",
+                (pid, md))
+    con.commit()

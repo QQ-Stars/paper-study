@@ -3,6 +3,7 @@ let PAPERS = [];
 let current = null;
 let curNoteText = '';
 let curHasExplainer = false;
+let curHasTranslation = false;
 let yearFilter = 'all';
 let favOnly = false;
 let q = '';
@@ -312,6 +313,9 @@ async function openPaper(p) {
   // 讲解
   const ex = await (await fetch('/api/explainer?id=' + encodeURIComponent(p.id))).text();
   setExplainer(ex);
+  // 译文
+  const tr = await (await fetch('/api/translation?id=' + encodeURIComponent(p.id))).text();
+  setTranslation(tr);
   // 笔记
   curNoteText = await (await fetch('/api/note?id=' + encodeURIComponent(p.id))).text();
   $('#noteEdit').value = curNoteText;
@@ -359,6 +363,46 @@ async function generateExplainer() {
           hint.textContent = '✅ 已生成并保存';
           setTimeout(() => { const h = $('#genHint'); if (h && h.textContent.startsWith('✅')) h.textContent = ''; }, 4000);
         } else { fail(ev.error || '模型返回为空'); }
+      }
+    });
+  } catch (e) { if (current && current.id === pid) fail(String(e)); }
+}
+
+// ====== 全文翻译（载入 + LLM 分段翻译）======
+function setTranslation(text) {
+  const real = text && text.trim();
+  curHasTranslation = !!real;
+  $('#transView').innerHTML = real ? md(text)
+    : '<div class="placeholder">选择论文后，点「🌐 翻译全文」生成中文翻译——读取 PDF 全文、自动跳过参考文献，分段翻译（较慢，约 1~3 分钟）。</div>';
+  $('#transView').scrollTop = 0;
+  const btn = $('#genTransBtn');
+  if (btn) { btn.disabled = false; btn.textContent = real ? '🌐 重新翻译' : '🌐 翻译全文'; }
+  const h = $('#transHint'); if (h) h.textContent = '';
+}
+async function generateTranslation() {
+  if (!current) { alert('请先在左侧选择一篇论文'); return; }
+  if (curHasTranslation && !confirm('已有翻译，重新翻译会覆盖当前内容。确定继续？')) return;
+  const btn = $('#genTransBtn'), view = $('#transView'), hint = $('#transHint'), pid = current.id;
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '翻译中…';
+  hint.textContent = '全文翻译较慢，请耐心等待…';
+  view.innerHTML = '<div class="ex-progress"><span class="ex-spinner"></span><span class="ex-log" id="transLog">正在准备…</span></div>';
+  const setLog = (t) => { const el = document.getElementById('transLog'); if (el) el.textContent = t; };
+  const fail = (msg) => { view.innerHTML = '<div class="placeholder">翻译失败：' + msg + '<br>需要本篇有本地 PDF；可在顶栏 ⚙ 检查模型与密钥后重试。</div>'; btn.disabled = false; btn.textContent = old; hint.textContent = ''; };
+  try {
+    await streamNDJSON('/api/translate', { id: pid }, (ev) => {
+      if (ev.type === 'progress') {
+        const ln = ev.line;
+        if (ln.startsWith('STAGE::pdf')) setLog('读取 PDF 全文…');
+        else if (ln.startsWith('STRIP::')) setLog('已跳过参考文献，准备分段…');
+        else if (ln.startsWith('PDFMISS::')) setLog('无本地 PDF，改用摘要翻译…');
+        else { const t = /^TOTAL::(\d+)/.exec(ln); if (t) setLog(`共 ${t[1]} 段，翻译中…`); const c = /^CHUNK::(\d+)::(\d+)/.exec(ln); if (c) { setLog(`翻译中… ${c[1]} / ${c[2]} 段`); hint.textContent = `${Math.round(c[1] / c[2] * 100)}%`; } }
+      } else if (ev.type === 'result') {
+        if (!current || current.id !== pid) return;       // 已切换论文，丢弃
+        if (ev.ok && ev.markdown && ev.markdown.trim()) {
+          setTranslation(ev.markdown);
+          hint.textContent = '✅ 翻译完成并保存';
+          setTimeout(() => { const h = $('#transHint'); if (h && h.textContent.startsWith('✅')) h.textContent = ''; }, 4000);
+        } else { fail(ev.error || '返回为空'); }
       }
     });
   } catch (e) { if (current && current.id === pid) fail(String(e)); }
@@ -432,6 +476,7 @@ function bindUI() {
   });
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dataset.tab));
   $('#genExplainerBtn').onclick = generateExplainer;
+  $('#genTransBtn').onclick = generateTranslation;
   $('#btnEdit').onclick = () => { setSegActive('#tab-note .seg-sm', $('#btnEdit')); showNoteMode('edit'); $('#noteEdit').focus(); };
   $('#btnPreview').onclick = () => { $('#notePreview').innerHTML = md($('#noteEdit').value) || ''; setSegActive('#tab-note .seg-sm', $('#btnPreview')); showNoteMode('preview'); };
   $('#btnSave').onclick = saveNote;

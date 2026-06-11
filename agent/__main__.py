@@ -52,6 +52,9 @@ def main():
     exp.add_argument("--id", required=True, help="论文 id (slug)")
     exp.add_argument("--deep", action="store_true", help="读取本地PDF正文(更准，更慢)")
 
+    tr = sub.add_parser("translate", help="全文翻译(LLM)：PDF→去参考文献→分块译中文，写入 translations，md→stdout")
+    tr.add_argument("--id", required=True, help="论文 id (slug)")
+
     sub.add_parser("ping", help="测试大模型连通性")
     sub.add_parser("purge", help="删除采集来的论文（保留 seed 种子 38 篇）")
 
@@ -99,6 +102,9 @@ def main():
     elif args.cmd == "explain":
         from . import explain
         explain.explain_paper(args.id, args.deep)
+    elif args.cmd == "translate":
+        from . import translate
+        translate.translate_paper(args.id)
 
 
 if __name__ == "__main__":
