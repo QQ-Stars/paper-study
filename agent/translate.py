@@ -45,6 +45,34 @@ def _strip_tail(md: str):
     return md, False
 
 
+def _is_delim(line: str) -> bool:
+    """Markdown 表格的分隔行，如 |:---|:---|。"""
+    s = line.strip()
+    return bool(s) and set(s) <= set("|:- ") and "-" in s and "|" in s
+
+
+def _strip_tables(md: str):
+    """删除 Markdown 表格（表格翻译又乱又占地方，用户要求跳过），各替换为一行占位。"""
+    lines = md.split("\n")
+    out, i, n, removed = [], 0, len(lines), 0
+    while i < n:
+        if lines[i].count("|") >= 2 and i + 1 < n and _is_delim(lines[i + 1]):
+            j = i + 2                                   # 标准表：表头 + 分隔 + 数据行
+            while j < n and lines[j].count("|") >= 2:
+                j += 1
+        elif (lines[i].count("|") >= 3 and i + 2 < n
+              and lines[i + 1].count("|") >= 3 and lines[i + 2].count("|") >= 3):
+            j = i                                       # 无分隔行的“管道密集”块兜底
+            while j < n and lines[j].count("|") >= 3:
+                j += 1
+        else:
+            out.append(lines[i]); i += 1; continue
+        out.append("> 📊 *（此处为表格，未翻译，详见原文）*")
+        removed += 1
+        i = j
+    return "\n".join(out), removed
+
+
 def _chunk(text: str, size: int = 3800):
     """按段落(空行)聚合成不超过 size 的块，尽量不切断段落；异常超长段落兜底硬切。"""
     blocks = re.split(r'\n\s*\n', text)
@@ -85,6 +113,9 @@ def translate_paper(pid: str, workers: int = 4) -> str:
     body, stripped = _strip_tail(body)
     if stripped:
         _p("STRIP::已跳过参考文献/致谢部分")
+    body, n_tbl = _strip_tables(body)
+    if n_tbl:
+        _p(f"STRIP::已跳过 {n_tbl} 个表格（未翻译）")
 
     chunks = _chunk(body)
     if not chunks:

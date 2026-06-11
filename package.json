@@ -1,7 +1,7 @@
 {
   "name": "study-app",
   "version": "1.0.0",
-  "description": "一个**本地、零依赖**的论文精读工具：左侧论文列表、中间 PDF、右侧「论文讲解 + 我的笔记」。笔记以 `notes/*.md` 存储，纳入 git 版本控制。",
+  "description": "Paper-Study：文献管理 + 学术搜索 + 论文精读 三合一本地 Web 应用（Node + SQLite + Python Agent）。含大模型采集、讲解生成、全文翻译、会议核实、收藏与笔记。",
   "main": "server.js",
   "directories": {
     "doc": "docs"
@@ -23,6 +23,7 @@
   },
   "homepage": "https://github.com/QQ-Stars/paper-study#readme",
   "dependencies": {
-    "better-sqlite3": "^12.10.0"
+    "better-sqlite3": "^12.10.0",
+    "katex": "^0.17.0"
   }
 }

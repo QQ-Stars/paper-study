@@ -15,6 +15,23 @@ let chProgress = null, chDir = null, chVenue = null;
 const $ = (s) => document.querySelector(s);
 const md = (t) => (window.marked ? window.marked.parse(t || '') :
   '<pre>' + (t || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) + '</pre>');
+// 渲染 markdown 到元素，并用 KaTeX 把 $...$ / $$...$$ 公式排版出来（讲解/译文/笔记共用）
+function renderMd(el, text) {
+  el.innerHTML = md(text);
+  if (window.renderMathInElement) {
+    try {
+      renderMathInElement(el, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '\\[', right: '\\]', display: true },
+          { left: '$', right: '$', display: false },
+          { left: '\\(', right: '\\)', display: false }
+        ],
+        throwOnError: false, ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      });
+    } catch (e) {}
+  }
+}
 const EMPTY_HTML = '<div id="viewerEmpty" class="empty"><div class="empty-ico">📄</div><div class="empty-title">从左侧选择一篇论文</div><div class="empty-sub">建议从 ① HallusionBench 开始</div></div>';
 
 const normPapers = (arr) => { (arr || []).forEach(p => { p.venue = p.venue || '—'; p.type = p.type || ''; p.year = p.year || ''; p.topic = p.topic || ''; }); return arr || []; };
@@ -319,8 +336,8 @@ async function openPaper(p) {
   // 笔记
   curNoteText = await (await fetch('/api/note?id=' + encodeURIComponent(p.id))).text();
   $('#noteEdit').value = curNoteText;
-  $('#notePreview').innerHTML = curNoteText.trim() ? md(curNoteText)
-    : '<div class="placeholder">还没有笔记。点「编辑」开始记，或在对话里让我「记录」。</div>';
+  if (curNoteText.trim()) renderMd($('#notePreview'), curNoteText);
+  else $('#notePreview').innerHTML = '<div class="placeholder">还没有笔记。点「编辑」开始记，或在对话里让我「记录」。</div>';
   showNoteMode('preview');
   // PDF
   renderPdf(p.id);
@@ -331,8 +348,8 @@ const EX_EMPTY = '*(暂无讲解)*';
 function setExplainer(text) {
   const real = text && text.trim() && text.trim() !== EX_EMPTY;
   curHasExplainer = !!real;
-  $('#explainerView').innerHTML = real ? md(text)
-    : '<div class="placeholder">这篇还没有讲解。点上方「✨ 生成讲解」，让大模型精读后写一份结构化讲解。</div>';
+  if (real) renderMd($('#explainerView'), text);
+  else $('#explainerView').innerHTML = '<div class="placeholder">这篇还没有讲解。点上方「✨ 生成讲解」，让大模型精读后写一份结构化讲解。</div>';
   $('#explainerView').scrollTop = 0;
   const btn = $('#genExplainerBtn');
   if (btn) { btn.disabled = false; btn.textContent = real ? '✨ 重新生成' : '✨ 生成讲解'; }
@@ -372,8 +389,8 @@ async function generateExplainer() {
 function setTranslation(text) {
   const real = text && text.trim();
   curHasTranslation = !!real;
-  $('#transView').innerHTML = real ? md(text)
-    : '<div class="placeholder">选择论文后，点「🌐 翻译全文」生成中文翻译——读取 PDF 全文、自动跳过参考文献，分段翻译（较慢，约 1~3 分钟）。</div>';
+  if (real) renderMd($('#transView'), text);
+  else $('#transView').innerHTML = '<div class="placeholder">选择论文后，点「🌐 翻译全文」生成中文翻译——读取 PDF 全文、自动跳过参考文献，分段翻译（较慢，约 1~3 分钟）。</div>';
   $('#transView').scrollTop = 0;
   const btn = $('#genTransBtn');
   if (btn) { btn.disabled = false; btn.textContent = real ? '🌐 重新翻译' : '🌐 翻译全文'; }
@@ -478,7 +495,7 @@ function bindUI() {
   $('#genExplainerBtn').onclick = generateExplainer;
   $('#genTransBtn').onclick = generateTranslation;
   $('#btnEdit').onclick = () => { setSegActive('#tab-note .seg-sm', $('#btnEdit')); showNoteMode('edit'); $('#noteEdit').focus(); };
-  $('#btnPreview').onclick = () => { $('#notePreview').innerHTML = md($('#noteEdit').value) || ''; setSegActive('#tab-note .seg-sm', $('#btnPreview')); showNoteMode('preview'); };
+  $('#btnPreview').onclick = () => { renderMd($('#notePreview'), $('#noteEdit').value); setSegActive('#tab-note .seg-sm', $('#btnPreview')); showNoteMode('preview'); };
   $('#btnSave').onclick = saveNote;
   $('#noteEdit').onblur = () => { if ($('#noteEdit').value !== curNoteText) saveNote(); };
   document.querySelectorAll('#statusSeg button').forEach(b => b.onclick = () => saveStatus(b.dataset.st));
@@ -537,7 +554,7 @@ async function saveNote() {
   curNoteText = content;
   current.hasNote = !!content.trim();
   const pp = PAPERS.find(x => x.id === current.id); if (pp) pp.hasNote = current.hasNote;
-  $('#notePreview').innerHTML = content.trim() ? md(content) : '<div class="placeholder">（空）</div>';
+  if (content.trim()) renderMd($('#notePreview'), content); else $('#notePreview').innerHTML = '<div class="placeholder">（空）</div>';
   const h = $('#saveHint'); h.textContent = '已保存 ✓ ' + new Date().toLocaleTimeString(); setTimeout(() => h.textContent = '', 2500);
 }
 async function saveStatus(status) {

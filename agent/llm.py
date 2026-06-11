@@ -124,33 +124,49 @@ def generate_explainer(paper: dict, fulltext: str = None) -> str:
 
 TRANSLATE_SYSTEM = (
     "你是专业的学术论文翻译，把用户给的英文论文片段（Markdown 格式）翻译成**简体中文**。\n"
-    "- 完整、忠实、准确地翻译所有正文文字，术语专业地道、符合中文论文表达；"
-    "**不要漏译、不要概括删减、不要加译者注或额外说明**。\n"
-    "- **保留原 Markdown 结构**：标题层级(#)、列表、表格、加粗/斜体、代码块、引用块原样保留，只翻译其中的自然语言文字。\n"
-    "- 专有名词、模型/数据集/方法名、缩写(如 LLaVA、POPE、Transformer、CVPR)保留英文；"
-    "行内变量、数学符号、公式（如 `$\\alpha$`、logits）保持原样不译。\n"
+    "- **必须翻译成中文**：无论片段从何处开始（可能从句子或单词中间开始），都要译成通顺中文，"
+    "**绝不能原样返回英文**，不要漏译、不要概括删减、不要加译者注。\n"
+    "- **保留原 Markdown 结构**：标题层级(#)、列表、加粗/斜体、代码块、引用块原样保留，只翻译其中的自然语言文字。\n"
+    "- 数学公式：已是 LaTeX(`$...$`/`$$...$$`)的**原样保留、不翻译、不要改成代码块**；"
+    "若遇到明显是被 PDF 抽取打乱的公式残片(充斥 =、上下标、\\mathbf、[b][M] 之类)，"
+    "请尽量还原成正确 LaTeX 并用 `$$ ... $$` 包裹，使其可被渲染；无法识别就照抄。公式内变量与符号一律不译。\n"
+    "- 专有名词、模型/数据集/方法名、缩写(如 LLaVA、POPE、Transformer、CVPR)保留英文。\n"
     "- 图表标题(如 Figure 3 / Table 2)：保留编号，翻译其说明文字。\n"
     "- 只输出译文本身，不要任何前后缀说明，不要用 ``` 把整体包起来。"
 )
 
 
+def _cjk_ratio(s: str) -> float:
+    cjk = sum(1 for ch in s if "一" <= ch <= "鿿")
+    en = sum(1 for ch in s if ch.isascii() and ch.isalpha())
+    tot = cjk + en
+    return cjk / tot if tot else 1.0
+
+
 def translate_md(chunk: str) -> str:
-    """把一段英文论文 Markdown 译成中文（保留结构）。失败重试一次。"""
-    last = None
-    for _ in range(2):
+    """把一段英文论文 Markdown 译成中文（保留结构）。若回来还是英文则换更强指令重试。"""
+    src_en = sum(1 for c in chunk if c.isascii() and c.isalpha())
+    user = chunk
+    best = ""
+    for attempt in range(3):
         try:
             resp = client().chat.completions.create(
                 model=config.MODEL,
                 messages=[{"role": "system", "content": TRANSLATE_SYSTEM},
-                          {"role": "user", "content": chunk}],
-                temperature=0.2,
+                          {"role": "user", "content": user}],
+                temperature=0.2 if attempt == 0 else 0.4,
             )
             out = (resp.choices[0].message.content or "").strip()
-            if out:
-                return out
-        except Exception as e:
-            last = e
-    raise RuntimeError(f"翻译失败: {last or '空响应'}")
+        except Exception:
+            continue
+        if not out:
+            continue
+        best = out
+        if src_en < 40 or _cjk_ratio(out) >= 0.25:      # 译文里中文占比够 → 成功
+            return out
+        user = ("下面是英文论文片段，请**完整翻译成简体中文**，"
+                "不要原样返回英文（即使它从句子中间开始）：\n\n" + chunk)
+    return best or chunk                                # 实在译不动，返回最后结果/原文，至少不丢内容
 
 
 def ping() -> str:
