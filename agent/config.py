@@ -31,13 +31,9 @@ BASE_URL = _S.get("baseUrl") or os.getenv("LLM_BASE_URL") or _base
 MODEL = _S.get("model") or os.getenv("LLM_MODEL") or _model
 S2_API_KEY = _S.get("s2ApiKey") or os.getenv("S2_API_KEY", "")
 
-# 「我的研究方向」——写论文讲解时，让大模型把每篇论文跟它对齐（竞品/上游/可借鉴/空白）。
-# 可在网页设置里用 researchDirection 覆盖；默认=跨图/多图幻觉。
-RESEARCH_DIRECTION = _S.get("researchDirection") or os.getenv("RESEARCH_DIRECTION") or (
-    "多模态大模型(MLLM)的「跨图 / 多图幻觉」：当模型同时输入多张图片时，"
-    "易把一张图的内容错误归因到另一张图（cross-image attribution / 信息串扰），"
-    "或在多图比较、计数、跨图关系推理时产生幻觉。研究目标是检测与缓解这类多图特有的幻觉。"
-)
+# 生成讲解读 PDF 全文时的安全上限（字符）。默认覆盖绝大多数会议论文(8~20页)全文；
+# 仅为防超长综述撑爆模型上下文而设，可经 settings.json: explainMaxChars 调整。
+EXPLAIN_MAX_CHARS = int(_S.get("explainMaxChars") or os.getenv("EXPLAIN_MAX_CHARS") or 120000)
 
 DB_PATH = os.getenv("DB_PATH") or str(ROOT / "data" / "app.db")
 # PDF 下载目录：默认 data/pdfs；网页设置可自定义（相对路径相对项目根）

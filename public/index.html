@@ -40,6 +40,7 @@
 
   <!-- 总览 -->
   <section id="home">
+    <div class="page-head"><h1>总览<em>Overview</em></h1><span class="ph-line"></span></div>
     <div id="dash" class="dash"></div>
     <div class="table-card">
       <table id="homeTable">
@@ -61,6 +62,7 @@
 
   <!-- 管理 -->
   <section id="manage" class="hidden">
+    <div class="page-head"><h1>管理<em>Collect &amp; Curate</em></h1><span class="ph-line"></span></div>
     <!-- 采集命令条 -->
     <div class="ingest-bar">
       <div class="ib-head"><span class="ib-title">采集新论文</span><span class="ib-tip">输入方向 → 预览候选（含相关度/已在库）→ 勾选入库；中文/英文皆可，自动扩展检索词</span></div>
@@ -264,7 +266,7 @@
       <div id="tab-explainer" class="tabpane active">
         <div class="ex-toolbar">
           <button id="genExplainerBtn" class="mini primary" disabled>✨ 生成讲解</button>
-          <label class="ex-deep" title="让大模型读取本地PDF正文前几页，讲解更准确但更慢"><input type="checkbox" id="genDeep"> 读PDF正文</label>
+          <label class="ex-deep" title="让大模型通读本地 PDF 全文（非节选），讲解更准确但更慢"><input type="checkbox" id="genDeep"> 读PDF全文</label>
           <span id="genHint" class="hint"></span>
         </div>
         <div id="explainerView" class="markdown">
