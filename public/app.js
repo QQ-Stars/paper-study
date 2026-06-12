@@ -366,7 +366,7 @@ function renderTrend() {
 function renderCite(g) {
   if (!chCite) return;
   chCite.clear();
-  $('#citeHint').textContent = `${g.nodes.length} 篇 · ${g.edgeCount} 条引用 · 节点越大＝被库内引用越多`;
+  $('#citeHint').textContent = `${g.nodes.length} 篇 · ${g.edgeCount} 条引用 · 节点越大＝被引越多 · 滚轮缩放 / 拖拽平移`;
   const t2 = cssVar('--ink-2');
   // 节点按方向分桶（与看板/趋势一致，避免图例过多、配色重复）
   const dirItems = topGroups(g.nodes, n => (n.type || '').split('·')[0], 6);
@@ -385,9 +385,9 @@ function renderCite(g) {
     tooltip: { confine: true, formatter: (p) => p.dataType === 'node' ? `${esc(p.data.name)}<br>被库内 <b>${p.data.value}</b> 篇引用` : '' },
     legend: [{ data: cats, top: 2, textStyle: { color: t2, fontSize: 11 }, itemWidth: 11, itemHeight: 11, itemGap: 12 }],
     series: [{
-      type: 'graph', layout: 'force', roam: true, draggable: true,
+      type: 'graph', layout: 'force', roam: true, draggable: true, zoom: 0.95,
       categories: cats.map(c => ({ name: c, itemStyle: { color: colorOf[c] } })),
-      force: { repulsion: 120, edgeLength: [50, 150], gravity: 0.06, friction: 0.18 },
+      force: { repulsion: 110, edgeLength: [45, 130], gravity: 0.09, friction: 0.2 },
       data, links: g.links.map(l => ({ source: l.source, target: l.target })),
       edgeSymbol: ['none', 'arrow'], edgeSymbolSize: 5,
       lineStyle: { color: 'source', opacity: 0.26, width: 1, curveness: 0.08 },

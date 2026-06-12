@@ -366,7 +366,7 @@ const server = http.createServer(async (req, res) => {
     const fp = path.normalize(path.join(PUBLIC, rel));
     if (!fp.startsWith(PUBLIC)) return send(res, 403, 'forbidden');
     if (fs.existsSync(fp) && fs.statSync(fp).isFile()) {
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(fp).toLowerCase()] || 'application/octet-stream' });
+      res.writeHead(200, { 'Content-Type': MIME[path.extname(fp).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
       return fs.createReadStream(fp).pipe(res);
     }
     return send(res, 404, 'not found');
