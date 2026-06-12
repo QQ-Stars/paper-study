@@ -41,7 +41,17 @@ function renderMd(el, text) {
 }
 const EMPTY_HTML = '<div id="viewerEmpty" class="empty"><div class="empty-ico">📄</div><div class="empty-title">从左侧选择一篇论文</div><div class="empty-sub">建议从 ① HallusionBench 开始</div></div>';
 
-const normPapers = (arr) => { (arr || []).forEach(p => { p.venue = p.venue || '—'; p.type = p.type || ''; p.year = p.year || ''; p.topic = p.topic || ''; }); return arr || []; };
+// 会议名归一化：统一大小写/常见别名，避免 NeurIPS 与 NEURIPS、arXiv 与 arXiv.org 被当成两个会议
+const VENUE_CANON = { neurips: 'NeurIPS', nips: 'NeurIPS', cvpr: 'CVPR', iccv: 'ICCV', eccv: 'ECCV', wacv: 'WACV', icml: 'ICML', iclr: 'ICLR', aaai: 'AAAI', ijcai: 'IJCAI', acl: 'ACL', emnlp: 'EMNLP', naacl: 'NAACL', coling: 'COLING', tmlr: 'TMLR', tpami: 'TPAMI', corr: 'arXiv' };
+function normVenue(v) {
+  if (!v) return v;
+  const s = String(v).trim();
+  const k = s.toLowerCase();
+  if (VENUE_CANON[k]) return VENUE_CANON[k];
+  if (k.startsWith('arxiv')) return 'arXiv';                 // arXiv / arXiv.org / arXiv preprint…
+  return s;
+}
+const normPapers = (arr) => { (arr || []).forEach(p => { p.venue = normVenue(p.venue) || '—'; p.type = p.type || ''; p.year = p.year || ''; p.topic = p.topic || ''; }); return arr || []; };
 
 // ====== PDF.js ======
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
@@ -196,7 +206,7 @@ function renderHome() {
   if (sem) list.sort((a, b) => semRank.get(b.id) - semRank.get(a.id));
   else list.sort(cmpHome);
   const emptyMsg = sem ? '语义检索没有命中（试试换种说法）。' : (favOnly ? '还没有收藏的论文。在阅读界面点「☆ 收藏」即可。' : '没有匹配的论文。');
-  $('#homeBody').innerHTML = list.map(rowHTML).join('') || `<tr><td colspan="9" class="empty-row">${emptyMsg}</td></tr>`;
+  $('#homeBody').innerHTML = list.map((p, i) => rowHTML(p, i + 1)).join('') || `<tr><td colspan="9" class="empty-row">${emptyMsg}</td></tr>`;
   document.querySelectorAll('#homeBody tr[data-id]').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
   document.querySelectorAll('#homeBody .fav-star').forEach(s => s.onclick = (e) => { e.stopPropagation(); toggleFavorite(s.dataset.id); });
   document.querySelectorAll('#homeTable th[data-sort]').forEach(th => {
@@ -324,10 +334,9 @@ function semScoreBadge(id) {
   const pct = Math.max(0, Math.min(100, Math.round(semRank.get(id) * 100)));
   return `<span class="sem-score" title="语义相关度 ${pct}%">${pct}</span>`;
 }
-function rowHTML(p) {
-  const order = p.order ? `<span class="ht-order">${p.order}</span>` : `<span class="ht-order none">·</span>`;
+function rowHTML(p, idx) {
   return `<tr data-id="${p.id}">
-    <td>${order}</td>
+    <td><span class="ht-idx">${idx}</span></td>
     <td class="ht-title">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${p.title}</td>
     <td><span class="venue v-${p.venue}">${p.venue}</span></td>
     <td>${p.year}</td>
