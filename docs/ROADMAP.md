@@ -66,8 +66,9 @@
 - ☐ 备份策略（SQLite/Postgres）
 - **交付**：一个可公开访问、稳定运行的正规产品。
 
-## P7 · 增强（可选）  ☐
-- ☐ 阅读推荐（Semantic Scholar Recommendations API）、引用关系图、趋势分析
+## P7 · 增强（可选）  ◐
+- ☑ 阅读/相似推荐（Semantic Scholar Recommendations，见 P4 相似论文）
+- ☑ **洞察视图**：研究趋势（年份 × 方向堆叠柱）+ **引用关系图**（`agent/citegraph.py` 抓 S2 参考文献建库内互引边 `cite_edges`，ECharts 力导向图，节点大小=被库内引用数）
 - ☐ 把论文库包成 **MCP server**，让 Claude 等客户端可"对话式"检索/分类/管理论文
 
 ---

@@ -25,6 +25,7 @@
       <button data-view="home" class="active">总览</button>
       <button data-view="read">阅读</button>
       <button data-view="manage">管理</button>
+      <button data-view="insights">洞察</button>
     </nav>
     <div class="filters">
       <div class="search-box">
@@ -199,6 +200,23 @@
       </div>
     </div>
 
+  </section>
+
+  <!-- 洞察：研究趋势 + 引用关系图 -->
+  <section id="insights" class="hidden">
+    <div class="page-head"><h1>洞察<em>Insights</em></h1><span class="ph-line"></span></div>
+    <div class="chart-card insight-card">
+      <div class="chart-title">研究趋势 · 各年份 × 研究方向</div>
+      <div id="chartTrend" class="echart-lg"></div>
+    </div>
+    <div class="chart-card insight-card">
+      <div class="ins-toolbar">
+        <div class="chart-title ins-title">引用关系图 · 库内谁引用谁</div>
+        <button id="citeBuildBtn" class="mini">⟳ 构建 / 刷新引用图</button>
+        <span id="citeHint" class="hint"></span>
+      </div>
+      <div id="chartCite" class="echart-graph"></div>
+    </div>
   </section>
 
   <!-- 设置弹窗（全局：顶栏 ⚙ 打开，任意页面可达，ESC 关闭） -->
