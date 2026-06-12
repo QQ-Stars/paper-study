@@ -17,6 +17,29 @@ def title_norm(s: str) -> str:
     return re.sub(r"[^a-z0-9一-龥]+", "", (s or "").lower())
 
 
+# 会议名归一化（与前端 public/app.js 的 normVenue 保持一致）：统一大小写/常见别名，
+# 避免 NeurIPS 与 NEURIPS、arXiv 与 arXiv.org 被当成两个会议。
+VENUE_CANON = {
+    "neurips": "NeurIPS", "nips": "NeurIPS",
+    "cvpr": "CVPR", "iccv": "ICCV", "eccv": "ECCV", "wacv": "WACV",
+    "icml": "ICML", "iclr": "ICLR", "aaai": "AAAI", "ijcai": "IJCAI",
+    "acl": "ACL", "emnlp": "EMNLP", "naacl": "NAACL", "coling": "COLING",
+    "tmlr": "TMLR", "tpami": "TPAMI", "corr": "arXiv",
+}
+
+
+def norm_venue(v):
+    if not v:
+        return v
+    s = str(v).strip()
+    k = s.lower()
+    if k in VENUE_CANON:
+        return VENUE_CANON[k]
+    if k.startswith("arxiv"):                       # arXiv / arXiv.org / arXiv preprint…
+        return "arXiv"
+    return s
+
+
 def exists(con, arxiv_id=None, title_norm_v=None) -> bool:
     if arxiv_id and con.execute("SELECT 1 FROM papers WHERE arxiv_id=?", (arxiv_id,)).fetchone():
         return True
@@ -44,6 +67,8 @@ def ensure_vectors_table(con):
 
 
 def insert_paper(con, row: dict):
+    if row.get("venue"):
+        row["venue"] = norm_venue(row["venue"])
     cols = ",".join(row.keys())
     ph = ",".join(["?"] * len(row))
     con.execute(f"INSERT OR IGNORE INTO papers({cols}) VALUES({ph})", list(row.values()))
