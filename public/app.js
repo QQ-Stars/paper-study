@@ -237,14 +237,19 @@ function updateCharts(d) {
   chProgress.setOption({
     animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
     title: {
-      text: d.pct + '%', subtext: '已理解', left: 'center', top: '38%', itemGap: 3,
-      textStyle: { fontSize: 23, fontWeight: 700, color: text }, subtextStyle: { fontSize: 10, color: t3 }
+      text: d.pct + '%', subtext: '已理解', left: '33%', top: 'center', textAlign: 'center', itemGap: 4,
+      textStyle: { fontSize: 26, fontWeight: 700, color: text }, subtextStyle: { fontSize: 10.5, color: t3 }
     },
     tooltip: { trigger: 'item', formatter: '{b}：{c} 篇 ({d}%)' },
+    legend: {
+      orient: 'vertical', right: '4%', top: 'center', itemWidth: 9, itemHeight: 9, itemGap: 13,
+      icon: 'roundRect', textStyle: { color: t2, fontSize: 11.5 },
+      formatter: (name) => { const m = { '已理解': d.done, '学习中': d.ing, '未开始': d.idle }; return `${name}  ${m[name] || 0}`; }
+    },
     series: [{
-      type: 'pie', radius: ['62%', '86%'], center: ['50%', '50%'], avoidLabelOverlap: false,
+      type: 'pie', radius: ['56%', '80%'], center: ['33%', '50%'], avoidLabelOverlap: false,
       itemStyle: { borderColor: surf, borderWidth: 2, borderRadius: 5 },
-      label: { show: false }, labelLine: { show: false }, emphasis: { scale: true, scaleSize: 6 },
+      label: { show: false }, labelLine: { show: false }, emphasis: { scale: true, scaleSize: 5 },
       data: [
         { value: d.done, name: '已理解', itemStyle: { color: ok } },
         { value: d.ing, name: '学习中', itemStyle: { color: warn } },
@@ -269,15 +274,20 @@ function topGroups(list, keyFn, max = 7) {
   return entries.map(([name, value], i) => ({ name, value, color: name === '其他' ? '#9a8b72' : palette[i % palette.length] }));
 }
 function barOption(items, t2, t3) {
+  const rail = cssVar('--surface-3');
   const labels = items.map(i => i.name).reverse();
-  const data = items.map(i => ({ value: i.value, itemStyle: { color: i.color, borderRadius: [0, 5, 5, 0] } })).reverse();
+  const data = items.map(i => ({ value: i.value, itemStyle: { color: i.color, borderRadius: [0, 6, 6, 0] } })).reverse();
   return {
     animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
-    grid: { left: 4, right: 28, top: 6, bottom: 2, containLabel: true },
+    grid: { left: 4, right: 30, top: 8, bottom: 4, containLabel: true },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (p) => `${p[0].name}：${p[0].value} 篇` },
     xAxis: { type: 'value', max: 'dataMax', axisLabel: { show: false }, splitLine: { show: false }, axisLine: { show: false }, axisTick: { show: false } },
     yAxis: { type: 'category', data: labels, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: t2, fontSize: 12 } },
-    series: [{ type: 'bar', data, barWidth: '54%', label: { show: true, position: 'right', color: t3, fontSize: 11, formatter: '{c}' } }]
+    series: [{
+      type: 'bar', data, barWidth: '56%', barMinHeight: 3,
+      showBackground: true, backgroundStyle: { color: rail, borderRadius: 6 },
+      label: { show: true, position: 'right', color: t2, fontSize: 11, fontWeight: 600, formatter: '{c}' }
+    }]
   };
 }
 function cmpHome(a, b) {
