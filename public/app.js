@@ -262,25 +262,46 @@ function updateCharts(d) {
 }
 
 // 把任意维度按出现次数分组，取前 max-1 个，其余并入「其他」（始终末位、灰色）。与具体领域无关。
+// 「其他」条带 breakdown：被并进去的具体类别明细（供悬停 tooltip 展开）。
 function topGroups(list, keyFn, max = 7) {
   const counts = {};
   list.forEach(p => { const k = ((keyFn(p) || '') + '').trim() || '其他'; counts[k] = (counts[k] || 0) + 1; });
-  let other = counts['其他'] || 0; delete counts['其他'];
+  const literalOther = counts['其他'] || 0; delete counts['其他'];
   let entries = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const cap = other ? max - 1 : max;
-  if (entries.length > cap) { other += entries.slice(cap - 1).reduce((s, [, v]) => s + v, 0); entries = entries.slice(0, cap - 1); }
-  if (other) entries.push(['其他', other]);
+  const cap = literalOther ? max - 1 : max;
+  let merged = [];
+  if (entries.length > cap) { merged = entries.slice(cap - 1); entries = entries.slice(0, cap - 1); }
   const palette = ['#bd5b3a', '#3f7d5b', '#5b7387', '#b07a2e', '#8a5a5a', '#6f8f6a', '#9a8b72'];
-  return entries.map(([name, value], i) => ({ name, value, color: name === '其他' ? '#9a8b72' : palette[i % palette.length] }));
+  const out = entries.map(([name, value], i) => ({ name, value, color: palette[i % palette.length] }));
+  const otherTotal = literalOther + merged.reduce((s, [, v]) => s + v, 0);
+  if (otherTotal) {
+    const breakdown = merged.map(([name, value]) => ({ name, value }));
+    if (literalOther) breakdown.push({ name: '（未细分）', value: literalOther });
+    breakdown.sort((a, b) => b.value - a.value);
+    out.push({ name: '其他', value: otherTotal, color: '#9a8b72', breakdown });
+  }
+  return out;
 }
 function barOption(items, t2, t3) {
   const rail = cssVar('--surface-3');
+  const byName = {}; items.forEach(it => { byName[it.name] = it; });
   const labels = items.map(i => i.name).reverse();
   const data = items.map(i => ({ value: i.value, itemStyle: { color: i.color, borderRadius: [0, 6, 6, 0] } })).reverse();
   return {
     animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
     grid: { left: 4, right: 30, top: 8, bottom: 4, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (p) => `${p[0].name}：${p[0].value} 篇` },
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' }, appendToBody: true,
+      formatter: (p) => {
+        const name = p[0].name, val = p[0].value, it = byName[name];
+        if (it && it.breakdown && it.breakdown.length) {
+          const rows = it.breakdown.slice(0, 12).map(b => `· ${b.name}　${b.value} 篇`).join('<br>');
+          const more = it.breakdown.length > 12 ? `<br>…等共 ${it.breakdown.length} 类` : '';
+          return `「其他」共 ${val} 篇，含：<br>${rows}${more}`;
+        }
+        return `${name}：${val} 篇`;
+      }
+    },
     xAxis: { type: 'value', max: 'dataMax', axisLabel: { show: false }, splitLine: { show: false }, axisLine: { show: false }, axisTick: { show: false } },
     yAxis: { type: 'category', data: labels, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: t2, fontSize: 12 } },
     series: [{
