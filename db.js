@@ -14,6 +14,16 @@ db.pragma('busy_timeout = 5000');
 // 应用表结构（幂等）
 db.exec(fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8'));
 
+// 会议名归一化（与 public/app.js 的 normVenue、agent/db.py 的 norm_venue 保持一致）
+const VENUE_CANON = { neurips: 'NeurIPS', nips: 'NeurIPS', cvpr: 'CVPR', iccv: 'ICCV', eccv: 'ECCV', wacv: 'WACV', icml: 'ICML', iclr: 'ICLR', aaai: 'AAAI', ijcai: 'IJCAI', acl: 'ACL', emnlp: 'EMNLP', naacl: 'NAACL', coling: 'COLING', tmlr: 'TMLR', tpami: 'TPAMI', corr: 'arXiv' };
+const normVenue = (v) => {
+  if (!v) return v;
+  const s = String(v).trim(), k = s.toLowerCase();
+  if (VENUE_CANON[k]) return VENUE_CANON[k];
+  if (k.startsWith('arxiv')) return 'arXiv';
+  return s;
+};
+
 // 列表：返回与旧 papers.json 相同的结构（含 file/status/hasNote）
 const listPapers = () => db.prepare(`
   SELECT p.id,
@@ -79,7 +89,7 @@ const addPaper = (f) => {
     VALUES (@id,'manual',@title,@venue,@year,@abstract,@tldr,@url,@pdf_url,@pdf_path,@type,@topic,@contribution,@authors, datetime('now'), datetime('now'))`)
     .run({
       id, title: String(f.title).trim(),
-      venue: f.venue || null, year: f.year ? String(f.year) : null,
+      venue: normVenue(f.venue) || null, year: f.year ? String(f.year) : null,
       abstract: f.abstract || null, tldr: f.tldr || null,
       url: f.url || null, pdf_url: f.pdf_url || null, pdf_path: f.pdf_path || null,
       type: f.type || '其他', topic: f.topic || '其他',
@@ -95,6 +105,7 @@ const updatePaper = (id, f) => {
       let v = f[k];
       if (k === 'authors' && Array.isArray(v)) v = JSON.stringify(v);
       if (v === '') v = null;
+      if (k === 'venue') v = normVenue(v);
       cols.push(`${k} = @${k}`); vals[k] = v;
     }
   }
