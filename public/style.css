@@ -481,6 +481,8 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .m-edit{background:none;border:0;cursor:pointer;font-size:14px;color:var(--ink-3);padding:4px 7px;border-radius:7px;flex:0 0 auto}
 .m-edit:hover{background:var(--surface-2);color:var(--accent)}
 .m-tag.manual{background:var(--accent-soft);color:var(--accent-ink);border-color:transparent}
+.m-tag.local{background:color-mix(in srgb,#5b7387 16%,transparent);color:#5b7387;border-color:transparent}
+[data-theme=dark] .m-tag.local{color:#9db4c6}
 .modal{position:fixed;inset:0;z-index:1000;background:rgba(22,16,11,.46);backdrop-filter:blur(6px) saturate(.92);display:flex;align-items:flex-start;justify-content:center;padding:48px 16px;overflow-y:auto}
 .modal.hidden{display:none}
 .modal-card{width:100%;max-width:560px;background:var(--bg);border:1px solid var(--border-2);border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.28);animation:pop .18s ease;overflow:hidden}

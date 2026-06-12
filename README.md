@@ -7,6 +7,7 @@
 - 🧠 **大模型辅助**：一键生成**论文讲解**、**全文中文翻译**（读 PDF 全文、跳过参考文献、公式用 KaTeX 渲染）。
 - 🔮 **语义检索**：本地嵌入（model2vec，无需 GPU/联网模型服务）按**大意**找论文，**中文 query 直接匹配英文论文**；顶栏「🔮 语义」开关，结果带相关度。
 - 🔗 **相似论文**：阅读时一键找内容相近的论文（Semantic Scholar Recommendations），标注是否在库、可直接收录。
+- 📂 **本地 PDF 导入**：把一个文件夹里的 PDF 一键扫描、抽取标题/摘要、自动分类入库（PDF 原地引用，不复制）。
 - ✅ **会议核实**：查权威库（DBLP / S2 / OpenAlex）还原真实发表会议，绝不臆造。
 - ★ **收藏** · 学习进度 · 笔记 · 手动添加/编辑 · 总览看板（ECharts）。
 
@@ -63,6 +64,7 @@ study-app/
 │  ├─ translate.py    #   全文翻译（去参考文献/表格 → 分块 → 并发译 → 拼接）
 │  ├─ recommend.py    #   相似论文推荐（S2 Recommendations）
 │  ├─ embed.py        #   论文向量 + 语义检索（本地 model2vec 静态嵌入，余弦排序）
+│  ├─ importer.py     #   本地 PDF 批量导入（扫描→抽取→分类→入库，原地引用）
 │  └─ verify.py       #   会议核实（查权威库，非 LLM 臆测）
 ├─ public/            # 前端（vanilla JS/CSS/HTML）
 │  ├─ index.html / app.js / style.css
@@ -71,7 +73,7 @@ study-app/
 ```
 
 - **三方共享同一个 `data/app.db`**：Node（better-sqlite3）读写、Python（sqlite3）读写，均开 WAL。
-- **流式接口**走 NDJSON：检索 `/api/search`、入库 `/api/ingest-selected`、会议核实 `/api/verify-venue`、讲解 `/api/explain`、翻译 `/api/translate`、相似论文 `/api/recommend`、语义检索 `/api/semsearch`、建索引 `/api/embed` 都把进度逐行推给前端做动画。
+- **流式接口**走 NDJSON：检索 `/api/search`、入库 `/api/ingest-selected`、会议核实 `/api/verify-venue`、讲解 `/api/explain`、翻译 `/api/translate`、相似论文 `/api/recommend`、语义检索 `/api/semsearch`、建索引 `/api/embed`、本地导入 `/api/import-pdfs` 都把进度逐行推给前端做动画。
 
 ## Python Agent 命令
 
@@ -82,6 +84,7 @@ python -m agent translate --id <论文id>             # 全文翻译
 python -m agent recommend --id <论文id> [--limit 14]  # 相似论文推荐（候选 JSON→stdout）
 python -m agent embed    --scope all|missing        # 建/更新语义检索向量索引
 python -m agent semsearch --query "缓解物体幻觉的解码方法" --k 30   # 语义检索（结果 JSON→stdout）
+python -m agent import-pdfs [--no-enrich]           # 本地 PDF 批量导入（stdin 读路径数组）
 python -m agent verify-venue --sources dblp,semanticscholar   # 会议核实（stdin 读候选）
 python -m agent ping                                # 测大模型连通性
 ```
@@ -94,6 +97,7 @@ python -m agent ping                                # 测大模型连通性
 - **会议核实**：候选区选核实源 →「✓ 核实会议」，把 arXiv 预印还原成真实会议（查不到只标「仅预印本」）。
 - **语义检索**：顶栏点「🔮 语义」→ 用一句话/中文描述（如「缓解物体幻觉的对比解码」）回车，按相关度排序全库，徽标显示分数。首次会**联网下载一次嵌入模型**（缓存进项目内 `.models/`）；新采集的论文检索时自动补索引，也可在 ⚙ 设置「重建语义索引」。
 - **相似论文**：阅读页「相似论文」tab →「🔗 找相似论文」，列出内容相近的论文，可「+ 收录」一键入库（收录时自动分类）。
+- **本地 PDF 导入**：管理页「📂 本地 PDF 批量导入」→ 填文件夹路径 → 扫描 → 勾选 → 导入；大模型抽标题/摘要并分类，默认联网补全会议/年份/引用。PDF 留在原处（原地引用），按 文件路径/arXiv/标题 三重去重。
 - **收藏 ★ / 进度 / 笔记**：阅读页右栏即可标记；顶栏「☆ 收藏」筛选只看收藏。
 
 ## 说明 / 约定
