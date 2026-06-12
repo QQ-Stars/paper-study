@@ -125,6 +125,28 @@
       </div>
     </div>
 
+    <!-- 本地 PDF 批量导入 -->
+    <div class="ingest-bar">
+      <div class="ib-head"><span class="ib-title">📂 本地 PDF 批量导入</span><span class="ib-tip">扫描文件夹里的 PDF → 大模型抽标题/摘要 → 自动分类入库（可联网补全会议/年份）。PDF 原地引用、不复制</span></div>
+      <div class="ib-row">
+        <input id="impDir" class="ib-input" placeholder="文件夹路径，如 D:\papers 或 F:\论文\幻觉（含子文件夹）" />
+        <button id="impScanBtn" class="mini primary ib-btn">扫描 →</button>
+      </div>
+      <div class="ib-opts">
+        <label class="opt-tog"><input type="checkbox" id="impEnrich" checked /> 联网补全元数据(S2)</label>
+        <span id="impScanHint" class="ib-tip"></span>
+      </div>
+      <div id="impPanel" class="cand-panel hidden">
+        <div class="cand-head">
+          <span id="impCount" class="cand-count"></span>
+          <label class="cand-all"><input type="checkbox" id="impSelAll" checked /> 全选</label>
+          <button id="impImportBtn" class="mini primary">导入选中 →</button>
+        </div>
+        <div id="impList" class="cand-list imp-list"></div>
+        <pre id="impLog" class="ing-log hidden"></pre>
+      </div>
+    </div>
+
     <!-- 库内论文 -->
     <div class="lib-card">
       <div class="lib-toolbar">

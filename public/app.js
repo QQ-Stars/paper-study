@@ -629,6 +629,9 @@ function bindUI() {
   $('#ingQueryAdd').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const a = currentQueries() || []; a.push(e.target.value.trim()); e.target.value = ''; renderQueryChips(a); } };
   $('#ingestSelBtn').onclick = ingestSelected;
   $('#verifyVenueBtn').onclick = verifyVenues;
+  $('#impScanBtn').onclick = scanPdfs;
+  $('#impImportBtn').onclick = importPdfs;
+  $('#impDir').onkeydown = (e) => { if (e.key === 'Enter') scanPdfs(); };
   document.querySelectorAll('#candPanel .vsrc-chip').forEach(c => c.onclick = () => c.classList.toggle('active'));
   $('#mSearch').oninput = renderManage;
   $('#mSort').onchange = renderManage;
@@ -714,7 +717,7 @@ function renderManage() {
       <span class="mi-status status-dot ${p.status}" data-id="${p.id}" title="点击切换学习状态（当前：${p.status}）"></span>
       <div class="m-item-main" data-id="${p.id}">
         <div class="m-item-title">${p.title}</div>
-        <div class="m-item-meta">${meta.join(' · ')}${p.source === 'manual' ? ' <span class="m-tag manual">手动</span>' : (p.source !== 'seed' ? ' <span class="m-tag">采集</span>' : '')}</div>
+        <div class="m-item-meta">${meta.join(' · ')}${p.source === 'manual' ? ' <span class="m-tag manual">手动</span>' : (p.source === 'localpdf' ? ' <span class="m-tag local">本地PDF</span>' : (p.source !== 'seed' ? ' <span class="m-tag">采集</span>' : ''))}</div>
       </div>
       <button class="m-fav ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</button>
       <button class="m-edit" data-id="${p.id}" title="编辑">✎</button>
@@ -983,6 +986,66 @@ async function verifyVenues() {
       }
     });
   } catch (e) { log.textContent = '失败: ' + e; }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+
+// ====== 本地 PDF 批量导入 ======
+let scannedFiles = [];
+function fmtSize(n) { if (n == null) return ''; if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB'; if (n >= 1024) return Math.round(n / 1024) + ' KB'; return n + ' B'; }
+async function scanPdfs() {
+  const dir = $('#impDir').value.trim();
+  if (!dir) { alert('请先填写文件夹路径'); return; }
+  const hint = $('#impScanHint'), btn = $('#impScanBtn');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '扫描中…'; hint.textContent = '';
+  try {
+    const j = await (await fetch('/api/scan-pdfs?dir=' + encodeURIComponent(dir))).json();
+    if (!j.ok) { hint.textContent = '✗ ' + (j.error || '扫描失败'); $('#impPanel').classList.add('hidden'); scannedFiles = []; return; }
+    scannedFiles = j.files || [];
+    renderImpList();
+    hint.textContent = `找到 ${scannedFiles.length} 个 PDF`;
+  } catch (e) { hint.textContent = '✗ ' + e; }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+function renderImpList() {
+  $('#impPanel').classList.remove('hidden');
+  $('#impCount').textContent = `${scannedFiles.length} 个 PDF`;
+  $('#impList').innerHTML = scannedFiles.map((f, i) => `
+    <label class="cand imp-item">
+      <input type="checkbox" class="imp-ck" data-i="${i}" checked />
+      <div class="cand-main">
+        <div class="cand-title">${esc(f.name)}</div>
+        <div class="cand-meta">${fmtSize(f.size)} · ${esc(f.path)}</div>
+      </div>
+    </label>`).join('') || '<div class="placeholder">这个文件夹里没有 PDF。</div>';
+  $('#impSelAll').checked = true;
+  $('#impSelAll').onchange = () => document.querySelectorAll('#impList .imp-ck').forEach(ck => ck.checked = $('#impSelAll').checked);
+}
+async function importPdfs() {
+  const picks = [...document.querySelectorAll('#impList .imp-ck:checked')].map(ck => scannedFiles[+ck.dataset.i]).filter(Boolean);
+  if (!picks.length) { alert('请勾选要导入的 PDF'); return; }
+  const enrich = $('#impEnrich').checked;
+  const log = $('#impLog'); log.classList.remove('hidden');
+  log.textContent = `导入 ${picks.length} 个 PDF…（读取首页 → 大模型抽标题/摘要 → 分类，每篇约几秒）`;
+  const btn = $('#impImportBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = '导入中…';
+  try {
+    await streamNDJSON('/api/import-pdfs', { paths: picks.map(f => f.path), enrich }, (ev) => {
+      if (ev.type === 'progress') {
+        const ln = ev.line; let m;
+        if ((m = /^TOTAL::(\d+)/.exec(ln))) log.textContent += `\n共 ${m[1]} 篇，读取解析中…`;
+        else if ((m = /^PARSED::(\d+)::(\d+)::(.*)/.exec(ln))) log.textContent += `\n  解析 ${m[1]}/${m[2]}：${m[3]}`;
+        else if ((m = /^ADDED::(.*)/.exec(ln))) log.textContent += `\n  ✅ 入库：${m[1]}`;
+        else if ((m = /^DUP::(.*)/.exec(ln))) log.textContent += `\n  ↩ 已在库，跳过：${m[1]}`;
+        else if (/^SKIP::/.test(ln)) log.textContent += `\n  ⚠ 跳过（无法解析标题）`;
+        log.scrollTop = log.scrollHeight;
+      } else if (ev.type === 'result') {
+        log.textContent += ev.ok
+          ? `\n\n✅ 完成：新增 ${ev.added} · 已在库 ${ev.dup} · 失败 ${ev.failed}`
+          : `\n\n✗ 失败：${ev.error || '未知'}`;
+        log.scrollTop = log.scrollHeight;
+      }
+    });
+    await reloadPapers(); renderManage();
+  } catch (e) { log.textContent += '\n✗ ' + e; }
   finally { btn.disabled = false; btn.textContent = old; }
 }
 

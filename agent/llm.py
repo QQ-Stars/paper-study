@@ -72,6 +72,37 @@ def classify(stub, query: str = "", fulltext: str = None,
     raise RuntimeError(f"LLM 结构化输出多次失败: {last}")
 
 
+PDF_META_SYSTEM = (
+    "你从一篇学术论文的首页文本中抽取书目信息。**只输出一个 JSON 对象**，键固定为：\n"
+    "- title：论文真正的标题（英文原文，合并断行成一行）。不是页眉、会议名、arXiv 编号或栏目名。\n"
+    "- authors：作者姓名数组（没有就空数组）。\n"
+    "- year：四位发表年份字符串；判断不了就 null。\n"
+    "- abstract：摘要正文（英文原文，尽量完整；首页没有摘要就空串）。\n"
+    "忽略 arXiv 行、脚注、版权与投稿信息。只依据给定文本，不要臆造。"
+)
+
+
+def parse_pdf_meta(page_text: str) -> dict:
+    """从 PDF 首页文本里抽出 {title, authors, year, abstract}。失败时返回空骨架。"""
+    try:
+        resp = client().chat.completions.create(
+            model=config.MODEL,
+            messages=[{"role": "system", "content": PDF_META_SYSTEM},
+                      {"role": "user", "content": (page_text or "")[:6000]}],
+            response_format={"type": "json_object"}, temperature=0,
+        )
+        d = json.loads(resp.choices[0].message.content) or {}
+    except Exception:
+        d = {}
+    yr = d.get("year")
+    return {
+        "title": (d.get("title") or "").strip(),
+        "authors": [a for a in (d.get("authors") or []) if isinstance(a, str) and a.strip()],
+        "year": str(yr).strip() if yr else None,
+        "abstract": (d.get("abstract") or "").strip() or None,
+    }
+
+
 def expand_queries(direction: str, n: int = 6) -> list:
     """把（可能中文/模糊的）研究方向 → 一组精准英文检索词组合。"""
     sys = (

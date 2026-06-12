@@ -257,6 +257,45 @@ const server = http.createServer(async (req, res) => {
       ch.on('close', code => { let r = {}; try { r = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0 && r.ok !== false, results: r.results || [], error: r.error || '' }); res.end(); });
       return;
     }
+    // 扫描文件夹里的 PDF（递归，最多 4 层 / 2000 个）——纯 Node，给批量导入选片用
+    if (p === '/api/scan-pdfs' && req.method === 'GET') {
+      const dir = (u.searchParams.get('dir') || '').trim();
+      if (!dir) return send(res, 400, JSON.stringify({ ok: false, error: '缺少文件夹路径' }), MIME['.json']);
+      try {
+        if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory())
+          return send(res, 200, JSON.stringify({ ok: false, error: '文件夹不存在或不是目录' }), MIME['.json']);
+        const files = [];
+        const walk = (d, depth) => {
+          if (depth > 4 || files.length >= 2000) return;
+          let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
+          for (const ent of ents) {
+            if (files.length >= 2000) break;
+            const fp = path.join(d, ent.name);
+            if (ent.isDirectory()) { if (!ent.name.startsWith('.')) walk(fp, depth + 1); }
+            else if (/\.pdf$/i.test(ent.name)) { try { files.push({ path: fp, name: ent.name, size: fs.statSync(fp).size }); } catch (e) {} }
+          }
+        };
+        walk(dir, 0);
+        files.sort((a, b) => a.path.localeCompare(b.path));
+        return send(res, 200, JSON.stringify({ ok: true, dir, count: files.length, files }), MIME['.json']);
+      } catch (e) { return send(res, 200, JSON.stringify({ ok: false, error: String(e) }), MIME['.json']); }
+    }
+    // 本地 PDF 批量导入（NDJSON 流，progress… + 最终 result）
+    if (p === '/api/import-pdfs' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const paths = (Array.isArray(b.paths) ? b.paths : []).filter(x => typeof x === 'string' && x.trim());
+      if (!paths.length) return send(res, 400, JSON.stringify({ ok: false, error: '未选择 PDF' }), MIME['.json']);
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const args = ['import-pdfs']; if (b.enrich === false) args.push('--no-enrich');
+      let out = ''; const ch = spawnAgent(args);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e) }); res.end(); });
+      ch.on('close', code => { let r = {}; try { r = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0 && r.ok !== false, added: r.added || 0, dup: r.dup || 0, failed: r.failed || 0, error: r.error || '' }); res.end(); });
+      ch.stdin.write(JSON.stringify(paths)); ch.stdin.end();
+      return;
+    }
     if (p === '/api/settings' && req.method === 'GET') {
       const s = readSettings(), e = readEnv();
       return send(res, 200, JSON.stringify({
