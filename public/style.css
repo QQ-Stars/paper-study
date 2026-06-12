@@ -118,7 +118,7 @@ html[data-theme=dark] body::after{opacity:.055}
 .insight-card{margin-bottom:16px}
 .insight-card:last-child{margin-bottom:0}
 .echart-lg{width:100%;height:280px}
-.echart-graph{width:100%;height:540px}
+.echart-graph{width:100%;height:600px}
 .ins-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
 .ins-title{margin:0!important}
 /* 概况主卡：反白（印刷负片），右上随一枚段落符水印 */
