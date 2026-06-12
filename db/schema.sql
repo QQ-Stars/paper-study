@@ -78,6 +78,14 @@ CREATE TABLE IF NOT EXISTS paper_vectors (
   vector    BLOB
 );
 
+-- ========== 引用关系边(库内, 引用关系图) ==========
+-- src 引用 dst（二者都在库内）。由 agent citegraph 抓 S2 参考文献后建立。
+CREATE TABLE IF NOT EXISTS cite_edges (
+  src_id  TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+  dst_id  TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+  PRIMARY KEY (src_id, dst_id)
+);
+
 -- ========== 采集任务(P5) ==========
 CREATE TABLE IF NOT EXISTS ingest_jobs (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,

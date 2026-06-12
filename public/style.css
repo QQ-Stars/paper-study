@@ -114,6 +114,13 @@ html[data-theme=dark] body::after{opacity:.055}
 .chart-title{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:10px;font-weight:500;color:var(--ink-3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:14px}
 .chart-title::before{content:"";width:3px;height:11px;background:var(--accent);border-radius:2px}
 .echart{width:100%;flex:1 1 auto;min-height:158px}
+/* 洞察视图 */
+.insight-card{margin-bottom:16px}
+.insight-card:last-child{margin-bottom:0}
+.echart-lg{width:100%;height:280px}
+.echart-graph{width:100%;height:540px}
+.ins-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.ins-title{margin:0!important}
 /* 概况主卡：反白（印刷负片），右上随一枚段落符水印 */
 .chart-card.kpi{background:var(--ink);border-color:var(--ink);color:var(--bg);position:relative;overflow:hidden}
 .chart-card.kpi::after{content:"¶";position:absolute;right:16px;top:4px;font-family:var(--font-display);font-style:italic;font-size:68px;line-height:1;opacity:.09;pointer-events:none}

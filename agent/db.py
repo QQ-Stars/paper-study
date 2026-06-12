@@ -66,6 +66,13 @@ def ensure_vectors_table(con):
         vector   BLOB)""")
 
 
+def ensure_edges_table(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS cite_edges (
+        src_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        dst_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        PRIMARY KEY (src_id, dst_id))""")
+
+
 def insert_paper(con, row: dict):
     if row.get("venue"):
         row["venue"] = norm_venue(row["venue"])

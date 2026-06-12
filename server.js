@@ -296,6 +296,21 @@ const server = http.createServer(async (req, res) => {
       ch.stdin.write(JSON.stringify(paths)); ch.stdin.end();
       return;
     }
+    // 引用关系图：读缓存的库内引用边 + 节点
+    if (p === '/api/citegraph' && req.method === 'GET') {
+      return send(res, 200, JSON.stringify(dbapi.getCiteGraph()), MIME['.json']);
+    }
+    // 构建/刷新引用图（抓 S2 参考文献，较慢；NDJSON 进度）
+    if (p === '/api/cite-build' && req.method === 'POST') {
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      let out = ''; const ch = spawnAgent(['citegraph']);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e) }); res.end(); });
+      ch.on('close', code => { let r = {}; try { r = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0 && r.ok !== false, edges: r.edges || 0, nodes: r.nodes || 0, error: r.error || '' }); res.end(); });
+      return;
+    }
     if (p === '/api/settings' && req.method === 'GET') {
       const s = readSettings(), e = readEnv();
       return send(res, 200, JSON.stringify({

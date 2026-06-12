@@ -16,6 +16,7 @@ let currentView = 'home';
 let homeSort = { key: 'year', dir: 1 };
 let manageSrc = 'all';
 let chProgress = null, chDir = null, chVenue = null;
+let chTrend = null, chCite = null;     // 洞察：趋势 / 引用图
 
 const $ = (s) => document.querySelector(s);
 const md = (t) => (window.marked ? window.marked.parse(t || '') :
@@ -73,7 +74,7 @@ async function init() {
   showView('home');
 }
 function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = $('#themeBtn'); if (b) b.textContent = t === 'dark' ? '☀️' : '🌙'; localStorage.setItem('theme', t); }
-function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); renderHome(); }
+function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); renderHome(); if (currentView === 'insights') renderInsights(); }
 function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); localStorage.setItem(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
 const MIN_VIEWER = 320; // 中间 PDF 区最小宽度，任何时候都保留
 function initResizers() {
@@ -160,9 +161,11 @@ function showView(v) {
   document.querySelectorAll('.viewnav button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
   $('#home').classList.toggle('hidden', v !== 'home');
   $('#manage').classList.toggle('hidden', v !== 'manage');
+  $('#insights').classList.toggle('hidden', v !== 'insights');
   $('#layout').classList.toggle('hidden', v !== 'read');
   if (v === 'home') renderHome();
   if (v === 'manage') renderManage();
+  if (v === 'insights') renderInsights();
   if (v === 'read' && !current) { $('#pdfScroll').innerHTML = EMPTY_HTML; }
 }
 function fmtTime(s) {
@@ -321,6 +324,99 @@ function barOption(items, t2, t3) {
     }]
   };
 }
+// ====== 洞察：研究趋势 + 引用关系图 ======
+function buildInsightsShell() {
+  if (chTrend || !window.echarts) return;
+  chTrend = echarts.init($('#chartTrend'));
+  chCite = echarts.init($('#chartCite'));
+  chCite.on('click', (params) => {
+    if (params.dataType === 'node') { const p = PAPERS.find(x => x.id === params.data.id); if (p) openPaper(p); }
+  });
+}
+async function renderInsights() {
+  buildInsightsShell();
+  renderTrend();
+  try {
+    const g = await (await fetch('/api/citegraph')).json();
+    if (g && g.edgeCount > 0) renderCite(g); else showCitePrompt();
+  } catch (e) { showCitePrompt(); }
+}
+function renderTrend() {
+  if (!chTrend) return;
+  const t2 = cssVar('--ink-2'), t3 = cssVar('--ink-3');
+  const years = [...new Set(PAPERS.map(p => p.year).filter(y => /^\d{4}$/.test(y)))].sort();
+  const dirItems = topGroups(PAPERS, p => (p.type || '').split('·')[0], 6);
+  const topNames = new Set(dirItems.filter(d => d.name !== '其他').map(d => d.name));
+  const bucket = (p) => { const k = (p.type || '').split('·')[0] || '其他'; return topNames.has(k) ? k : '其他'; };
+  const series = dirItems.map(d => ({
+    name: d.name, type: 'bar', stack: 'total', barWidth: '50%',
+    itemStyle: { color: d.color }, emphasis: { focus: 'series' },
+    data: years.map(y => PAPERS.filter(p => p.year === y && bucket(p) === d.name).length)
+  }));
+  chTrend.setOption({
+    animationDuration: 700, animationEasing: 'cubicOut',
+    legend: { top: 2, textStyle: { color: t2, fontSize: 11 }, itemWidth: 11, itemHeight: 11, itemGap: 12 },
+    grid: { left: 6, right: 16, top: 40, bottom: 4, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    xAxis: { type: 'category', data: years, axisTick: { show: false }, axisLine: { lineStyle: { color: cssVar('--border') } }, axisLabel: { color: t2, fontSize: 12 } },
+    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: cssVar('--surface-3') } }, axisLabel: { color: t3, fontSize: 11 } },
+    series
+  });
+}
+function renderCite(g) {
+  if (!chCite) return;
+  chCite.clear();
+  $('#citeHint').textContent = `${g.nodes.length} 篇 · ${g.edgeCount} 条引用 · 节点越大＝被库内引用越多`;
+  const t2 = cssVar('--ink-2');
+  // 节点按方向分桶（与看板/趋势一致，避免图例过多、配色重复）
+  const dirItems = topGroups(g.nodes, n => (n.type || '').split('·')[0], 6);
+  const topNames = new Set(dirItems.filter(d => d.name !== '其他').map(d => d.name));
+  const bucket = (n) => { const k = (n.type || '').split('·')[0] || '其他'; return topNames.has(k) ? k : '其他'; };
+  const cats = dirItems.map(d => d.name);
+  const colorOf = {}; dirItems.forEach(d => { colorOf[d.name] = d.color; });
+  const maxIn = Math.max(1, ...g.nodes.map(n => n.indeg));
+  const data = g.nodes.map(n => ({
+    id: n.id, name: n.title,
+    symbolSize: 8 + (n.indeg / maxIn) * 28,
+    category: cats.indexOf(bucket(n)), value: n.indeg,
+    label: { show: n.indeg >= 3 }
+  }));
+  chCite.setOption({
+    tooltip: { confine: true, formatter: (p) => p.dataType === 'node' ? `${esc(p.data.name)}<br>被库内 <b>${p.data.value}</b> 篇引用` : '' },
+    legend: [{ data: cats, top: 2, textStyle: { color: t2, fontSize: 11 }, itemWidth: 11, itemHeight: 11, itemGap: 12 }],
+    series: [{
+      type: 'graph', layout: 'force', roam: true, draggable: true,
+      categories: cats.map(c => ({ name: c, itemStyle: { color: colorOf[c] } })),
+      force: { repulsion: 120, edgeLength: [50, 150], gravity: 0.06, friction: 0.18 },
+      data, links: g.links.map(l => ({ source: l.source, target: l.target })),
+      edgeSymbol: ['none', 'arrow'], edgeSymbolSize: 5,
+      lineStyle: { color: 'source', opacity: 0.26, width: 1, curveness: 0.08 },
+      label: { position: 'right', fontSize: 10, color: t2, formatter: (p) => p.data.name.length > 16 ? p.data.name.slice(0, 16) + '…' : p.data.name },
+      emphasis: { focus: 'adjacency', lineStyle: { width: 2, opacity: 0.6 }, label: { show: true } }
+    }]
+  });
+}
+function showCitePrompt() {
+  if (!chCite) return;
+  chCite.clear();
+  $('#citeHint').textContent = '';
+  chCite.setOption({ graphic: { type: 'text', left: 'center', top: 'center', style: { text: '还没有引用图\n点上方「⟳ 构建 / 刷新引用图」（抓取参考文献，约 1~2 分钟）', fill: cssVar('--ink-3'), fontSize: 13, lineHeight: 24, textAlign: 'center' } } });
+}
+async function buildCite() {
+  const btn = $('#citeBuildBtn'), hint = $('#citeHint');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '构建中…';
+  hint.textContent = '抓取参考文献中（约 1~2 分钟，有 S2 key 更快）…';
+  try {
+    await streamNDJSON('/api/cite-build', {}, (ev) => {
+      if (ev.type === 'progress') { const m = /^PROG::(\d+)::(\d+)/.exec(ev.line); if (m) hint.textContent = `抓取参考文献 ${m[1]} / ${m[2]}…`; }
+      else if (ev.type === 'result') { hint.textContent = ev.ok ? `✅ 已建 ${ev.edges} 条引用` : ('失败：' + (ev.error || '未知')); }
+    });
+    const g = await (await fetch('/api/citegraph')).json();
+    if (g && g.edgeCount > 0) renderCite(g); else showCitePrompt();
+  } catch (e) { hint.textContent = '失败：' + e; }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+
 function cmpHome(a, b) {
   const k = homeSort.key, d = homeSort.dir;
   let va, vb;
@@ -671,6 +767,7 @@ function bindUI() {
   $('#verifyVenueBtn').onclick = verifyVenues;
   $('#impScanBtn').onclick = scanPdfs;
   $('#impImportBtn').onclick = importPdfs;
+  $('#citeBuildBtn').onclick = buildCite;
   $('#impDir').onkeydown = (e) => { if (e.key === 'Enter') scanPdfs(); };
   document.querySelectorAll('#candPanel .vsrc-chip').forEach(c => c.onclick = () => c.classList.toggle('active'));
   $('#mSearch').oninput = renderManage;
@@ -695,7 +792,7 @@ function bindUI() {
   $('#themeBtn').onclick = toggleTheme;
   $('#toggleLeft').onclick = () => togglePane('hide-left');
   $('#toggleRight').onclick = () => togglePane('hide-right');
-  let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (pdfDoc && currentView === 'read') layoutPages(++renderToken); [chProgress, chDir, chVenue].forEach(c => c && c.resize()); }, 200); });
+  let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (pdfDoc && currentView === 'read') layoutPages(++renderToken); [chProgress, chDir, chVenue, chTrend, chCite].forEach(c => c && c.resize()); }, 200); });
 }
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -1137,8 +1234,11 @@ async function saveSettings() {
     pdfDir: $('#setPdfDir').value.trim(),
     researchTheme: $('#setTheme') ? $('#setTheme').value.trim() : ''
   };
-  if ($('#setApiKey').value.trim()) body.apiKey = $('#setApiKey').value.trim();
-  if ($('#setS2Key').value.trim()) body.s2ApiKey = $('#setS2Key').value.trim();
+  const ak = $('#setApiKey').value.trim(), sk = $('#setS2Key').value.trim();
+  const badKey = (k) => k && !/^[\x21-\x7E]+$/.test(k);   // 合法 key 全是无空格的可见 ASCII；含空格/中文 → 拦截
+  if (badKey(ak) || badKey(sk)) { const h = $('#setHint'); h.textContent = '⚠ API Key 含空格或非英文字符，看着不像 key，已拦截'; setTimeout(() => h.textContent = '', 4000); return; }
+  if (ak) body.apiKey = ak;
+  if (sk) body.s2ApiKey = sk;
   await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const h = $('#setHint'); h.textContent = '已保存 ✓（下次采集生效）'; setTimeout(() => h.textContent = '', 3000);
   loadSettings();

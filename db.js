@@ -53,6 +53,16 @@ const getNote = (id) => {
   const r = db.prepare('SELECT content FROM notes WHERE paper_id = ?').get(id);
   return r ? r.content : '';
 };
+// 引用关系图：库内论文为节点，cite_edges 为有向边（src 引用 dst）。
+const getCiteGraph = () => {
+  db.exec(`CREATE TABLE IF NOT EXISTS cite_edges (src_id TEXT NOT NULL, dst_id TEXT NOT NULL, PRIMARY KEY(src_id,dst_id))`);
+  const edges = db.prepare('SELECT src_id, dst_id FROM cite_edges').all();
+  const papers = db.prepare('SELECT id, title, venue, year, type, topic, citations FROM papers').all();
+  const indeg = {}, outdeg = {};
+  edges.forEach(e => { indeg[e.dst_id] = (indeg[e.dst_id] || 0) + 1; outdeg[e.src_id] = (outdeg[e.src_id] || 0) + 1; });
+  const nodes = papers.map(p => ({ id: p.id, title: p.title, venue: p.venue, year: p.year, type: p.type, topic: p.topic, citations: p.citations, indeg: indeg[p.id] || 0, outdeg: outdeg[p.id] || 0 }));
+  return { nodes, links: edges.map(e => ({ source: e.src_id, target: e.dst_id })), edgeCount: edges.length };
+};
 const setNote = (id, content) => db.prepare(`
   INSERT INTO notes(paper_id, content, updated_at) VALUES(?, ?, datetime('now'))
   ON CONFLICT(paper_id) DO UPDATE SET content = excluded.content, updated_at = datetime('now')
@@ -113,4 +123,4 @@ const updatePaper = (id, f) => {
   return db.prepare(`UPDATE papers SET ${cols.join(', ')}, updated_at = datetime('now') WHERE id = @id`).run(vals).changes;
 };
 
-module.exports = { db, listPapers, getExplainer, getTranslation, getNote, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper };
+module.exports = { db, listPapers, getExplainer, getTranslation, getNote, getCiteGraph, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper };
