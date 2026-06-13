@@ -1122,6 +1122,7 @@ function renderCandidates() {
   const SRC_SHORT = { dblp: 'DBLP', semanticscholar: 'S2', openalex: 'OpenAlex' };
   $('#candList').innerHTML = candidates.map((c, i) => {
     const rel = c.relevance != null ? Math.round(c.relevance * 100) : 0;
+    const vn = normVenue(c.venue) || '';
     const vv = c._verify;
     const vb = vv ? (
       vv.skipped ? `<b class="vbadge src" title="${vv.note || ''}">源自${SRC_SHORT[vv.source_of_truth] || vv.source_of_truth}</b>`
@@ -1131,7 +1132,7 @@ function renderCandidates() {
       <input type="checkbox" class="cand-ck" data-i="${i}" ${c.in_library ? 'disabled' : 'checked'} />
       <div class="cand-main">
         <div class="cand-title">${c.title}</div>
-        <div class="cand-meta"><span class="venue v-${c.venue || ''}">${c.venue || '—'} ${c.year || ''}</span>${ccfBadge(c.ccf)}${vb ? ' ' + vb : ''} · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
+        <div class="cand-meta"><span class="venue v-${vn}">${vn || '—'} ${c.year || ''}</span>${ccfBadge(c.ccf)}${vb ? ' ' + vb : ''} · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
       </div>
       <div class="cand-rel" title="相关度 ${rel}%"><div class="cand-rel-track"><div class="cand-rel-bar" style="width:${rel}%"></div></div><span>${rel}</span></div>
     </label>`;
