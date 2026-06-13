@@ -43,8 +43,14 @@ const normVenue = (v) => {
   return s;
 };
 
-// 列表：返回与旧 papers.json 相同的结构（含 file/status/hasNote）
-const listPapers = () => db.prepare(`
+// CCF 推荐目录（第七版）会议/期刊 → 级别 A/B/C
+let CCF_RANKS = {};
+try { CCF_RANKS = JSON.parse(fs.readFileSync(path.join(__dirname, 'db', 'ccf_ranks.json'), 'utf8')); } catch (e) {}
+const ccfRank = (v) => CCF_RANKS[normVenue(v)] || null;
+
+// 列表：返回与旧 papers.json 相同的结构（含 file/status/hasNote/ccf）
+const listPapers = () => {
+  const rows = db.prepare(`
   SELECT p.id,
          p.id || '.pdf'              AS file,
          p.title, p.venue, p.year, p.type, p.topic,
@@ -59,6 +65,9 @@ const listPapers = () => db.prepare(`
   LEFT JOIN favorites f ON f.paper_id = p.id
   ORDER BY p.year, COALESCE(p.order_no, 999), p.venue
 `).all();
+  rows.forEach(r => { r.ccf = ccfRank(r.venue); });   // 现算 CCF 级别（A/B/C），随 venue 变化
+  return rows;
+};
 
 const getExplainer = (id) => {
   const r = db.prepare('SELECT explainer FROM papers WHERE id = ?').get(id);

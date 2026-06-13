@@ -149,6 +149,7 @@ const server = http.createServer(async (req, res) => {
       const args = ['search', '--query', String(b.query), '--sources', sources.join(','), '--years', String(b.years || '2024-2026'),
         '--max', String(Math.min(parseInt(b.max) || 10, 60)), '--min-relevance', String(b.minRelevance == null ? 0 : b.minRelevance)];
       if (b.expand) args.push('--expand');
+      if (b.onlyA) args.push('--only-a');
       if (Array.isArray(b.queries) && b.queries.length) args.push('--queries', JSON.stringify(b.queries));
       let out = ''; const ch = spawnAgent(args);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));

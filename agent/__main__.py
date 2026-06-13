@@ -18,6 +18,7 @@ def _add_search_args(p):
     p.add_argument("--min-relevance", type=float, default=0.0)
     p.add_argument("--expand", action="store_true")
     p.add_argument("--expand-n", type=int, default=6)
+    p.add_argument("--only-a", action="store_true", help="只采 CCF-A 类会议/期刊的论文")
 
 
 def _years(s):
@@ -90,7 +91,7 @@ def main():
     elif args.cmd == "ingest":
         srcs = [s.strip() for s in args.sources.split(",") if s.strip()]
         pipeline.ingest(args.query, srcs, _years(args.years), args.max, args.min_relevance,
-                        args.explain, args.deep, args.expand, args.expand_n)
+                        args.explain, args.deep, args.expand, args.expand_n, only_a=args.only_a)
     elif args.cmd == "expand":
         sys.stdout.write(json.dumps(llm.expand_queries(args.query, args.expand_n), ensure_ascii=False))
         sys.stdout.flush()
@@ -98,7 +99,7 @@ def main():
         srcs = [s.strip() for s in args.sources.split(",") if s.strip()]
         qs = json.loads(args.queries) if args.queries.strip() else None
         cands = pipeline.search(args.query, srcs, _years(args.years), args.max,
-                                args.min_relevance, args.expand, args.expand_n, qs)
+                                args.min_relevance, args.expand, args.expand_n, qs, only_a=args.only_a)
         sys.stdout.write(json.dumps(cands, ensure_ascii=False))
         sys.stdout.flush()
     elif args.cmd == "ingest-selected":

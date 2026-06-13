@@ -2,7 +2,7 @@
 import json
 import math
 import sys
-from . import db, llm, util, config, extract
+from . import db, llm, util, config, extract, ccf
 from .models import PaperStub
 from .sources.semanticscholar import SemanticScholar
 from .sources.arxiv import Arxiv
@@ -12,7 +12,7 @@ from .sources.dblp import DBLP
 SOURCES = {"semanticscholar": SemanticScholar, "arxiv": Arxiv, "openalex": OpenAlex, "dblp": DBLP}
 
 
-def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=False, expand=False, expand_n=6):
+def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=False, expand=False, expand_n=6, only_a=False):
     # 1) 智能扩展检索词（中文/模糊方向 → 多个精准英文检索词）
     queries = llm.expand_queries(direction, expand_n) if expand else [direction]
     print("🔎 检索词：")
@@ -46,6 +46,9 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
     for stub in seen.values():
         if added >= limit or n_cls >= cap:
             break
+        if only_a and ccf.rank(stub.venue) != "A":
+            skipped += 1
+            continue
         tn = db.title_norm(stub.title)
         if db.exists(con, arxiv_id=stub.arxiv_id, title_norm_v=tn):
             skipped += 1
@@ -109,8 +112,8 @@ def _p(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n=6, queries=None):
-    """第一阶段：扩展→多源收集→去重→LLM分类打分。返回候选(不下载PDF)。"""
+def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n=6, queries=None, only_a=False):
+    """第一阶段：扩展→多源收集→去重→LLM分类打分。返回候选(不下载PDF)。only_a=只保留 CCF-A。"""
     queries = queries if queries else (llm.expand_queries(direction, expand_n) if expand else [direction])
     _p("STAGE::expand")
     _p("QUERIES::" + json.dumps(queries, ensure_ascii=False))
@@ -139,6 +142,9 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
     for stub in seen.values():
         if len(cands) >= limit or i >= cap:
             break
+        crank = ccf.rank(stub.venue)
+        if only_a and crank != "A":          # 只采 CCF-A：非 A 直接跳过（也省去分类调用）
+            continue
         i += 1
         tn = db.title_norm(stub.title)
         in_lib = db.exists(con, arxiv_id=stub.arxiv_id, title_norm_v=tn)
@@ -156,6 +162,7 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
             continue
         cands.append({
             **stub.model_dump(),
+            "ccf": crank,
             "type": attrs.type, "topic": attrs.topic, "task": attrs.task,
             "models": attrs.models, "datasets": attrs.datasets,
             "contribution": attrs.contribution, "llm_tldr": attrs.tldr, "tags": attrs.tags,
