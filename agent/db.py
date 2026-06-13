@@ -26,6 +26,25 @@ VENUE_CANON = {
     "acl": "ACL", "emnlp": "EMNLP", "naacl": "NAACL", "coling": "COLING",
     "tmlr": "TMLR", "tpami": "TPAMI", "corr": "arXiv",
 }
+# 会议「全名 → 缩写」子串匹配（顺序敏感：更具体的在前）
+VENUE_FULL = [
+    ("empirical methods in natural language", "EMNLP"),
+    ("north american chapter", "NAACL"),
+    ("findings of the association for computational linguistics", "ACL Findings"),
+    ("association for computational linguistics", "ACL"),
+    ("computer vision and pattern recognition", "CVPR"),
+    ("european conference on computer vision", "ECCV"),
+    ("winter conference on applications of computer vision", "WACV"),
+    ("international conference on computer vision", "ICCV"),
+    ("learning representations", "ICLR"),
+    ("international conference on machine learning", "ICML"),
+    ("neural information processing systems", "NeurIPS"),
+    ("international joint conference on artificial intelligence", "IJCAI"),
+    ("aaai conference on artificial intelligence", "AAAI"),
+    ("advancement of artificial intelligence", "AAAI"),
+    ("acm multimedia", "ACM MM"),
+    ("international conference on multimedia", "ACM MM"),
+]
 
 
 def norm_venue(v):
@@ -33,10 +52,13 @@ def norm_venue(v):
         return v
     s = str(v).strip()
     k = s.lower()
-    if k in VENUE_CANON:
+    if k in VENUE_CANON:                             # 缩写大小写变体
         return VENUE_CANON[k]
-    if k.startswith("arxiv"):                       # arXiv / arXiv.org / arXiv preprint…
+    if k.startswith("arxiv"):                        # arXiv / arXiv.org / arXiv preprint…
         return "arXiv"
+    for sub, abbr in VENUE_FULL:                     # 全名 → 缩写
+        if sub in k:
+            return abbr
     return s
 
 

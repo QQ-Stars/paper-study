@@ -105,6 +105,7 @@ html[data-theme=dark] body::after{opacity:.055}
 
 /* ============ 总览看板 ============ */
 #home{flex:1;min-height:0;overflow-y:auto;padding:26px 34px 48px;animation:fade .4s ease}
+#insights{flex:1;min-height:0;overflow-y:auto;padding:26px 34px 48px;animation:fade .4s ease}
 .dash{display:grid;grid-template-columns:1.18fr 1fr 1fr 1fr;gap:16px;margin-bottom:18px}
 @media(max-width:1180px){.dash{grid-template-columns:1fr 1fr}}
 @media(max-width:660px){.dash{grid-template-columns:1fr}}
@@ -118,7 +119,7 @@ html[data-theme=dark] body::after{opacity:.055}
 .insight-card{margin-bottom:16px}
 .insight-card:last-child{margin-bottom:0}
 .echart-lg{width:100%;height:280px}
-.echart-graph{width:100%;height:600px}
+.echart-graph{width:100%;max-width:900px;height:600px;margin:0 auto}
 .ins-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
 .ins-title{margin:0!important}
 /* 概况主卡：反白（印刷负片），右上随一枚段落符水印 */
