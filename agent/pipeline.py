@@ -162,6 +162,7 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
             continue
         cands.append({
             **stub.model_dump(),
+            "venue": db.norm_venue(stub.venue),     # 全名→简称（如 …Computational Linguistics→ACL）
             "ccf": crank,
             "type": attrs.type, "topic": attrs.topic, "task": attrs.task,
             "models": attrs.models, "datasets": attrs.datasets,
