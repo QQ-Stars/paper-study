@@ -16,11 +16,30 @@ db.exec(fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8'));
 
 // 会议名归一化（与 public/app.js 的 normVenue、agent/db.py 的 norm_venue 保持一致）
 const VENUE_CANON = { neurips: 'NeurIPS', nips: 'NeurIPS', cvpr: 'CVPR', iccv: 'ICCV', eccv: 'ECCV', wacv: 'WACV', icml: 'ICML', iclr: 'ICLR', aaai: 'AAAI', ijcai: 'IJCAI', acl: 'ACL', emnlp: 'EMNLP', naacl: 'NAACL', coling: 'COLING', tmlr: 'TMLR', tpami: 'TPAMI', corr: 'arXiv' };
+const VENUE_FULL = [
+  ['empirical methods in natural language', 'EMNLP'],
+  ['north american chapter', 'NAACL'],
+  ['findings of the association for computational linguistics', 'ACL Findings'],
+  ['association for computational linguistics', 'ACL'],
+  ['computer vision and pattern recognition', 'CVPR'],
+  ['european conference on computer vision', 'ECCV'],
+  ['winter conference on applications of computer vision', 'WACV'],
+  ['international conference on computer vision', 'ICCV'],
+  ['learning representations', 'ICLR'],
+  ['international conference on machine learning', 'ICML'],
+  ['neural information processing systems', 'NeurIPS'],
+  ['international joint conference on artificial intelligence', 'IJCAI'],
+  ['aaai conference on artificial intelligence', 'AAAI'],
+  ['advancement of artificial intelligence', 'AAAI'],
+  ['acm multimedia', 'ACM MM'],
+  ['international conference on multimedia', 'ACM MM']
+];
 const normVenue = (v) => {
   if (!v) return v;
   const s = String(v).trim(), k = s.toLowerCase();
   if (VENUE_CANON[k]) return VENUE_CANON[k];
   if (k.startsWith('arxiv')) return 'arXiv';
+  for (const [sub, abbr] of VENUE_FULL) { if (k.includes(sub)) return abbr; }
   return s;
 };
 
