@@ -4,7 +4,7 @@
 - 查不到正式发表记录 → 保留原值并标"仅预印本"，绝不编造。
 """
 import sys
-from . import util, config
+from . import util, config, ccf
 from .sources.dblp import DBLP
 from .sources.openalex import OpenAlex
 
@@ -126,7 +126,7 @@ def verify_one(c, sources):
     # 候选本就来自所选权威源之一 → 已权威，无需核实
     if cand_src in sources:
         return {"venue": orig, "year": c.get("year"), "matched": True, "skipped": True,
-                "source_of_truth": cand_src, "changed": False, "orig_venue": orig,
+                "source_of_truth": cand_src, "changed": False, "orig_venue": orig, "ccf": ccf.rank(orig),
                 "note": f"数据源即权威源（{SRC_LABEL.get(cand_src, cand_src)}），无需核实"}
     # 按所选源优先级逐个查，命中即止
     for s in sources:
@@ -140,9 +140,10 @@ def verify_one(c, sources):
         if r:
             venue = r[0] or orig
             return {"venue": venue, "year": (r[1] or c.get("year")), "matched": True, "skipped": False,
-                    "source_of_truth": s, "changed": (_norm(venue) != _norm(orig)), "orig_venue": orig, "note": ""}
+                    "source_of_truth": s, "changed": (_norm(venue) != _norm(orig)), "orig_venue": orig,
+                    "ccf": ccf.rank(venue), "note": ""}
     return {"venue": orig, "year": c.get("year"), "matched": False, "skipped": False,
-            "source_of_truth": "none", "changed": False, "orig_venue": orig,
+            "source_of_truth": "none", "changed": False, "orig_venue": orig, "ccf": ccf.rank(orig),
             "note": "所选权威库未找到正式发表记录（可能确为预印本）"}
 
 

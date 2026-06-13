@@ -452,11 +452,12 @@ function semScoreBadge(id) {
   const pct = Math.max(0, Math.min(100, Math.round(semRank.get(id) * 100)));
   return `<span class="sem-score" title="语义相关度 ${pct}%">${pct}</span>`;
 }
+function ccfBadge(ccf) { return ccf ? `<span class="ccf ccf-${ccf}" title="CCF ${ccf} 类">${ccf}</span>` : ''; }
 function rowHTML(p, idx) {
   return `<tr data-id="${p.id}">
     <td><span class="ht-idx">${idx}</span></td>
-    <td class="ht-title">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${p.title}</td>
-    <td><span class="venue v-${p.venue}">${p.venue}</span></td>
+    <td class="ht-title" title="${esc(p.title)}">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${p.title}</td>
+    <td><span class="venue v-${p.venue}">${p.venue}</span>${ccfBadge(p.ccf)}</td>
     <td>${p.year}</td>
     <td>${p.type}</td>
     <td>${p.topic || ''}</td>
@@ -504,7 +505,7 @@ function paperItem(p) {
   const order = p.order ? `<span class="order-badge">${p.order}</span>` : '';
   d.innerHTML =
     `<div class="pi-top">${order}<div class="pi-title">${p.title}</div><span class="fav-star ${p.favorite ? 'on' : ''}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span><span class="status-dot ${p.status}" title="${p.status}"></span></div>
-     <div class="pi-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span><span class="dir">${p.type}${p.topic ? ' · ' + p.topic : ''}</span>${semScoreBadge(p.id)}</div>`;
+     <div class="pi-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span>${ccfBadge(p.ccf)}<span class="dir">${p.type}${p.topic ? ' · ' + p.topic : ''}</span>${semScoreBadge(p.id)}</div>`;
   d.querySelector('.fav-star').onclick = (e) => { e.stopPropagation(); toggleFavorite(p.id); };
   return d;
 }
@@ -1092,7 +1093,7 @@ async function runSearch(queries) {
     await streamNDJSON('/api/search', {
       query: q, sources, years: $('#ingYears').value.trim(),
       max: parseInt($('#ingMax').value) || 10, minRelevance: parseFloat($('#ingRel').value),
-      expand: queries ? false : $('#ingExpand').checked, queries: queries || null
+      expand: queries ? false : $('#ingExpand').checked, onlyA: $('#ingOnlyA').checked, queries: queries || null
     }, (ev) => {
       if (ev.type === 'progress') handleProgress(ev.line);
       else if (ev.type === 'result') { candidates = ev.candidates || []; renderCandidates(); }
@@ -1117,7 +1118,7 @@ function renderCandidates() {
       <input type="checkbox" class="cand-ck" data-i="${i}" ${c.in_library ? 'disabled' : 'checked'} />
       <div class="cand-main">
         <div class="cand-title">${c.title}</div>
-        <div class="cand-meta"><span class="venue v-${c.venue || ''}">${c.venue || '—'} ${c.year || ''}</span>${vb ? ' ' + vb : ''} · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
+        <div class="cand-meta"><span class="venue v-${c.venue || ''}">${c.venue || '—'} ${c.year || ''}</span>${ccfBadge(c.ccf)}${vb ? ' ' + vb : ''} · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
       </div>
       <div class="cand-rel" title="相关度 ${rel}%"><div class="cand-rel-track"><div class="cand-rel-bar" style="width:${rel}%"></div></div><span>${rel}</span></div>
     </label>`;
@@ -1154,6 +1155,7 @@ async function verifyVenues() {
         vs.forEach((v, i) => {
           if (!candidates[i]) return;
           candidates[i]._verify = v;
+          if (v.ccf !== undefined) candidates[i].ccf = v.ccf;
           if (v.matched && !v.skipped) { candidates[i].venue = v.venue; if (v.year) candidates[i].year = v.year; }
         });
         renderCandidates();
