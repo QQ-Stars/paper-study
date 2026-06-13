@@ -802,6 +802,7 @@ function bindUI() {
   $('#setSaveBtn').onclick = saveSettings;
   $('#setTestBtn').onclick = testLLM;
   $('#reindexBtn').onclick = reindexAll;
+  $('#normVenueBtn').onclick = normVenues;
   $('#settingsBtn').onclick = openSettingsModal;
   $('#setClose').onclick = closeSettingsModal;
   $('#settingsModal').onclick = (e) => { if (e.target.id === 'settingsModal') closeSettingsModal(); };
@@ -952,6 +953,25 @@ async function runSemSearch(query) {
     });
   } catch (e) { updateSummary(); alert('语义检索失败：' + e); }
   finally { semBusy = false; }
+}
+async function normVenues() {
+  const btn = $('#normVenueBtn'), hint = $('#normVenueHint');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '规整中…';
+  hint.textContent = '大模型规整会议名中…';
+  try {
+    await streamNDJSON('/api/norm-venues', {}, (ev) => {
+      if (ev.type === 'progress') {
+        if (ev.line.startsWith('STAGE::apply')) hint.textContent = '写入中…';
+      } else if (ev.type === 'result') {
+        if (ev.ok) {
+          const n = Object.keys(ev.mapping || {}).length;
+          hint.textContent = n ? `✅ 规整 ${n} 个会议名 · ${ev.changed} 篇` : '✅ 已是规范，无需改动';
+          reloadPapers();
+        } else hint.textContent = '失败：' + (ev.error || '未知');
+      }
+    });
+  } catch (e) { hint.textContent = '失败：' + e; }
+  finally { btn.disabled = false; btn.textContent = old; }
 }
 async function reindexAll() {
   const btn = $('#reindexBtn'), hint = $('#reindexHint');
