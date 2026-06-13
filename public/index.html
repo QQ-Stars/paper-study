@@ -72,7 +72,7 @@
     <div class="page-head"><h1>管理<em>Collect &amp; Curate</em></h1><span class="ph-line"></span></div>
     <!-- 采集命令条 -->
     <div class="ingest-bar">
-      <div class="ib-head"><span class="ib-title">采集新论文</span><span class="ib-tip">输入方向 → 预览候选（含相关度/已在库）→ 勾选入库；中文/英文皆可，自动扩展检索词</span></div>
+      <div class="ib-head"><span class="ib-title">采集新论文</span><span class="ib-tip">输入方向 →（智能扩展时）预览/编辑检索词 → 「用这些词检索」→ 勾选入库；中文/英文皆可</span></div>
       <div class="ib-row">
         <input id="ingQuery" class="ib-input" placeholder="如：多模态大模型的幻觉检测与缓解" />
         <button id="ingSearchBtn" class="mini primary ib-btn">检索 →</button>
@@ -94,7 +94,7 @@
       </div>
 
       <div id="ingQueriesBox" class="ing-queries hidden">
-        <div class="iq-head">检索词（点 × 删除，输入框回车添加）</div>
+        <div class="iq-head">检索词 · 确认或编辑后点「用这些词检索 →」（点 × 删除，回车添加）</div>
         <div id="ingQueryChips" class="iq-chips"></div>
         <div class="iq-bottom">
           <input id="ingQueryAdd" class="iq-add" placeholder="+ 添加检索词后回车" />

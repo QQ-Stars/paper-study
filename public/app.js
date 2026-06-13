@@ -784,7 +784,8 @@ function bindUI() {
   $('#favFilter').onclick = toggleFavFilter;
   $('#zoomIn').onclick = () => setZoom(zoomFactor + 0.15);
   $('#zoomOut').onclick = () => setZoom(zoomFactor - 0.15);
-  $('#ingSearchBtn').onclick = () => runSearch(null);
+  $('#ingSearchBtn').onclick = () => { if ($('#ingExpand').checked) editQueries(); else runSearch(null); };
+  $('#ingExpand').onchange = syncSearchBtnLabel; syncSearchBtnLabel();
   $('#ingEditBtn').onclick = editQueries;
   $('#ingSearchWithBtn').onclick = () => runSearch(currentQueries());
   $('#ingQueryAdd').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const a = currentQueries() || []; a.push(e.target.value.trim()); e.target.value = ''; renderQueryChips(a); } };
@@ -1061,14 +1062,24 @@ function renderQueryChips(qs) {
   box.innerHTML = qs.map((x, i) => `<span class="iq-chip">${x}<b class="iq-x" data-i="${i}">×</b></span>`).join('') || '<span class="placeholder">（无检索词）</span>';
   document.querySelectorAll('#ingQueryChips .iq-x').forEach(b => b.onclick = () => { const a = currentQueries(); a.splice(+b.dataset.i, 1); renderQueryChips(a); });
 }
+function syncSearchBtnLabel() {
+  const b = $('#ingSearchBtn'), exp = $('#ingExpand') && $('#ingExpand').checked;
+  if (b) { b.textContent = exp ? '扩展检索词 →' : '检索 →'; b.title = exp ? '先用大模型扩展检索词并预览，确认/编辑后再点「用这些词检索」正式检索' : '直接用方向原词检索'; }
+  const edit = $('#ingEditBtn'); if (edit) edit.style.display = exp ? 'none' : '';
+}
 async function editQueries() {
   const q = $('#ingQuery').value.trim(); if (!q) { alert('请先填写检索方向'); return; }
+  const btn = $('#ingSearchBtn'), old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '扩展中…'; }
+  $('#ingStages').classList.add('hidden'); $('#candPanel').classList.add('hidden');
   $('#ingQueriesBox').classList.remove('hidden');
   $('#ingQueryChips').innerHTML = '<span class="placeholder">生成中…</span>';
+  $('#ingQueriesBox').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   try {
     const j = await (await fetch('/api/expand', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, expandN: 6 }) })).json();
     renderQueryChips((j.queries && j.queries.length) ? j.queries : [q]);
   } catch (e) { renderQueryChips([q]); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
 }
 function handleProgress(line) {
   if (line.startsWith('STAGE::')) {
