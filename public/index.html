@@ -53,7 +53,8 @@
         <thead><tr>
           <th style="width:46px">#</th>
           <th data-sort="title">论文标题</th>
-          <th data-sort="venue" style="width:110px">会议</th>
+          <th data-sort="venue" style="width:104px">会议</th>
+          <th data-sort="ccf" style="width:60px">CCF</th>
           <th data-sort="year" style="width:66px">年份</th>
           <th data-sort="type" style="width:120px">方向</th>
           <th data-sort="topic" style="width:110px">主题</th>
@@ -225,13 +226,13 @@
     <div class="modal-card wide">
       <div class="modal-head"><span>⚙ 模型与数据源设置<span id="setSummaryMeta" class="set-meta-inline">—</span></span><button id="setClose" class="modal-x" title="关闭">×</button></div>
       <div class="modal-body">
-        <div class="settings-theme">
-          <div class="settings-sub">研究主题 · 决定采集分类与相关度</div>
+        <div class="set-card set-card-theme">
+          <div class="settings-sub">研究主题<span class="sub-note">决定采集分类与相关度</span></div>
           <input id="setTheme" class="theme-input" placeholder="如：多模态大模型的幻觉检测与缓解" />
           <div class="set-tip">采集时大模型会优先把论文归入库中<b>已有的研究方向</b>，都不合适才新建——换个主题即可研究任意方向。留空则用每次检索词。</div>
         </div>
         <div class="settings-cols">
-          <div>
+          <div class="set-card">
             <div class="settings-sub">大模型</div>
             <div class="m-field"><label>供应商</label>
               <select id="setProvider">
@@ -252,28 +253,35 @@
               <span id="setHint" class="hint"></span>
             </div>
           </div>
-          <div>
-            <div class="settings-sub">数据源 API</div>
-            <div class="m-field"><label>Semantic Scholar API Key（可选）</label>
-              <input id="setS2Key" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
-            <div class="set-tip" id="setS2Tip"></div>
-            <div class="set-tip">· arXiv 无需 key（公开 API）<br>· 没有 S2 key 也能用，只是高峰期可能限流</div>
-            <div class="settings-sub" style="margin-top:20px">本地存储</div>
-            <div class="m-field"><label>PDF 下载目录（留空＝默认 data/pdfs）</label>
-              <input id="setPdfDir" placeholder="如 D:\\papers，留空用默认" /></div>
-            <div class="set-tip">本地查找顺序：默认 data/pdfs → 自定义目录 → 种子目录</div>
-            <div class="settings-sub" style="margin-top:20px">语义检索 🔮</div>
-            <div class="set-actions">
-              <button id="reindexBtn" class="mini">重建语义索引</button>
-              <span id="reindexHint" class="hint"></span>
+          <div class="set-col">
+            <div class="set-card">
+              <div class="settings-sub">数据源 API</div>
+              <div class="m-field"><label>Semantic Scholar API Key（可选）</label><input id="setS2Key" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
+              <div class="set-tip" id="setS2Tip"></div>
+              <div class="set-tip">· arXiv 无需 key（公开 API）<br>· 没有 S2 key 也能用，只是高峰期可能限流</div>
             </div>
-            <div class="set-tip">用本地嵌入模型把全库论文向量化，即可在顶栏「🔮 语义」用大意/中文描述检索（跨语言）。新采集的论文检索时会自动补索引；换嵌入模型后可在此全量重建。</div>
-            <div class="settings-sub" style="margin-top:18px">数据整理 🏛</div>
-            <div class="set-actions">
-              <button id="normVenueBtn" class="mini">规整会议名 (AI)</button>
-              <span id="normVenueHint" class="hint"></span>
+            <div class="set-card">
+              <div class="settings-sub">本地存储</div>
+              <div class="m-field"><label>PDF 下载目录（留空＝默认 data/pdfs）</label><input id="setPdfDir" placeholder="如 D:\\papers，留空用默认" /></div>
+              <div class="set-tip">本地查找顺序：默认 data/pdfs → 自定义目录 → 种子目录</div>
             </div>
-            <div class="set-tip">用大模型把库里五花八门的会议/期刊名统一成标准简称（有简称尽量用简称），不靠写死的列表、适用任意会议。采集多了点一下即可。</div>
+            <div class="set-card">
+              <div class="settings-sub">维护工具</div>
+              <div class="set-tool">
+                <div class="set-actions">
+                  <button id="reindexBtn" class="mini">🔮 重建语义索引</button>
+                  <span id="reindexHint" class="hint"></span>
+                </div>
+                <div class="set-tip">把全库论文向量化，用顶栏「🔮 语义」按大意/中文描述检索（跨语言）。新采集自动补索引；换嵌入模型后可全量重建。</div>
+              </div>
+              <div class="set-tool">
+                <div class="set-actions">
+                  <button id="normVenueBtn" class="mini">🏛 规整会议名 (AI)</button>
+                  <span id="normVenueHint" class="hint"></span>
+                </div>
+                <div class="set-tip">用大模型把库里五花八门的会议/期刊名统一成标准简称（有简称尽量用简称），适用任意会议。</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

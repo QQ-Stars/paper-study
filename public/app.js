@@ -229,7 +229,7 @@ function renderHome() {
   if (sem) list.sort((a, b) => semRank.get(b.id) - semRank.get(a.id));
   else list.sort(cmpHome);
   const emptyMsg = sem ? '语义检索没有命中（试试换种说法）。' : (favOnly ? '还没有收藏的论文。在阅读界面点「☆ 收藏」即可。' : '没有匹配的论文。');
-  $('#homeBody').innerHTML = list.map((p, i) => rowHTML(p, i + 1)).join('') || `<tr><td colspan="9" class="empty-row">${emptyMsg}</td></tr>`;
+  $('#homeBody').innerHTML = list.map((p, i) => rowHTML(p, i + 1)).join('') || `<tr><td colspan="10" class="empty-row">${emptyMsg}</td></tr>`;
   document.querySelectorAll('#homeBody tr[data-id]').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
   document.querySelectorAll('#homeBody .fav-star').forEach(s => s.onclick = (e) => { e.stopPropagation(); toggleFavorite(s.dataset.id); });
   document.querySelectorAll('#homeTable th[data-sort]').forEach(th => {
@@ -443,6 +443,7 @@ function cmpHome(a, b) {
   const k = homeSort.key, d = homeSort.dir;
   let va, vb;
   if (k === 'status') { const m = { '未开始': 0, '学习中': 1, '已理解': 2 }; va = m[a.status]; vb = m[b.status]; }
+  else if (k === 'ccf') { const m = { A: 0, B: 1, C: 2 }; va = (a.ccf in m) ? m[a.ccf] : 3; vb = (b.ccf in m) ? m[b.ccf] : 3; }
   else { va = (a[k] || '') + ''; vb = (b[k] || '') + ''; }
   if (va < vb) return -d; if (va > vb) return d;
   return (a.year + '').localeCompare(b.year + '') || ((a.order || 99) - (b.order || 99));
@@ -457,7 +458,8 @@ function rowHTML(p, idx) {
   return `<tr data-id="${p.id}">
     <td><span class="ht-idx">${idx}</span></td>
     <td class="ht-title" title="${esc(p.title)}">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${p.title}</td>
-    <td><span class="venue v-${p.venue}">${p.venue}</span>${ccfBadge(p.ccf)}</td>
+    <td><span class="venue v-${p.venue}">${p.venue}</span></td>
+    <td class="ht-ccf">${ccfBadge(p.ccf)}</td>
     <td>${p.year}</td>
     <td>${p.type}</td>
     <td>${p.topic || ''}</td>
@@ -869,7 +871,7 @@ function renderManage() {
   list.sort(cmp);
   $('#mCount').textContent = `共 ${list.length}`;
   $('#mList').innerHTML = list.map(p => {
-    const meta = [`<span class="venue v-${p.venue}">${p.venue} ${p.year}</span>`, p.type];
+    const meta = [`<span class="venue v-${p.venue}">${p.venue} ${p.year}</span>${ccfBadge(p.ccf)}`, p.type];
     if (p.topic) meta.push(p.topic);
     if (p.relevance != null) meta.push('rel ' + p.relevance);
     if (p.citations != null) meta.push(p.citations + ' cite');
