@@ -103,6 +103,41 @@ def parse_pdf_meta(page_text: str) -> dict:
     }
 
 
+VENUE_NORM_SYSTEM = (
+    "你是学术会议/期刊名称规整助手。给你一组会议或期刊名称（JSON 数组），为每个给出**标准简称**。规则：\n"
+    "- 知名会议/期刊一律用公认缩写：CVPR, ICCV, ECCV, WACV, NeurIPS, ICML, ICLR, AAAI, IJCAI, "
+    "ACL, EMNLP, NAACL, COLING, ACM MM, TPAMI, IJCV, TMLR, TACL 等。\n"
+    "- 名称里括号内含缩写（如 “…(ICFTIC)”）就用括号里的缩写。\n"
+    "- arXiv / arXiv.org / preprint / CoRR 一律写成 'arXiv'。\n"
+    "- 没有公认缩写的期刊或小会：去掉 'Proceedings of the'、年份、'IEEE'/'ACM' 等冗余前后缀，"
+    "保留一个**尽量短**的规范名称。\n"
+    "- **已经是规范缩写的原样保留**，不要改动。\n"
+    "只输出一个 JSON 对象：键=我给的每个原名（原样照抄），值=对应简称。不要解释。"
+)
+
+
+def canonicalize_venues(venues: list) -> dict:
+    """把一组会议/期刊名规整成标准简称。返回 {原名: 简称}。分批以防过长。"""
+    out = {}
+    uniq = [v for v in dict.fromkeys(venues) if v and str(v).strip()]
+    for i in range(0, len(uniq), 60):
+        chunk = uniq[i:i + 60]
+        try:
+            resp = client().chat.completions.create(
+                model=config.MODEL,
+                messages=[{"role": "system", "content": VENUE_NORM_SYSTEM},
+                          {"role": "user", "content": json.dumps(chunk, ensure_ascii=False)}],
+                response_format={"type": "json_object"}, temperature=0,
+            )
+            d = json.loads(resp.choices[0].message.content) or {}
+            for k, v in d.items():
+                if isinstance(v, str) and v.strip():
+                    out[k] = v.strip()
+        except Exception:
+            continue
+    return out
+
+
 def expand_queries(direction: str, n: int = 6) -> list:
     """把（可能中文/模糊的）研究方向 → 一组精准英文检索词组合。"""
     sys = (

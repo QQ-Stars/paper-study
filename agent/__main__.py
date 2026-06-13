@@ -71,6 +71,8 @@ def main():
 
     sub.add_parser("citegraph", help="构建库内引用关系边(抓 S2 参考文献)，写入 cite_edges")
 
+    sub.add_parser("norm-venues", help="用大模型把库内会议/期刊名规整成标准简称(落库)")
+
     sub.add_parser("ping", help="测试大模型连通性")
     sub.add_parser("purge", help="删除采集来的论文（保留 seed 种子 38 篇）")
 
@@ -140,6 +142,9 @@ def main():
     elif args.cmd == "citegraph":
         from . import citegraph
         citegraph.build_edges()
+    elif args.cmd == "norm-venues":
+        from . import venuefix
+        venuefix.run()
 
 
 if __name__ == "__main__":
