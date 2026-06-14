@@ -359,6 +359,72 @@ const server = http.createServer(async (req, res) => {
       child.on('close', code => send(res, 200, JSON.stringify({ ok: code === 0, output: out }), MIME['.json']));
       return;
     }
+    // ============ 后台采集任务（P5）============
+    // 发起后台任务：建行 → 后台 spawn run-job（不等结束）→ 立即返回 id
+    if (p === '/api/jobs' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const sources = (Array.isArray(b.sources) ? b.sources : []).filter(s => ['semanticscholar', 'arxiv', 'openalex', 'dblp'].includes(s));
+      if (!b.query || !String(b.query).trim() || !sources.length) return send(res, 400, JSON.stringify({ ok: false, error: '缺少检索方向或数据源' }), MIME['.json']);
+      const yrs = String(b.years || '2024-2026').split('-');
+      const id = dbapi.createJob({ query: b.query, sources, yearFrom: parseInt(yrs[0]) || null, yearTo: parseInt(yrs[1] || yrs[0]) || null, max: b.max, minRelevance: b.minRelevance, onlyA: !!b.onlyA });
+      runJobBackground(id);
+      return send(res, 200, JSON.stringify({ ok: true, id }), MIME['.json']);
+    }
+    if (p === '/api/jobs' && req.method === 'GET') {
+      return send(res, 200, JSON.stringify(dbapi.listJobs()), MIME['.json']);
+    }
+    if (p === '/api/jobs/detail' && req.method === 'GET') {
+      const id = parseInt(u.searchParams.get('id'));
+      const job = dbapi.getJob(id);
+      if (!job) return send(res, 404, JSON.stringify({ ok: false, error: '任务不存在' }), MIME['.json']);
+      return send(res, 200, JSON.stringify({ ok: true, job, candidates: dbapi.listJobCandidates(id) }), MIME['.json']);
+    }
+    if (p === '/api/jobs/delete' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      dbapi.deleteJob(parseInt(b.id));
+      return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
+    }
+    // 确认入库：选中的暂存候选走 ingest-selected（复用入库链路）→ 标记 added + 收尾
+    if (p === '/api/jobs/confirm' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const jobId = parseInt(b.jobId);
+      const cands = Array.isArray(b.candidates) ? b.candidates : [];
+      if (!jobId || !cands.length) return send(res, 400, JSON.stringify({ ok: false, error: '缺少任务或候选' }), MIME['.json']);
+      const cids = cands.map(c => c._cid).filter(Boolean);
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const args = ['ingest-selected']; if (b.deep) args.push('--deep');
+      let added = 0; const ch = spawnAgent(args);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (!l.trim()) return; const m = /^INGESTED::(\d+)/.exec(l); if (m) added = +m[1]; emit({ type: 'progress', line: l }); }));
+      ch.on('error', e => { emit({ type: 'done', ok: false, error: String(e) }); res.end(); });
+      ch.on('close', code => {
+        try { dbapi.markJobCandidateIds(jobId, cids, 'added'); dbapi.bumpJobAdded(jobId, added); dbapi.closeJobIfEmpty(jobId); } catch (e) {}
+        emit({ type: 'done', ok: code === 0, added }); res.end();
+      });
+      ch.stdin.write(JSON.stringify(cands)); ch.stdin.end();
+      return;
+    }
+    // ============ 定时任务（P5）============
+    if (p === '/api/schedules' && req.method === 'GET') {
+      return send(res, 200, JSON.stringify(dbapi.listSchedules()), MIME['.json']);
+    }
+    if (p === '/api/schedules' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const sources = (Array.isArray(b.sources) ? b.sources : []).filter(s => ['semanticscholar', 'arxiv', 'openalex', 'dblp'].includes(s));
+      if (!b.query || !String(b.query).trim() || !sources.length) return send(res, 400, JSON.stringify({ ok: false, error: '缺少检索方向或数据源' }), MIME['.json']);
+      const id = dbapi.createSchedule({ query: b.query, sources, years: b.years, max: b.max, minRelevance: b.minRelevance, onlyA: !!b.onlyA, everyDays: b.everyDays });
+      return send(res, 200, JSON.stringify({ ok: true, id }), MIME['.json']);
+    }
+    if (p === '/api/schedules/toggle' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      dbapi.toggleSchedule(parseInt(b.id), !!b.enabled);
+      return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
+    }
+    if (p === '/api/schedules/delete' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      dbapi.deleteSchedule(parseInt(b.id));
+      return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
+    }
     // ---- PDF 字节（绕过迅雷类下载器：路径不含 .pdf，由脚本 fetch 取字节）----
     if (p === '/pdfbytes') {
       const f = resolvePdfById(safeBase(u.searchParams.get('id')));
@@ -387,6 +453,33 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// ============ 后台任务执行 + 定时调度（P5）============
+// 后台跑一个采集任务：spawn run-job（不绑定 HTTP 响应），stderr 进 job.log；结束兜底状态
+function runJobBackground(jobId) {
+  const ch = spawnAgent(['run-job', '--id', String(jobId)]);
+  ch.stderr.on('data', d => { try { dbapi.appendJobLog(jobId, d.toString()); } catch (e) {} });
+  ch.on('error', e => { try { dbapi.appendJobLog(jobId, '\nERR::' + e); dbapi.setJobStatus(jobId, 'failed'); } catch (_) {} });
+  ch.on('close', code => {
+    try { const j = dbapi.getJob(jobId); if (j && j.status === 'running') dbapi.setJobStatus(jobId, code === 0 ? 'review' : 'failed'); } catch (e) {}
+  });
+}
+// 定时调度：到点的 schedule → 建任务 + 跑 + 顺延 next_run
+function checkSchedules() {
+  try {
+    for (const s of dbapi.dueSchedules()) {
+      const yrs = String(s.years || '2024-2026').split('-');
+      const id = dbapi.createJob({
+        query: s.query, sources: (s.sources || 'semanticscholar').split(','),
+        yearFrom: parseInt(yrs[0]) || null, yearTo: parseInt(yrs[1] || yrs[0]) || null,
+        max: s.max_papers, minRelevance: s.min_relevance, onlyA: !!s.only_a, scheduleId: s.id
+      });
+      runJobBackground(id);
+      dbapi.markScheduleRan(s.id, s.every_days);
+      console.log(`[调度] 定时 #${s.id} 触发 → job #${id}：${s.query}`);
+    }
+  } catch (e) { console.error('[调度] 出错', e); }
+}
+
 server.listen(PORT, () => {
   console.log('========================================');
   console.log(' 论文学习 App 已启动 (SQLite)');
@@ -395,4 +488,7 @@ server.listen(PORT, () => {
   console.log(' PDF目录: ' + PAPERS_DIR);
   console.log(' 按 Ctrl+C 停止');
   console.log('========================================');
+  try { const n = dbapi.resetOrphanJobs(); if (n) console.log(` ⚠ 已重置 ${n} 个中断的采集任务`); } catch (e) {}
+  setTimeout(checkSchedules, 8000);              // 启动 8s 后查一次定时
+  setInterval(checkSchedules, 10 * 60 * 1000);   // 之后每 10 分钟查一次
 });
