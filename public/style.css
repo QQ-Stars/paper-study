@@ -454,6 +454,16 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 /* 采集向导 */
 .linkbtn{background:none;border:0;color:var(--accent-ink);font-size:12px;cursor:pointer;font-family:var(--font-sans);padding:4px 2px}
 .linkbtn:hover{text-decoration:underline}
+.ing-history{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.ih-label{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em;flex:0 0 auto}
+.ih-chips{display:flex;gap:7px;flex-wrap:wrap;flex:1 1 auto;min-width:0}
+.ih-chip{display:inline-flex;align-items:center;gap:6px;max-width:240px;padding:4px 10px;border:1px solid var(--border-2);border-radius:999px;background:var(--surface);color:var(--ink-2);font-size:12px;cursor:pointer;transition:.14s}
+.ih-chip:hover{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft)}
+.ih-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ih-x{font-style:normal;font-weight:700;color:var(--ink-3);flex:0 0 auto}
+.ih-chip:hover .ih-x{color:var(--accent-ink)}
+.ih-x:hover{color:var(--accent)}
+.ih-clear{flex:0 0 auto;color:var(--ink-3)}
 .ing-queries{margin-top:16px;padding:14px;border:1px dashed var(--border-2);border-radius:12px;background:var(--surface-2)}
 .iq-head{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
 .iq-chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px}

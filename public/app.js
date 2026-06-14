@@ -789,6 +789,8 @@ function bindUI() {
   $('#ingEditBtn').onclick = editQueries;
   $('#ingSearchWithBtn').onclick = () => runSearch(currentQueries());
   $('#ingQueryAdd').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const a = currentQueries() || []; a.push(e.target.value.trim()); e.target.value = ''; renderQueryChips(a); } };
+  $('#ingHistClear').onclick = () => { try { localStorage.removeItem(HIST_KEY); } catch (e) {} renderHist(); };
+  renderHist();
   $('#ingestSelBtn').onclick = ingestSelected;
   $('#verifyVenueBtn').onclick = verifyVenues;
   $('#impScanBtn').onclick = scanPdfs;
@@ -1062,6 +1064,33 @@ function renderQueryChips(qs) {
   box.innerHTML = qs.map((x, i) => `<span class="iq-chip">${x}<b class="iq-x" data-i="${i}">×</b></span>`).join('') || '<span class="placeholder">（无检索词）</span>';
   document.querySelectorAll('#ingQueryChips .iq-x').forEach(b => b.onclick = () => { const a = currentQueries(); a.splice(+b.dataset.i, 1); renderQueryChips(a); });
 }
+// ====== 采集检索历史（localStorage） ======
+const HIST_KEY = 'paperstudy.searchHistory', HIST_MAX = 12;
+function loadHist() { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch (e) { return []; } }
+function saveHist(a) { try { localStorage.setItem(HIST_KEY, JSON.stringify(a.slice(0, HIST_MAX))); } catch (e) {} }
+function pushHist(q, queries) {
+  q = (q || '').trim(); if (!q) return;
+  const a = loadHist().filter(e => e.q !== q);
+  a.unshift({ q, queries: (queries && queries.length) ? queries : undefined, ts: Date.now() });
+  saveHist(a); renderHist();
+}
+function renderHist() {
+  const wrap = $('#ingHistory'), box = $('#ingHistChips'); if (!wrap || !box) return;
+  const a = loadHist();
+  if (!a.length) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  box.innerHTML = a.map((e, i) => `<span class="ih-chip" data-i="${i}" title="${esc(e.q)}${e.queries ? ' · ' + e.queries.length + ' 个检索词（点击恢复）' : ''}"><span class="ih-t">${esc(e.q)}</span><b class="ih-x" data-i="${i}" title="从历史删除">×</b></span>`).join('');
+  box.querySelectorAll('.ih-chip').forEach(c => c.onclick = (ev) => {
+    if (ev.target.classList.contains('ih-x')) return;
+    const e = loadHist()[+c.dataset.i]; if (!e) return;
+    $('#ingQuery').value = e.q;
+    if (e.queries && e.queries.length) { renderQueryChips(e.queries); $('#ingQueriesBox').classList.remove('hidden'); }
+  });
+  box.querySelectorAll('.ih-x').forEach(x => x.onclick = (ev) => {
+    ev.stopPropagation();
+    const a2 = loadHist(); a2.splice(+x.dataset.i, 1); saveHist(a2); renderHist();
+  });
+}
 function syncSearchBtnLabel() {
   const b = $('#ingSearchBtn'), exp = $('#ingExpand') && $('#ingExpand').checked;
   if (b) { b.textContent = exp ? '扩展检索词 →' : '检索 →'; b.title = exp ? '先用大模型扩展检索词并预览，确认/编辑后再点「用这些词检索」正式检索' : '直接用方向原词检索'; }
@@ -1077,8 +1106,9 @@ async function editQueries() {
   $('#ingQueriesBox').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   try {
     const j = await (await fetch('/api/expand', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, expandN: 6 }) })).json();
-    renderQueryChips((j.queries && j.queries.length) ? j.queries : [q]);
-  } catch (e) { renderQueryChips([q]); }
+    const qs = (j.queries && j.queries.length) ? j.queries : [q];
+    renderQueryChips(qs); pushHist(q, qs);
+  } catch (e) { renderQueryChips([q]); pushHist(q, [q]); }
   finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
 }
 function handleProgress(line) {
@@ -1096,6 +1126,7 @@ async function runSearch(queries) {
   const q = $('#ingQuery').value.trim();
   if (!q) { alert('请填写检索方向'); return; }
   if (!sources.length) { alert('请至少选择一个数据源'); return; }
+  pushHist(q, queries && queries.length ? queries : null);
   candidates = [];
   $('#candPanel').classList.add('hidden');
   $('#ingStages').classList.remove('hidden');
