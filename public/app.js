@@ -955,6 +955,7 @@ function bindUI() {
   $('#setTestBtn').onclick = testLLM;
   $('#reindexBtn').onclick = reindexAll;
   $('#normVenueBtn').onclick = normVenues;
+  $('#dlPdfsBtn').onclick = downloadPdfs;
   $('#settingsBtn').onclick = openSettingsModal;
   $('#setClose').onclick = closeSettingsModal;
   $('#settingsModal').onclick = (e) => { if (e.target.id === 'settingsModal') closeSettingsModal(); };
@@ -1124,6 +1125,28 @@ async function normVenues() {
           hint.textContent = n ? `✅ 规整 ${n} 个会议名 · ${ev.changed} 篇` : '✅ 已是规范，无需改动';
           reloadPapers();
         } else hint.textContent = '失败：' + (ev.error || '未知');
+      }
+    });
+ } catch (e) { hint.textContent = '失败：' + e; }
+ finally { btn.disabled = false; btn.textContent = old; }
+}
+async function downloadPdfs() {
+  const btn = $('#dlPdfsBtn'), hint = $('#dlPdfsHint');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '下载中…';
+  hint.textContent = '正在扫描库内缺 PDF 的论文…';
+  let ok = 0, skip = 0, fail = 0, total = 0;
+  try {
+    await streamNDJSON('/api/download-pdfs', {}, (ev) => {
+      if (ev.type === 'progress') {
+        let m;
+        if ((m = /^TOTAL::(\d+)/.exec(ev.line))) { total = +m[1]; hint.textContent = `共 ${total} 篇缺 PDF，逐一下载中…`; }
+        else if ((m = /^PDFSTART::(.*)/.exec(ev.line))) hint.textContent = `下载中：${m[1]}`;
+        else if ((m = /^PDFOK::(.*)/.exec(ev.line))) { ok++; hint.textContent = `✅ ${m[1]}（${ok}/${total}）`; }
+        else if (/^PDFNOURL::/.test(ev.line)) { skip++; hint.textContent = `跳过（无 PDF 地址） ${ok+skip}/${total}`; }
+        else if ((m = /^PDFERR::(.*)/.exec(ev.line))) { fail++; hint.textContent = `❌ ${m[1]}`; }
+      } else if (ev.type === 'result') {
+        if (ev.ok) hint.textContent = `✅ 完成：下载 ${ev.downloaded} · 跳过 ${ev.skipped} · 失败 ${ev.failed}`;
+        else hint.textContent = '失败：' + (ev.error || '');
       }
     });
   } catch (e) { hint.textContent = '失败：' + e; }
