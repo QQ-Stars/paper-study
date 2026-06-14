@@ -124,6 +124,7 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
         if sname not in SOURCES:
             continue
         src = SOURCES[sname]()
+        before = len(seen)
         for q in queries:
             try:
                 for stub in src.search(q, years, per):
@@ -132,6 +133,7 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
                         seen[key] = stub
             except Exception as e:
                 _p(f"SRCERR::{sname}::{e}")
+        _p(f"SRC::{sname}::{len(seen) - before}")     # 该源新增的去重后篇数
     _p(f"FOUND::{len(seen)}")
     _p("STAGE::classify")
     con = db.connect()
@@ -146,6 +148,7 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
         if only_a and crank != "A":          # 只采 CCF-A：非 A 直接跳过（也省去分类调用）
             continue
         i += 1
+        _p(f"DOING::{i}::{stub.title[:60]}")           # 正在分类（LLM 调用前推送，最及时）
         tn = db.title_norm(stub.title)
         in_lib = db.exists(con, arxiv_id=stub.arxiv_id, title_norm_v=tn)
         try:
@@ -157,7 +160,6 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
             kt.append(attrs.type)
         if attrs.topic and attrs.topic not in kp:
             kp.append(attrs.topic)
-        _p(f"CLASSIFIED::{i}::{stub.title[:48]}")
         if min_rel and attrs.relevance is not None and attrs.relevance < min_rel and not in_lib:
             continue
         cands.append({
@@ -169,6 +171,7 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
             "contribution": attrs.contribution, "llm_tldr": attrs.tldr, "tags": attrs.tags,
             "relevance": attrs.relevance, "in_library": in_lib,
         })
+        _p(f"KEPT::{len(cands)}")                       # 已保留（通过相关度阈值）篇数
     con.close()
     _p(f"DONE::{len(cands)}")
     return cands

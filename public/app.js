@@ -1111,15 +1111,35 @@ async function editQueries() {
   } catch (e) { renderQueryChips([q]); pushHist(q, [q]); }
   finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
 }
+let srcCounts = {}, keptN = null, errN = 0;
+const SRC_LABEL = { arxiv: 'arXiv', semanticscholar: 'S2', openalex: 'OpenAlex', dblp: 'DBLP' };
+function setDetail(main, sub) {
+  if (main != null && $('#ingdMain')) $('#ingdMain').textContent = main;
+  if (sub != null && $('#ingdSub')) $('#ingdSub').innerHTML = sub;
+}
+function srcSummary() { return Object.entries(srcCounts).map(([k, v]) => `${SRC_LABEL[k] || k} ${v}`).join(' · '); }
+function updCount() { const el = $('#ingdCount'); if (el) el.textContent = keptN != null ? `保留 ${keptN}${errN ? ` · ${errN} 跳过` : ''}` : ''; }
 function handleProgress(line) {
   if (line.startsWith('STAGE::')) {
     const s = line.slice(7);
-    if (s === 'search') { setStage('expand', 'done'); setStage('search', 'active'); }
-    else if (s === 'classify') { setStage('search', 'done'); setStage('classify', 'active'); }
+    if (s === 'search') { setStage('expand', 'done'); setStage('search', 'active'); setDetail('正在检索数据源…', ''); }
+    else if (s === 'classify') { setStage('search', 'done'); setStage('classify', 'active'); keptN = 0; errN = 0; updCount(); setDetail('分类打分中…', srcSummary()); }
   } else if (line.startsWith('QUERIES::')) {
     try { renderQueryChips(JSON.parse(line.slice(9))); $('#ingQueriesBox').classList.remove('hidden'); } catch (e) {}
-  } else if (line.startsWith('FOUND::')) { $('#stFound').textContent = ' ' + line.slice(7); }
-  else if (line.startsWith('CLASSIFIED::')) { $('#stCls').textContent = ' ' + line.split('::')[1]; }
+  } else if (line.startsWith('SRC::')) {
+    const p = line.split('::'); srcCounts[p[1]] = p[2]; setDetail('正在检索数据源…', srcSummary());
+  } else if (line.startsWith('SRCERR::')) {
+    const p = line.split('::'); setDetail(null, (srcSummary() ? srcSummary() + ' · ' : '') + `<b class="ingd-warn">${SRC_LABEL[p[1]] || p[1]} 失败</b>`);
+  } else if (line.startsWith('FOUND::')) {
+    const n = line.slice(7); $('#stFound').textContent = ' ' + n; setDetail(`共 ${n} 篇候选 · 开始分类打分`, srcSummary());
+  } else if (line.startsWith('DOING::')) {
+    const rest = line.slice(7), m = rest.indexOf('::'); const idx = rest.slice(0, m), title = rest.slice(m + 2);
+    $('#stCls').textContent = ' ' + idx; setDetail(`分类打分 · 第 ${idx} 篇`, `《${esc(title)}》`);
+  } else if (line.startsWith('KEPT::')) {
+    keptN = line.slice(6); updCount();
+  } else if (line.startsWith('CLSERR::')) {
+    errN++; updCount();
+  }
 }
 async function runSearch(queries) {
   const sources = [...document.querySelectorAll('.ib-opts .src-chip.active')].map(c => c.dataset.src);
@@ -1132,6 +1152,8 @@ async function runSearch(queries) {
   $('#ingStages').classList.remove('hidden');
   setStage('expand', queries ? 'done' : 'active'); setStage('search', ''); setStage('classify', '');
   $('#stFound').textContent = ''; $('#stCls').textContent = '';
+  srcCounts = {}; keptN = null; errN = 0;
+  $('#ingDetail').classList.remove('hidden'); setDetail(queries ? '正在检索数据源…' : '扩展检索词中…', ''); updCount();
   const btn = $('#ingSearchBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = '检索中…';
   try {
     await streamNDJSON('/api/search', {
@@ -1147,6 +1169,7 @@ async function runSearch(queries) {
 }
 function renderCandidates() {
   setStage('expand', 'done'); setStage('search', 'done'); setStage('classify', 'done');
+  $('#ingDetail').classList.add('hidden');
   $('#candPanel').classList.remove('hidden');
   const fresh = candidates.filter(c => !c.in_library).length;
   $('#candCount').textContent = `找到 ${candidates.length} 篇 · ${fresh} 篇新`;
