@@ -104,6 +104,33 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
   finished_at   TEXT
 );
 
+-- ========== 后台采集：暂存候选（待用户确认入库） ==========
+CREATE TABLE IF NOT EXISTS job_candidates (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id     INTEGER NOT NULL,
+  title_norm TEXT,
+  data       TEXT,                              -- 候选完整 JSON（search 产出，可直接喂 ingest-selected）
+  status     TEXT NOT NULL DEFAULT 'pending',   -- pending / added / rejected
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_jobcand_job ON job_candidates(job_id);
+
+-- ========== 后台采集：定时任务规格 ==========
+CREATE TABLE IF NOT EXISTS job_schedules (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  query         TEXT NOT NULL,
+  sources       TEXT,
+  years         TEXT,
+  max_papers    INTEGER,
+  min_relevance REAL,
+  only_a        INTEGER DEFAULT 1,
+  every_days    INTEGER DEFAULT 7,
+  enabled       INTEGER DEFAULT 1,
+  last_run      TEXT,
+  next_run      TEXT,
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
 -- ========== 迁移版本 ==========
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,

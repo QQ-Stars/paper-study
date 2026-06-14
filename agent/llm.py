@@ -138,12 +138,17 @@ def canonicalize_venues(venues: list) -> dict:
     return out
 
 
-def expand_queries(direction: str, n: int = 6) -> list:
-    """把（可能中文/模糊的）研究方向 → 一组精准英文检索词组合。"""
+def expand_queries(direction: str, n: int = 8) -> list:
+    """把（可能中文/模糊的）研究方向 → 一组多样化的精准英文检索词组合（目标：最大化召回）。"""
     sys = (
-        "你是学术检索专家。把用户给的研究方向（可能是中文或较模糊）转成一组用于 "
-        "arXiv / Semantic Scholar 的英文检索关键词组合。要求：必要时翻译成英文；"
-        "覆盖同义词、子方向、经典方法名、常用基准名；每条 2~6 个英文词，精准、可直接检索。"
+        "你是学术文献检索专家。把用户给的研究方向（可能中文或较模糊）转成一组用于 "
+        "arXiv / Semantic Scholar / DBLP 的英文检索关键词组合，目标是**最大化召回**——"
+        "尽量从不同角度切入，把换个说法就搜不到的论文也捞回来。\n"
+        "每条从不同切入点出发，整体覆盖：①核心问题的同义/近义表述 ②细分子任务/子问题 "
+        "③经典或代表性方法名 ④常用评测基准/数据集名 ⑤该任务的别称或相关现象词 "
+        "⑥关键术语的缩写与全称（如 MLLM / multimodal large language model）。\n"
+        "硬性要求：必要时翻译成英文；每条 2~6 个英文词、精准可直接检索；"
+        "**条目之间措辞与角度尽量不同、避免雷同**；宁可多覆盖一个角度也别漏。"
         f"只输出 JSON 对象，形如 {{\"queries\": [\"...\", \"...\"]}}，包含约 {n} 条。"
     )
     try:
@@ -151,11 +156,14 @@ def expand_queries(direction: str, n: int = 6) -> list:
             model=config.MODEL,
             messages=[{"role": "system", "content": sys},
                       {"role": "user", "content": f"研究方向: {direction}"}],
-            response_format={"type": "json_object"}, temperature=0.4,
+            response_format={"type": "json_object"}, temperature=0.6,
         )
         qs = json.loads(resp.choices[0].message.content).get("queries", [])
-        qs = [q.strip() for q in qs if isinstance(q, str) and q.strip()]
-        return qs[:n] or [direction]
+        seen, out = set(), []
+        for q in qs:                                  # 去雷同（忽略大小写）
+            if isinstance(q, str) and q.strip() and q.strip().lower() not in seen:
+                seen.add(q.strip().lower()); out.append(q.strip())
+        return out[:n] or [direction]
     except Exception:
         return [direction]
 

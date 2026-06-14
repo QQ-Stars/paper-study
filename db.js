@@ -14,6 +14,12 @@ db.pragma('busy_timeout = 5000');
 // 应用表结构（幂等）
 db.exec(fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8'));
 
+// ingest_jobs 增量列（幂等：给旧库补列）
+for (const [col, ddl] of [['only_a', 'INTEGER DEFAULT 0'], ['queries', 'TEXT'], ['schedule_id', 'INTEGER']]) {
+  const has = db.prepare(`SELECT 1 FROM pragma_table_info('ingest_jobs') WHERE name = ?`).get(col);
+  if (!has) db.exec(`ALTER TABLE ingest_jobs ADD COLUMN ${col} ${ddl}`);
+}
+
 // 会议名归一化（与 public/app.js 的 normVenue、agent/db.py 的 norm_venue 保持一致）
 const VENUE_CANON = { neurips: 'NeurIPS', nips: 'NeurIPS', cvpr: 'CVPR', iccv: 'ICCV', eccv: 'ECCV', wacv: 'WACV', icml: 'ICML', iclr: 'ICLR', aaai: 'AAAI', ijcai: 'IJCAI', acl: 'ACL', emnlp: 'EMNLP', naacl: 'NAACL', coling: 'COLING', tmlr: 'TMLR', tpami: 'TPAMI', corr: 'arXiv' };
 const VENUE_FULL = [
@@ -151,4 +157,62 @@ const updatePaper = (id, f) => {
   return db.prepare(`UPDATE papers SET ${cols.join(', ')}, updated_at = datetime('now') WHERE id = @id`).run(vals).changes;
 };
 
-module.exports = { db, listPapers, getExplainer, getTranslation, getNote, getCiteGraph, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper };
+// ====== 后台采集任务（ingest_jobs / job_candidates） ======
+const createJob = (j) => {
+  const r = db.prepare(`INSERT INTO ingest_jobs
+    (query, venues, year_from, year_to, max_papers, min_relevance, only_a, schedule_id, status)
+    VALUES (@query,@venues,@year_from,@year_to,@max_papers,@min_relevance,@only_a,@schedule_id,'pending')`)
+    .run({
+      query: String(j.query || '').trim(),
+      venues: Array.isArray(j.sources) ? j.sources.join(',') : (j.sources || ''),
+      year_from: j.yearFrom || null, year_to: j.yearTo || null,
+      max_papers: Math.min(parseInt(j.max) || 12, 50),
+      min_relevance: j.minRelevance == null ? 0.5 : j.minRelevance,
+      only_a: j.onlyA ? 1 : 0, schedule_id: j.scheduleId || null
+    });
+  return r.lastInsertRowid;
+};
+const listJobs = () => db.prepare(`SELECT id, query, venues, year_from, year_to, max_papers, min_relevance, only_a, schedule_id,
+  status, found, added, skipped, created_at, finished_at,
+  (SELECT COUNT(*) FROM job_candidates c WHERE c.job_id = ingest_jobs.id AND c.status='pending') AS pending
+  FROM ingest_jobs ORDER BY id DESC`).all();
+const getJob = (id) => db.prepare('SELECT * FROM ingest_jobs WHERE id = ?').get(id);
+const setJobStatus = (id, status) => db.prepare(
+  `UPDATE ingest_jobs SET status=?, finished_at=CASE WHEN ? IN ('done','failed') THEN datetime('now') ELSE finished_at END WHERE id=?`
+).run(status, status, id);
+const appendJobLog = (id, text) => db.prepare(`UPDATE ingest_jobs SET log = substr(COALESCE(log,'') || ?, -8000) WHERE id=?`).run(text, id);
+const bumpJobAdded = (id, n) => db.prepare('UPDATE ingest_jobs SET added = COALESCE(added,0) + ? WHERE id=?').run(n, id);
+const deleteJob = (id) => { db.prepare('DELETE FROM job_candidates WHERE job_id=?').run(id); return db.prepare('DELETE FROM ingest_jobs WHERE id=?').run(id).changes; };
+const listJobCandidates = (id) => db.prepare(`SELECT id, data FROM job_candidates WHERE job_id=? AND status='pending' ORDER BY id`).all(id)
+  .map(r => { try { const c = JSON.parse(r.data); c._cid = r.id; return c; } catch (e) { return null; } }).filter(Boolean);
+const markJobCandidates = (jobId, titleNorms, status) => {
+  if (!titleNorms || !titleNorms.length) return 0;
+  const stmt = db.prepare(`UPDATE job_candidates SET status=? WHERE job_id=? AND title_norm=?`);
+  const tx = db.transaction((tns) => { let n = 0; for (const tn of tns) n += stmt.run(status, jobId, tn).changes; return n; });
+  return tx(titleNorms);
+};
+const closeJobIfEmpty = (id) => { const r = db.prepare(`SELECT COUNT(*) AS p FROM job_candidates WHERE job_id=? AND status='pending'`).get(id); if (r && r.p === 0) setJobStatus(id, 'done'); };
+const resetOrphanJobs = () => db.prepare(`UPDATE ingest_jobs SET status='failed', finished_at=datetime('now') WHERE status IN ('running','pending')`).run().changes;
+
+// ====== 定时任务（job_schedules） ======
+const listSchedules = () => db.prepare('SELECT * FROM job_schedules ORDER BY id DESC').all();
+const createSchedule = (s) => db.prepare(`INSERT INTO job_schedules
+    (query, sources, years, max_papers, min_relevance, only_a, every_days, enabled, next_run)
+    VALUES (@query,@sources,@years,@max_papers,@min_relevance,@only_a,@every_days,1, datetime('now'))`)
+  .run({
+    query: String(s.query || '').trim(),
+    sources: Array.isArray(s.sources) ? s.sources.join(',') : (s.sources || 'semanticscholar'),
+    years: s.years || '2024-2026', max_papers: Math.min(parseInt(s.max) || 12, 50),
+    min_relevance: s.minRelevance == null ? 0.5 : s.minRelevance,
+    only_a: s.onlyA ? 1 : 0, every_days: Math.max(1, parseInt(s.everyDays) || 7)
+  }).lastInsertRowid;
+const toggleSchedule = (id, enabled) => db.prepare('UPDATE job_schedules SET enabled=? WHERE id=?').run(enabled ? 1 : 0, id).changes;
+const deleteSchedule = (id) => db.prepare('DELETE FROM job_schedules WHERE id=?').run(id).changes;
+const dueSchedules = () => db.prepare(`SELECT * FROM job_schedules WHERE enabled=1 AND (next_run IS NULL OR next_run <= datetime('now'))`).all();
+const markScheduleRan = (id, everyDays) => db.prepare(`UPDATE job_schedules SET last_run=datetime('now'), next_run=datetime('now', ?) WHERE id=?`).run(`+${Math.max(1, parseInt(everyDays) || 7)} days`, id);
+
+module.exports = {
+  db, listPapers, getExplainer, getTranslation, getNote, getCiteGraph, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper,
+  createJob, listJobs, getJob, setJobStatus, appendJobLog, bumpJobAdded, deleteJob, listJobCandidates, markJobCandidates, closeJobIfEmpty, resetOrphanJobs,
+  listSchedules, createSchedule, toggleSchedule, deleteSchedule, dueSchedules, markScheduleRan
+};

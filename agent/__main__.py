@@ -70,6 +70,9 @@ def main():
     ip = sub.add_parser("import-pdfs", help="本地 PDF 批量导入：stdin 读路径数组 → 抽取+分类+入库")
     ip.add_argument("--no-enrich", action="store_true", help="不用 Semantic Scholar 补全元数据")
 
+    rj = sub.add_parser("run-job", help="执行后台采集任务：读 ingest_jobs 一行→search→暂存候选(待确认)")
+    rj.add_argument("--id", type=int, required=True)
+
     sub.add_parser("citegraph", help="构建库内引用关系边(抓 S2 参考文献)，写入 cite_edges")
 
     sub.add_parser("norm-venues", help="用大模型把库内会议/期刊名规整成标准简称(落库)")
@@ -140,6 +143,9 @@ def main():
             raw = raw[1:]
         paths = json.loads(raw) if raw.strip() else []
         importer.import_pdfs(paths, enrich=not args.no_enrich)
+    elif args.cmd == "run-job":
+        from . import jobs
+        jobs.run_job(args.id)
     elif args.cmd == "citegraph":
         from . import citegraph
         citegraph.build_edges()
