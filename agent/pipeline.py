@@ -12,7 +12,7 @@ from .sources.dblp import DBLP
 SOURCES = {"semanticscholar": SemanticScholar, "arxiv": Arxiv, "openalex": OpenAlex, "dblp": DBLP}
 
 
-def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=False, expand=False, expand_n=6, only_a=False):
+def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=False, expand=False, expand_n=6, only_a=False, download_pdf=True):
     # 1) 智能扩展检索词（中文/模糊方向 → 多个精准英文检索词）
     queries = llm.expand_queries(direction, expand_n) if expand else [direction]
     print("🔎 检索词：")
@@ -21,7 +21,7 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
 
     # 2) 多源 × 多词 收集候选，跨词去重
     seen = {}
-    per = max(3, math.ceil(limit * 1.4 / max(1, len(queries))))
+    per = max(5, math.ceil(limit * 2.5 / max(1, len(queries))))
     for sname in sources:
         if sname not in SOURCES:
             print(f"  ! 未知数据源: {sname}"); continue
@@ -42,7 +42,7 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
     kt, kp = list(kt), list(kp)
     theme = config.RESEARCH_THEME or direction
     found, added, skipped, n_cls = len(seen), 0, 0, 0
-    cap = limit * 3
+    cap = min(len(seen), max(limit * 6, 50))
     for stub in seen.values():
         if added >= limit or n_cls >= cap:
             break
@@ -56,17 +56,20 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
         try:
             slug = util.make_slug(stub)
             pdf_path = None
-            if stub.pdf_url:
+            pdf_url = util.infer_pdf_url(stub)
+            if pdf_url:
+                stub.pdf_url = pdf_url
+            if download_pdf and pdf_url:
                 try:
                     dest = config.PDF_DIR / f"{slug}.pdf"
-                    util.download_pdf(stub.pdf_url, dest)
+                    util.download_pdf(pdf_url, dest)
                     pdf_path = str(dest)
                 except Exception:
                     pdf_path = None
             body = None
             if deep and pdf_path:
                 try:
-                    body = extract.first_pages(config.ROOT / pdf_path, 8, stub.abstract)
+                    body = extract.first_pages(pdf_path, 8, stub.abstract)
                 except Exception:
                     body = None
             attrs = llm.classify(stub, direction, body, known_types=kt, known_topics=kp, theme=theme)
@@ -87,7 +90,7 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
                 "venue": stub.venue, "year": stub.year, "abstract": stub.abstract,
                 "tldr": stub.tldr or attrs.tldr, "citations": stub.citations,
                 "s2_fields": json.dumps(stub.fields, ensure_ascii=False),
-                "url": stub.url, "pdf_url": stub.pdf_url, "pdf_path": pdf_path,
+                "url": stub.url, "pdf_url": pdf_url, "pdf_path": pdf_path,
                 "type": attrs.type, "topic": attrs.topic, "task": attrs.task,
                 "models": json.dumps(attrs.models, ensure_ascii=False),
                 "datasets": json.dumps(attrs.datasets, ensure_ascii=False),
@@ -112,13 +115,36 @@ def _p(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
+def _download_pdf_for_stub(stub, slug):
+    pdf_url = util.infer_pdf_url(stub)
+    if pdf_url:
+        stub.pdf_url = pdf_url
+    title = (stub.title or "paper").replace("\n", " ")[:48]
+    if not pdf_url:
+        _p(f"PDFNOURL::{title}")
+        return None, ""
+    dest = config.PDF_DIR / f"{slug}.pdf"
+    _p(f"PDFSTART::{title}")
+
+    def progress(done, total):
+        _p(f"PDFPROG::{done}::{total or 0}::{title}")
+
+    try:
+        util.download_pdf(pdf_url, dest, progress=progress)
+        _p(f"PDFOK::{dest.name}")
+        return str(dest), pdf_url
+    except Exception as e:
+        _p(f"PDFERR::{title}::{e}")
+        return None, pdf_url
+
+
 def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n=6, queries=None, only_a=False):
     """第一阶段：扩展→多源收集→去重→LLM分类打分。返回候选(不下载PDF)。only_a=只保留 CCF-A。"""
     queries = queries if queries else (llm.expand_queries(direction, expand_n) if expand else [direction])
     _p("STAGE::expand")
     _p("QUERIES::" + json.dumps(queries, ensure_ascii=False))
     seen = {}
-    per = max(3, math.ceil(limit * 1.5 / max(1, len(queries))))
+    per = max(5, math.ceil(limit * 2.5 / max(1, len(queries))))
     _p("STAGE::search")
     for sname in sources:
         if sname not in SOURCES:
@@ -140,7 +166,8 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
     kt, kp = db.known_categories(con)           # 已有研究方向/主题，供大模型复用；本批新建的也即时并入
     kt, kp = list(kt), list(kp)
     theme = config.RESEARCH_THEME or direction
-    cands, i, cap = [], 0, limit * 3
+    cands, i = [], 0
+    cap = min(len(seen), max(limit * 6, 50))
     for stub in seen.values():
         if len(cands) >= limit or i >= cap:
             break
@@ -177,7 +204,7 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
     return cands
 
 
-def ingest_candidates(cands, deep=False):
+def ingest_candidates(cands, deep=False, download_pdf=True):
     """第二阶段：对用户勾选的候选下载PDF+入库（属性多在第一阶段算好）。
     若候选未带分类（如「相似论文」推荐来的），入库时现场补一次 LLM 分类，保持库内类别一致。"""
     con = db.connect()
@@ -211,14 +238,13 @@ def ingest_candidates(cands, deep=False):
                 except Exception as e:
                     _p(f"CLSERR::{e}")
             slug = util.make_slug(stub)
-            pdf_path = None
-            if stub.pdf_url:
-                try:
-                    dest = config.PDF_DIR / f"{slug}.pdf"
-                    util.download_pdf(stub.pdf_url, dest)
-                    pdf_path = str(dest)
-                except Exception:
-                    pdf_path = None
+            if download_pdf:
+                pdf_path, pdf_url = _download_pdf_for_stub(stub, slug)
+            else:
+                pdf_path, pdf_url = None, util.infer_pdf_url(stub)
+                if pdf_url:
+                    stub.pdf_url = pdf_url
+                _p(f"PDFSKIP::{stub.title[:48]}")
             row = {
                 "id": slug, "source": stub.source, "source_id": stub.source_id,
                 "arxiv_id": stub.arxiv_id, "doi": stub.doi, "s2_id": stub.s2_id,
@@ -227,7 +253,7 @@ def ingest_candidates(cands, deep=False):
                 "venue": stub.venue, "year": stub.year, "abstract": stub.abstract,
                 "tldr": stub.tldr or ctldr, "citations": stub.citations,
                 "s2_fields": json.dumps(stub.fields, ensure_ascii=False),
-                "url": stub.url, "pdf_url": stub.pdf_url, "pdf_path": pdf_path,
+                "url": stub.url, "pdf_url": pdf_url, "pdf_path": pdf_path,
                 "type": ctype, "topic": ctopic, "task": ctask,
                 "models": json.dumps(cmodels, ensure_ascii=False),
                 "datasets": json.dumps(cdatasets, ensure_ascii=False),

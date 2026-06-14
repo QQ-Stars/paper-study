@@ -16,6 +16,15 @@ if _sp.exists():
     except Exception:
         _S = {}
 
+
+def _dir_from_settings(key: str, default: str) -> Path:
+    val = (_S.get(key) or "").strip()
+    p = Path(val) if val else (ROOT / default)
+    if not p.is_absolute():
+        p = ROOT / p
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
 PROVIDER = (_S.get("provider") or os.getenv("LLM_PROVIDER", "deepseek")).lower()
 API_KEY = _S.get("apiKey") or os.getenv("LLM_API_KEY", "")
 
@@ -47,9 +56,18 @@ MODEL_DIR = ROOT / ".models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = os.getenv("DB_PATH") or str(ROOT / "data" / "app.db")
-# PDF 下载目录：默认 data/pdfs；网页设置可自定义（相对路径相对项目根）
-_pd = _S.get("pdfDir")
-PDF_DIR = Path(_pd) if _pd else (ROOT / "data" / "pdfs")
-if not PDF_DIR.is_absolute():
-    PDF_DIR = ROOT / PDF_DIR
-PDF_DIR.mkdir(parents=True, exist_ok=True)
+# Artifact directories. Relative paths are resolved from project root.
+PDF_DIR = _dir_from_settings("pdfDir", "data/pdfs")
+EXPLAINER_DIR = _dir_from_settings("explainerDir", "data/explainers")
+TRANSLATION_DIR = _dir_from_settings("translationDir", "data/translations")
+
+
+def artifact_path(kind: str, paper_id: str, ext: str = ".md") -> Path:
+    base = {
+        "pdf": PDF_DIR,
+        "explainer": EXPLAINER_DIR,
+        "translation": TRANSLATION_DIR,
+    }[kind]
+    safe = "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in str(paper_id or "paper"))
+    safe = safe.strip(".-_") or "paper"
+    return base / f"{safe}{ext}"

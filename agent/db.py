@@ -107,6 +107,10 @@ def insert_paper(con, row: dict):
 def set_explainer(con, pid: str, md: str):
     con.execute("UPDATE papers SET explainer=?, updated_at=datetime('now') WHERE id=?", (md, pid))
     con.commit()
+    try:
+        config.artifact_path("explainer", pid).write_text(md or "", encoding="utf-8")
+    except Exception:
+        pass
 
 
 def set_translation(con, pid: str, md: str):
@@ -119,3 +123,7 @@ def set_translation(con, pid: str, md: str):
                    ON CONFLICT(paper_id) DO UPDATE SET content=excluded.content, updated_at=datetime('now')""",
                 (pid, md))
     con.commit()
+    try:
+        config.artifact_path("translation", pid).write_text(md or "", encoding="utf-8")
+    except Exception:
+        pass

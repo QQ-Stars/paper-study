@@ -107,8 +107,9 @@ def translate_paper(pid: str, workers: int = 4) -> str:
         _p(f"STAGE::pdf::读取 PDF 全文（共 {extract.page_count(pdf)} 页）…")
         body = extract.full_text(pdf, None, config.EXPLAIN_MAX_CHARS)
     else:
-        _p("PDFMISS::未找到本地PDF，改用摘要翻译")
-        body = ((r.get("title") or "") + "\n\n" + (r.get("abstract") or "")).strip()
+        con.close()
+        _p("PDFMISS::未找到本地PDF，无法进行全文翻译")
+        raise SystemExit(5)
 
     body, stripped = _strip_tail(body)
     if stripped:

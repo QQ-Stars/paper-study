@@ -25,6 +25,7 @@
       <button data-view="home" class="active">总览</button>
       <button data-view="read">阅读</button>
       <button data-view="manage">管理</button>
+      <button data-view="jobs">采集</button>
       <button data-view="insights">洞察</button>
     </nav>
     <div class="filters">
@@ -233,6 +234,50 @@
     </div>
   </section>
 
+  <!-- 采集：后台任务 + 定时 + 评审入库（P5） -->
+  <section id="jobs" class="hidden">
+    <div class="page-head"><h1>采集<em>Background Harvest</em></h1><span class="ph-line"></span></div>
+
+    <!-- 发起后台任务 -->
+    <div class="ingest-bar">
+      <div class="ib-head"><span class="ib-title">发起后台采集</span><span class="ib-tip">提交后在后台跑、不用等；检索词自动多样化扩展提高召回；采到的论文进「待确认」，你确认后才入库</span></div>
+      <div class="ib-row">
+        <input id="jbQuery" class="ib-input" placeholder="如：多模态大模型的幻觉检测与缓解" />
+        <button id="jbStartBtn" class="mini primary ib-btn">后台采集 →</button>
+      </div>
+      <div class="ib-opts">
+        <div class="opt-grp"><span class="opt-lab">数据源</span>
+          <button type="button" class="src-chip" data-src="arxiv">arXiv</button>
+          <button type="button" class="src-chip active" data-src="semanticscholar">Semantic Scholar</button>
+          <button type="button" class="src-chip active" data-src="openalex">OpenAlex</button>
+          <button type="button" class="src-chip active" data-src="dblp">DBLP</button>
+        </div>
+        <div class="opt-grp"><span class="opt-lab">年份</span><input id="jbYears" class="opt-input" value="2024-2026" /></div>
+        <div class="opt-grp"><span class="opt-lab">数量</span><input id="jbMax" class="opt-input num" type="number" value="15" min="1" max="50" /></div>
+        <div class="opt-grp"><span class="opt-lab">相关度≥</span><input id="jbRel" class="opt-input num" type="number" value="0.5" min="0" max="1" step="0.1" /></div>
+        <label class="opt-tog" title="只采 CCF 推荐目录第七版的 A 类会议/期刊"><input type="checkbox" id="jbOnlyA" checked /> 只采 CCF-A</label>
+      </div>
+    </div>
+
+    <!-- 定时任务 -->
+    <div class="ingest-bar">
+      <div class="ib-head"><span class="ib-title">定时任务 ⏱</span><span class="ib-tip">按周期自动跑采集（默认源 S2 / OpenAlex / DBLP），新论文进「待确认」等你确认——系统自己养着自己长</span></div>
+      <div class="ib-row sch-row">
+        <input id="schQuery" class="ib-input" placeholder="定时采集的方向，如：MLLM 幻觉缓解" />
+        <div class="opt-grp"><span class="opt-lab">每</span><input id="schDays" class="opt-input num" type="number" value="7" min="1" max="90" /><span class="opt-lab">天</span></div>
+        <label class="opt-tog"><input type="checkbox" id="schOnlyA" checked /> 只采 CCF-A</label>
+        <button id="schAddBtn" class="mini primary">添加定时 →</button>
+      </div>
+      <div id="schList" class="sch-list"></div>
+    </div>
+
+    <!-- 任务列表 -->
+    <div class="ingest-bar">
+      <div class="ib-head"><span class="ib-title">采集任务<span id="jobsCount" class="set-meta-inline"></span></span><button id="jobsRefresh" class="linkbtn">↻ 刷新</button></div>
+      <div id="jobsList" class="jobs-list"></div>
+    </div>
+  </section>
+
   <!-- 设置弹窗（全局：顶栏 ⚙ 打开，任意页面可达，ESC 关闭） -->
   <div id="settingsModal" class="modal hidden">
     <div class="modal-card wide">
@@ -273,9 +318,11 @@
               <div class="set-tip">· arXiv 无需 key（公开 API）<br>· 没有 S2 key 也能用，只是高峰期可能限流</div>
             </div>
             <div class="set-card">
-              <div class="settings-sub">本地存储</div>
-              <div class="m-field"><label>PDF 下载目录（留空＝默认 data/pdfs）</label><input id="setPdfDir" placeholder="如 D:\\papers，留空用默认" /></div>
-              <div class="set-tip">本地查找顺序：默认 data/pdfs → 自定义目录 → 种子目录</div>
+             <div class="settings-sub">本地存储</div>
+             <div class="m-field"><label>PDF 下载目录（留空＝默认 data/pdfs）</label><input id="setPdfDir" placeholder="如 D:\\papers，留空用默认" /></div>
+              <div class="m-field"><label>论文讲解保存目录（留空＝默认 data/explainers）</label><input id="setExplainerDir" placeholder="留空用默认" /></div>
+              <div class="m-field"><label>译文保存目录（留空＝默认 data/translations）</label><input id="setTranslationDir" placeholder="留空用默认" /></div>
+             <div class="set-tip">本地查找顺序：默认 data/pdfs → 自定义目录 → 种子目录</div>
             </div>
             <div class="set-card">
               <div class="settings-sub">维护工具</div>
