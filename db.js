@@ -191,6 +191,12 @@ const markJobCandidates = (jobId, titleNorms, status) => {
   const tx = db.transaction((tns) => { let n = 0; for (const tn of tns) n += stmt.run(status, jobId, tn).changes; return n; });
   return tx(titleNorms);
 };
+const markJobCandidateIds = (jobId, ids, status) => {
+  if (!ids || !ids.length) return 0;
+  const stmt = db.prepare(`UPDATE job_candidates SET status=? WHERE job_id=? AND id=?`);
+  const tx = db.transaction((arr) => { let n = 0; for (const i of arr) n += stmt.run(status, jobId, i).changes; return n; });
+  return tx(ids);
+};
 const closeJobIfEmpty = (id) => { const r = db.prepare(`SELECT COUNT(*) AS p FROM job_candidates WHERE job_id=? AND status='pending'`).get(id); if (r && r.p === 0) setJobStatus(id, 'done'); };
 const resetOrphanJobs = () => db.prepare(`UPDATE ingest_jobs SET status='failed', finished_at=datetime('now') WHERE status IN ('running','pending')`).run().changes;
 
@@ -213,6 +219,6 @@ const markScheduleRan = (id, everyDays) => db.prepare(`UPDATE job_schedules SET 
 
 module.exports = {
   db, listPapers, getExplainer, getTranslation, getNote, getCiteGraph, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper,
-  createJob, listJobs, getJob, setJobStatus, appendJobLog, bumpJobAdded, deleteJob, listJobCandidates, markJobCandidates, closeJobIfEmpty, resetOrphanJobs,
+  createJob, listJobs, getJob, setJobStatus, appendJobLog, bumpJobAdded, deleteJob, listJobCandidates, markJobCandidates, markJobCandidateIds, closeJobIfEmpty, resetOrphanJobs,
   listSchedules, createSchedule, toggleSchedule, deleteSchedule, dueSchedules, markScheduleRan
 };
