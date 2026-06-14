@@ -16,6 +16,8 @@ data/app.db
 data/app.db-wal
 data/app.db-shm
 data/pdfs/
+data/explainers/
+data/translations/
 data/settings.json
 
 # 系统/编辑器
