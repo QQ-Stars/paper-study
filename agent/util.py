@@ -45,6 +45,32 @@ def infer_pdf_url(obj) -> str:
     return ""
 
 
+def unpaywall_pdf_url(doi, email="") -> str:
+    """用 Unpaywall 按 DOI 找开放获取(OA) PDF 直链——命中开放版才返回，否则空。
+    覆盖 ACL Anthology / AAAI(ojs) / OpenReview / 开放的 ACM 等会议论文。"""
+    doi = str(doi or "").strip()
+    if not doi:
+        return ""
+    try:
+        r = httpx.get(f"https://api.unpaywall.org/v2/{doi}",
+                      params={"email": email or "paper-study@users.noreply.github.com"},
+                      timeout=25, follow_redirects=True, headers=UA)
+        if r.status_code != 200:
+            return ""
+        loc = (r.json().get("best_oa_location") or {})
+        return (loc.get("url_for_pdf") or "").strip()
+    except Exception:
+        return ""
+
+
+def resolve_pdf_url(obj, email="") -> str:
+    """综合解析 PDF 直链：先用已有元数据 / arXiv，再用 Unpaywall(按 DOI 找开放获取)。"""
+    url = infer_pdf_url(obj)
+    if url:
+        return url
+    return unpaywall_pdf_url(_field(obj, "doi"), email)
+
+
 def _looks_like_pdf(path) -> bool:
     try:
         with open(path, "rb") as f:

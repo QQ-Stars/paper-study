@@ -61,6 +61,9 @@ PDF_DIR = _dir_from_settings("pdfDir", "data/pdfs")
 EXPLAINER_DIR = _dir_from_settings("explainerDir", "data/explainers")
 TRANSLATION_DIR = _dir_from_settings("translationDir", "data/translations")
 
+# Unpaywall 联系邮箱（按 DOI 找开放获取 PDF 时需带一个联系邮箱；可在设置 contactEmail 覆盖）
+UNPAYWALL_EMAIL = (_S.get("contactEmail") or "paper-study@users.noreply.github.com").strip()
+
 
 def artifact_path(kind: str, paper_id: str, ext: str = ".md") -> Path:
     base = {
