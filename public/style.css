@@ -492,6 +492,45 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .ingd-warn{color:var(--warn);font-style:normal;font-weight:600}
 .ingd-count{flex:0 0 auto;font-family:var(--font-mono);font-size:11px;color:var(--accent-ink);background:var(--accent-soft);padding:3px 10px;border-radius:99px;white-space:nowrap}
 .ingd-count:empty{display:none}
+
+/* ====== 采集页（后台任务 + 定时）====== */
+.sch-row{flex-wrap:wrap;gap:12px}
+.sch-list{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.sch-empty{font-family:var(--font-mono);font-size:11px;color:var(--ink-3);padding:4px 2px}
+.sch-item{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:10px}
+.sch-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sch-q{font-weight:600;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sch-meta{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3)}
+.sch-toggle{position:relative;display:inline-block;width:34px;height:18px;flex:0 0 auto;cursor:pointer}
+.sch-toggle input{opacity:0;width:0;height:0;position:absolute}
+.sch-slider{position:absolute;inset:0;background:var(--border-2);border-radius:99px;transition:.2s}
+.sch-slider::before{content:'';position:absolute;width:14px;height:14px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.sch-toggle input:checked + .sch-slider{background:var(--accent)}
+.sch-toggle input:checked + .sch-slider::before{transform:translateX(16px)}
+.sch-del,.job-del{flex:0 0 auto}
+
+.jobs-list{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+.job-card{border:1px solid var(--border);border-radius:12px;padding:13px 15px;background:var(--surface)}
+.job-card[data-status=review]{border-color:color-mix(in srgb,var(--warn) 40%,var(--border))}
+.job-top{display:flex;align-items:flex-start;gap:12px}
+.job-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px}
+.job-q{font-weight:650;font-size:14px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.job-meta{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3)}
+.job-badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;font-weight:600;padding:3px 11px;border-radius:99px;white-space:nowrap;flex:0 0 auto}
+.job-badge.st-pending{background:var(--idle-soft);color:var(--ink-3)}
+.job-badge.st-running{background:var(--accent-soft);color:var(--accent-ink)}
+.job-badge.st-review{background:var(--warn-soft);color:var(--warn)}
+.job-badge.st-done{background:var(--ok-soft);color:var(--ok)}
+.job-badge.st-failed{background:#f3d9d0;color:#b4421f}
+[data-theme=dark] .job-badge.st-failed{background:#3a201a;color:#e08a6e}
+.job-stats{font-family:var(--font-mono);font-size:11px;color:var(--ink-2);margin-top:9px}
+.job-stats b{color:var(--accent-ink)}
+.job-actions{display:flex;gap:8px;margin-top:10px}
+.job-cands{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border-2)}
+.jc-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.jc-tip{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);margin-right:auto}
+.jc-list{display:flex;flex-direction:column;gap:7px}
+.jc-log{margin-top:10px;padding:10px 12px;background:var(--surface-2);border-radius:9px;font-family:var(--font-mono);font-size:11px;color:var(--ink-2);white-space:pre-wrap;max-height:160px;overflow-y:auto}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 var(--accent-soft)}50%{box-shadow:0 0 0 5px var(--accent-soft)}}
 .cand-panel{margin-top:16px;animation:fade .3s ease}
 .cand-head{display:flex;align-items:center;gap:14px;margin-bottom:11px}

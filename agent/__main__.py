@@ -34,6 +34,7 @@ def main():
     _add_search_args(ing)
     ing.add_argument("--explain", action="store_true")
     ing.add_argument("--deep", action="store_true", help="深度分类: 读取PDF正文")
+    ing.add_argument("--no-pdf", action="store_true", help="入库时不下载 PDF")
 
     se = sub.add_parser("search", help="第一阶段：仅返回候选(不下载)")
     _add_search_args(se)
@@ -45,6 +46,7 @@ def main():
 
     isel = sub.add_parser("ingest-selected", help="第二阶段：从 stdin 读勾选候选并入库")
     isel.add_argument("--deep", action="store_true")
+    isel.add_argument("--no-pdf", action="store_true", help="入库时不下载 PDF")
 
     vv = sub.add_parser("verify-venue", help="会议核实：查权威库（stdin 读候选JSON，结果→stdout）")
     vv.add_argument("--sources", default="dblp,semanticscholar", help="核实源(优先级顺序): dblp,semanticscholar,openalex")
@@ -70,6 +72,9 @@ def main():
     ip = sub.add_parser("import-pdfs", help="本地 PDF 批量导入：stdin 读路径数组 → 抽取+分类+入库")
     ip.add_argument("--no-enrich", action="store_true", help="不用 Semantic Scholar 补全元数据")
 
+    dp = sub.add_parser("download-pdfs", help="为库内论文下载/补齐 PDF；stdin 可传 id 数组，为空则补全部缺失")
+    dp.add_argument("--limit", type=int, default=0, help="最多补下载多少篇，0 表示不限")
+
     rj = sub.add_parser("run-job", help="执行后台采集任务：读 ingest_jobs 一行→search→暂存候选(待确认)")
     rj.add_argument("--id", type=int, required=True)
 
@@ -94,7 +99,8 @@ def main():
     elif args.cmd == "ingest":
         srcs = [s.strip() for s in args.sources.split(",") if s.strip()]
         pipeline.ingest(args.query, srcs, _years(args.years), args.max, args.min_relevance,
-                        args.explain, args.deep, args.expand, args.expand_n, only_a=args.only_a)
+                        args.explain, args.deep, args.expand, args.expand_n, only_a=args.only_a,
+                        download_pdf=not args.no_pdf)
     elif args.cmd == "expand":
         sys.stdout.write(json.dumps(llm.expand_queries(args.query, args.expand_n), ensure_ascii=False))
         sys.stdout.flush()
@@ -110,7 +116,7 @@ def main():
         if raw[:1] == "﻿":          # 剥离可能的 UTF-8 BOM
             raw = raw[1:]
         cands = json.loads(raw) if raw.strip() else []
-        pipeline.ingest_candidates(cands, args.deep)
+        pipeline.ingest_candidates(cands, args.deep, download_pdf=not args.no_pdf)
     elif args.cmd == "verify-venue":
         from . import verify
         raw = sys.stdin.read()
@@ -143,6 +149,11 @@ def main():
             raw = raw[1:]
         paths = json.loads(raw) if raw.strip() else []
         importer.import_pdfs(paths, enrich=not args.no_enrich)
+    elif args.cmd == "download-pdfs":
+        from . import pdfs
+        raw = sys.stdin.read()
+        ids = json.loads(raw) if raw.strip() else None
+        pdfs.download_pdfs(ids, limit=args.limit)
     elif args.cmd == "run-job":
         from . import jobs
         jobs.run_job(args.id)

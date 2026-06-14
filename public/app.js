@@ -182,10 +182,12 @@ function showView(v) {
   $('#home').classList.toggle('hidden', v !== 'home');
   $('#manage').classList.toggle('hidden', v !== 'manage');
   $('#insights').classList.toggle('hidden', v !== 'insights');
+  $('#jobs').classList.toggle('hidden', v !== 'jobs');
   $('#layout').classList.toggle('hidden', v !== 'read');
   if (v === 'home') renderHome();
   if (v === 'manage') renderManage();
   if (v === 'insights') renderInsights();
+  if (v === 'jobs') renderJobs(); else stopJobsPoll();
   if (v === 'read' && !current) { $('#pdfScroll').innerHTML = EMPTY_HTML; }
 }
 function fmtTime(s) {
@@ -763,6 +765,150 @@ async function renderPage(holder) {
 function setZoom(f) { zoomFactor = Math.min(3, Math.max(0.5, f)); if (pdfDoc) layoutPages(++renderToken); }
 
 // ====== 交互绑定 ======
+// ====== 采集页：后台任务 + 定时（P5） ======
+let jobsTimer = null;
+const JOB_STATUS = { pending: ['待命', 'st-pending'], running: ['运行中', 'st-running'], review: ['待确认', 'st-review'], done: ['已完成', 'st-done'], failed: ['失败', 'st-failed'] };
+async function renderJobs() { renderSchedules(); await refreshJobs(); }
+async function refreshJobs() {
+  let jobs = [];
+  try { jobs = await (await fetch('/api/jobs')).json(); } catch (e) {}
+  const box = $('#jobsList'); if (!box) return jobs;
+  $('#jobsCount').textContent = jobs.length ? `共 ${jobs.length}` : '';
+  box.innerHTML = jobs.length ? jobs.map(jobCardHTML).join('') : '<div class="placeholder">还没有采集任务。在上面发起一个后台采集吧。</div>';
+  document.querySelectorAll('#jobsList .job-del').forEach(b => b.onclick = () => deleteJob(b.dataset.id));
+  document.querySelectorAll('#jobsList .job-review').forEach(b => b.onclick = () => toggleJobCands(b.dataset.id));
+  if (jobs.some(j => j.status === 'running' || j.status === 'pending')) startJobsPoll();
+  return jobs;
+}
+function jobCardHTML(j) {
+  const [label, cls] = JOB_STATUS[j.status] || [j.status, ''];
+  const yr = (j.year_from && j.year_to) ? `${j.year_from}-${j.year_to}` : '';
+  const busy = (j.status === 'running' || j.status === 'pending');
+  return `<div class="job-card" data-id="${j.id}" data-status="${j.status}">
+    <div class="job-top">
+      <div class="job-main"><span class="job-q">${esc(j.query)}</span>
+        <span class="job-meta">${esc(j.venues || '')}${yr ? ' · ' + yr : ''}${j.only_a ? ' · 只采A' : ''}${j.schedule_id ? ' · ⏱定时' : ''}</span></div>
+      <span class="job-badge ${cls}">${busy ? '<span class="ingd-spin"></span>' : ''}${label}</span>
+    </div>
+    <div class="job-stats">找到 ${j.found || 0} · 待确认 <b>${j.pending || 0}</b> · 已入库 ${j.added || 0} · ${fmtTime(j.created_at)}</div>
+    <div class="job-actions">
+      ${j.status === 'review' && j.pending > 0 ? `<button class="mini primary job-review" data-id="${j.id}">查看 ${j.pending} 篇待确认 →</button>` : ''}
+      <button class="mini job-del" data-id="${j.id}">删除</button>
+    </div>
+    <div class="job-cands hidden" data-id="${j.id}"></div>
+  </div>`;
+}
+async function toggleJobCands(id) {
+  const box = document.querySelector(`#jobsList .job-cands[data-id="${id}"]`); if (!box) return;
+  if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  box.innerHTML = '<div class="placeholder">加载候选…</div>';
+  let d = {};
+  try { d = await (await fetch('/api/jobs/detail?id=' + id)).json(); } catch (e) {}
+  const cands = d.candidates || [];
+  if (!cands.length) { box.innerHTML = '<div class="placeholder">没有待确认候选。</div>'; return; }
+  box.dataset.cands = JSON.stringify(cands);
+  box.innerHTML = `<div class="jc-head"><label class="cand-all"><input type="checkbox" class="jc-all" checked> 全选</label>
+      <span class="jc-tip">勾选要入库的，其余忽略</span>
+      <button class="mini primary jc-confirm" data-id="${id}">确认入库 →</button></div>
+    <div class="jc-list">${cands.map((c, i) => jobCandHTML(c, i)).join('')}</div>
+    <pre class="jc-log hidden"></pre>`;
+  const all = box.querySelector('.jc-all');
+  all.onchange = () => box.querySelectorAll('.jc-ck').forEach(ck => ck.checked = all.checked);
+  box.querySelector('.jc-confirm').onclick = () => confirmJob(id, box);
+}
+function jobCandHTML(c, i) {
+  const rel = c.relevance != null ? Math.round(c.relevance * 100) : 0;
+  const vn = normVenue(c.venue) || '';
+  return `<label class="cand">
+    <input type="checkbox" class="jc-ck" data-i="${i}" checked />
+    <div class="cand-main">
+      <div class="cand-title">${esc(c.title)}</div>
+      <div class="cand-meta"><span class="venue v-${vn}">${esc(vn || '—')} ${c.year || ''}</span>${ccfBadge(c.ccf)} · ${esc(c.type || '')}${c.topic ? ' · ' + esc(c.topic) : ''}</div>
+    </div>
+    <div class="cand-rel" title="相关度 ${rel}%"><div class="cand-rel-track"><div class="cand-rel-bar" style="width:${rel}%"></div></div><span>${rel}</span></div>
+  </label>`;
+}
+async function confirmJob(id, box) {
+  const cands = JSON.parse(box.dataset.cands || '[]');
+  const picks = [...box.querySelectorAll('.jc-ck:checked')].map(ck => cands[+ck.dataset.i]).filter(Boolean);
+  if (!picks.length) { alert('请勾选要入库的论文'); return; }
+  const log = box.querySelector('.jc-log'); log.classList.remove('hidden'); log.textContent = `入库 ${picks.length} 篇中…`;
+  const btn = box.querySelector('.jc-confirm'); btn.disabled = true;
+  try {
+    await streamNDJSON('/api/jobs/confirm', { jobId: +id, candidates: picks }, (ev) => {
+      if (ev.type === 'progress') { log.textContent += '\n' + ev.line; log.scrollTop = log.scrollHeight; }
+      else if (ev.type === 'done') { log.textContent += `\n✅ 完成，新增 ${ev.added} 篇`; }
+    });
+    await reloadPapers(); renderManage();
+    await refreshJobs();
+  } catch (e) { log.textContent = '失败: ' + e; }
+  finally { btn.disabled = false; }
+}
+async function deleteJob(id) {
+  if (!confirm('删除这个采集任务及其待确认候选？')) return;
+  await fetch('/api/jobs/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: +id }) });
+  refreshJobs();
+}
+async function startJob() {
+  const q = $('#jbQuery').value.trim(); if (!q) { alert('请填写检索方向'); return; }
+  const sources = [...document.querySelectorAll('#jobs .ib-opts .src-chip.active')].map(c => c.dataset.src);
+  if (!sources.length) { alert('请至少选择一个数据源'); return; }
+  const btn = $('#jbStartBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = '提交中…';
+  try {
+    const r = await (await fetch('/api/jobs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q, sources, years: $('#jbYears').value.trim(), max: parseInt($('#jbMax').value) || 15, minRelevance: parseFloat($('#jbRel').value), onlyA: $('#jbOnlyA').checked })
+    })).json();
+    if (!r.ok) { alert('发起失败：' + (r.error || '')); return; }
+    $('#jbQuery').value = '';
+    await refreshJobs(); startJobsPoll();
+  } catch (e) { alert('发起失败：' + e); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+function startJobsPoll() {
+  stopJobsPoll();
+  jobsTimer = setInterval(async () => {
+    if (currentView !== 'jobs') { stopJobsPoll(); return; }
+    if (document.querySelector('#jobsList .job-cands:not(.hidden)')) return;   // 正在看候选，别打断
+    const jobs = await refreshJobs();
+    if (!jobs || !jobs.some(j => j.status === 'running' || j.status === 'pending')) stopJobsPoll();
+  }, 3000);
+}
+function stopJobsPoll() { if (jobsTimer) { clearInterval(jobsTimer); jobsTimer = null; } }
+
+// ---- 定时任务 ----
+async function renderSchedules() {
+  let list = [];
+  try { list = await (await fetch('/api/schedules')).json(); } catch (e) {}
+  const box = $('#schList'); if (!box) return;
+  box.innerHTML = list.length ? list.map(s => `<div class="sch-item" data-id="${s.id}">
+    <label class="sch-toggle" title="${s.enabled ? '已启用，点击暂停' : '已暂停，点击启用'}"><input type="checkbox" class="sch-en" data-id="${s.id}" ${s.enabled ? 'checked' : ''}><span class="sch-slider"></span></label>
+    <div class="sch-main"><span class="sch-q">${esc(s.query)}</span><span class="sch-meta">每 ${s.every_days} 天 · ${esc(s.sources || '')}${s.only_a ? ' · 只采A' : ''}${s.next_run ? ' · 下次 ' + fmtTime(s.next_run) : ''}</span></div>
+    <button class="mini sch-del" data-id="${s.id}">删除</button></div>`).join('') : '<div class="sch-empty">还没有定时任务。添加后系统会按周期自动采集。</div>';
+  box.querySelectorAll('.sch-en').forEach(c => c.onchange = () => schToggle(c.dataset.id, c.checked));
+  box.querySelectorAll('.sch-del').forEach(b => b.onclick = () => schDelete(b.dataset.id));
+}
+async function schAdd() {
+  const q = $('#schQuery').value.trim(); if (!q) { alert('请填写定时采集的方向'); return; }
+  const days = parseInt($('#schDays').value) || 7;
+  const r = await (await fetch('/api/schedules', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: q, sources: ['semanticscholar', 'openalex', 'dblp'], years: '2024-2026', everyDays: days, onlyA: $('#schOnlyA').checked })
+  })).json();
+  if (!r || !r.ok) { alert('添加失败：' + ((r && r.error) || '')); return; }
+  $('#schQuery').value = '';
+  renderSchedules();
+}
+async function schToggle(id, enabled) {
+  await fetch('/api/schedules/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: +id, enabled }) });
+}
+async function schDelete(id) {
+  if (!confirm('删除这个定时任务？')) return;
+  await fetch('/api/schedules/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: +id }) });
+  renderSchedules();
+}
+
 function bindUI() {
   $('#search').oninput = (e) => { q = e.target.value.trim(); if (semActive) { if (!q) { semRank = null; refresh(); } } else refresh(); };
   $('#search').onkeydown = (e) => { if (e.key === 'Enter' && semActive) { e.preventDefault(); runSemSearch(q); } };
@@ -814,6 +960,10 @@ function bindUI() {
   $('#settingsModal').onclick = (e) => { if (e.target.id === 'settingsModal') closeSettingsModal(); };
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSettingsModal(); closePaperModal(); } });
   document.querySelectorAll('.ib-opts .src-chip').forEach(c => c.onclick = () => c.classList.toggle('active'));
+  $('#jbStartBtn').onclick = startJob;
+  $('#jbQuery').onkeydown = (e) => { if (e.key === 'Enter') startJob(); };
+  $('#schAddBtn').onclick = schAdd;
+  $('#jobsRefresh').onclick = () => refreshJobs();
   document.querySelectorAll('#libSrcFilter .fchip').forEach(c => c.onclick = () => {
     document.querySelectorAll('#libSrcFilter .fchip').forEach(x => x.classList.remove('active'));
     c.classList.add('active'); manageSrc = c.dataset.src; renderManage();
@@ -1142,7 +1292,7 @@ function handleProgress(line) {
   }
 }
 async function runSearch(queries) {
-  const sources = [...document.querySelectorAll('.ib-opts .src-chip.active')].map(c => c.dataset.src);
+  const sources = [...document.querySelectorAll('#manage .ib-opts .src-chip.active')].map(c => c.dataset.src);
   const q = $('#ingQuery').value.trim();
   if (!q) { alert('请填写检索方向'); return; }
   if (!sources.length) { alert('请至少选择一个数据源'); return; }
@@ -1323,8 +1473,10 @@ async function loadSettings() {
     $('#setModel').value = s.model || '';
     $('#setApiKey').value = '';
     $('#setS2Key').value = '';
-    $('#setPdfDir').value = s.pdfDir || '';
-    if ($('#setTheme')) $('#setTheme').value = s.researchTheme || '';
+   $('#setPdfDir').value = s.pdfDir || '';
+   $('#setExplainerDir').value = s.explainerDir || '';
+   $('#setTranslationDir').value = s.translationDir || '';
+   if ($('#setTheme')) $('#setTheme').value = s.researchTheme || '';
     $('#setKeyTip').textContent = s.hasApiKey ? `当前已配置：${s.apiKeyTail}` : '⚠️ 未配置 API Key';
     $('#setS2Tip').textContent = s.hasS2Key ? `当前已配置：${s.s2KeyTail}` : '未配置（不填也能用，仅高峰可能限流）';
     const meta = $('#setSummaryMeta'); if (meta) meta.textContent = `${s.provider} · ${s.model || '—'}` + (s.hasApiKey ? '' : ' · ⚠ 未配置 Key');
@@ -1343,8 +1495,10 @@ async function saveSettings() {
     provider: $('#setProvider').value,
     baseUrl: $('#setBaseUrl').value.trim(),
     model: $('#setModel').value.trim(),
-    pdfDir: $('#setPdfDir').value.trim(),
-    researchTheme: $('#setTheme') ? $('#setTheme').value.trim() : ''
+   pdfDir: $('#setPdfDir').value.trim(),
+   explainerDir: $('#setExplainerDir').value.trim(),
+   translationDir: $('#setTranslationDir').value.trim(),
+   researchTheme: $('#setTheme') ? $('#setTheme').value.trim() : ''
   };
   const ak = $('#setApiKey').value.trim(), sk = $('#setS2Key').value.trim();
   const badKey = (k) => k && !/^[\x21-\x7E]+$/.test(k);   // 合法 key 全是无空格的可见 ASCII；含空格/中文 → 拦截

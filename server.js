@@ -13,18 +13,23 @@ let cfg = { papersDir: '../paper', port: 5173 };
 try { Object.assign(cfg, JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'))); } catch (e) {}
 const PAPERS_DIR = path.resolve(ROOT, cfg.papersDir);
 const PDFS_DIR = path.join(ROOT, 'data', 'pdfs');   // 采集 Agent 下载的 PDF
+const EXPLAINERS_DIR = path.join(ROOT, 'data', 'explainers');
+const TRANSLATIONS_DIR = path.join(ROOT, 'data', 'translations');
 const PORT = process.env.PORT || cfg.port || 5173;
 
 const resolveDir = (d) => (path.isAbsolute(d) ? d : path.join(ROOT, d));
+const settingDir = (s, key, fallback) => resolveDir((s && s[key]) || fallback);
 // 按论文 id 解析本地 PDF：① DB 存的 pdf_path ② 按 slug 找（默认 data/pdfs 优先 → 自定义目录 → 种子 ../paper）
 const resolvePdfById = (id) => {
   try {
     const sp = dbapi.getPdfPath(id);
     if (sp) { const abs = path.isAbsolute(sp) ? sp : path.join(ROOT, sp); if (fs.existsSync(abs)) return abs; }
   } catch (e) {}
-  const custom = readSettings().pdfDir;
-  const dirs = [PDFS_DIR];
+  const settings = readSettings();
+  const custom = settings.pdfDir;
+  const dirs = [];
   if (custom) dirs.push(resolveDir(custom));
+  dirs.push(PDFS_DIR);
   dirs.push(PAPERS_DIR);
   for (const dir of dirs) { const f = path.join(dir, id + '.pdf'); if (fs.existsSync(f)) return f; }
   return null;
@@ -122,6 +127,7 @@ const server = http.createServer(async (req, res) => {
         '--min-relevance', String(b.minRelevance == null ? 0.5 : b.minRelevance)];
       if (b.deep) args.push('--deep');
       if (b.expand) args.push('--expand');
+      if (b.downloadPdf === false) args.push('--no-pdf');
       let out = '';
       const child = spawn(py, args, { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
       child.stdout.on('data', d => out += d.toString());
@@ -164,7 +170,7 @@ const server = http.createServer(async (req, res) => {
       const cands = Array.isArray(b.candidates) ? b.candidates : [];
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
       const emit = (o) => res.write(JSON.stringify(o) + '\n');
-      const args = ['ingest-selected']; if (b.deep) args.push('--deep');
+      const args = ['ingest-selected']; if (b.deep) args.push('--deep'); if (b.downloadPdf === false) args.push('--no-pdf');
       let added = 0; const ch = spawnAgent(args);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (!l.trim()) return; const m = /^INGESTED::(\d+)/.exec(l); if (m) added = +m[1]; emit({ type: 'progress', line: l }); }));
       ch.on('error', e => { emit({ type: 'done', ok: false, error: String(e) }); res.end(); });
@@ -297,6 +303,36 @@ const server = http.createServer(async (req, res) => {
       ch.stdin.write(JSON.stringify(paths)); ch.stdin.end();
       return;
     }
+    // 下载/补齐库内 PDF（NDJSON：progress... + result）
+    if (p === '/api/download-pdfs' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const ids = Array.isArray(b.ids) ? b.ids.map(x => safeBase(x)).filter(Boolean) : [];
+      const limit = Math.max(0, Math.min(parseInt(b.limit) || 0, 500));
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const args = ['download-pdfs']; if (limit) args.push('--limit', String(limit));
+      let out = ''; const ch = spawnAgent(args);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
+      ch.stdout.on('data', d => out += d.toString());
+      ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e) }); res.end(); });
+      ch.on('close', code => { let r = {}; try { r = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0 && r.ok !== false, ...r, error: r.error || '' }); res.end(); });
+      ch.stdin.write(ids.length ? JSON.stringify(ids) : '');
+      ch.stdin.end();
+      return;
+    }
+    if (p === '/api/pdf/status' && req.method === 'GET') {
+      const id = safeBase(u.searchParams.get('id'));
+      const f = id ? resolvePdfById(id) : null;
+      const row = id ? dbapi.getPaper(id) : null;
+      return send(res, 200, JSON.stringify({
+        ok: true,
+        id,
+        hasPdf: !!f,
+        size: f ? fs.statSync(f).size : 0,
+        path: f || '',
+        canDownload: !!(row && (row.pdf_url || row.arxiv_id || /arxiv/i.test(row.url || '') || /^\d{4}\.\d{4,5}/.test(row.id || '')))
+      }), MIME['.json']);
+    }
     // 引用关系图：读缓存的库内引用边 + 节点
     if (p === '/api/citegraph' && req.method === 'GET') {
       return send(res, 200, JSON.stringify(dbapi.getCiteGraph()), MIME['.json']);
@@ -332,6 +368,14 @@ const server = http.createServer(async (req, res) => {
         apiKeyTail: maskKey(s.apiKey || e.LLM_API_KEY), hasApiKey: !!(s.apiKey || e.LLM_API_KEY),
         s2KeyTail: maskKey(s.s2ApiKey), hasS2Key: !!s.s2ApiKey,
         pdfDir: s.pdfDir || '',
+        explainerDir: s.explainerDir || '',
+        translationDir: s.translationDir || '',
+        defaultPdfDir: path.relative(ROOT, PDFS_DIR),
+        defaultExplainerDir: path.relative(ROOT, EXPLAINERS_DIR),
+        defaultTranslationDir: path.relative(ROOT, TRANSLATIONS_DIR),
+        resolvedPdfDir: settingDir(s, 'pdfDir', path.relative(ROOT, PDFS_DIR)),
+        resolvedExplainerDir: settingDir(s, 'explainerDir', path.relative(ROOT, EXPLAINERS_DIR)),
+        resolvedTranslationDir: settingDir(s, 'translationDir', path.relative(ROOT, TRANSLATIONS_DIR)),
         researchTheme: s.researchTheme || ''
       }), MIME['.json']);
     }
@@ -344,7 +388,12 @@ const server = http.createServer(async (req, res) => {
       if (b.apiKey) s.apiKey = b.apiKey;          // 非空才更新
       if (b.s2ApiKey) s.s2ApiKey = b.s2ApiKey;
       if (b.pdfDir !== undefined) s.pdfDir = b.pdfDir.trim();
+      if (b.explainerDir !== undefined) s.explainerDir = b.explainerDir.trim();
+      if (b.translationDir !== undefined) s.translationDir = b.translationDir.trim();
       if (b.researchTheme !== undefined) s.researchTheme = b.researchTheme.trim();
+      for (const key of ['pdfDir', 'explainerDir', 'translationDir']) {
+        if (s[key]) fs.mkdirSync(resolveDir(s[key]), { recursive: true });
+      }
       writeSettings(s);
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
@@ -393,7 +442,7 @@ const server = http.createServer(async (req, res) => {
       const cids = cands.map(c => c._cid).filter(Boolean);
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
       const emit = (o) => res.write(JSON.stringify(o) + '\n');
-      const args = ['ingest-selected']; if (b.deep) args.push('--deep');
+      const args = ['ingest-selected']; if (b.deep) args.push('--deep'); if (b.downloadPdf === false) args.push('--no-pdf');
       let added = 0; const ch = spawnAgent(args);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (!l.trim()) return; const m = /^INGESTED::(\d+)/.exec(l); if (m) added = +m[1]; emit({ type: 'progress', line: l }); }));
       ch.on('error', e => { emit({ type: 'done', ok: false, error: String(e) }); res.end(); });
@@ -485,7 +534,7 @@ server.listen(PORT, () => {
   console.log(' 论文学习 App 已启动 (SQLite)');
   console.log(' 打开:  http://localhost:' + PORT);
   console.log(' 数据库: ' + (process.env.DB_PATH || path.join(ROOT, 'data', 'app.db')));
-  console.log(' PDF目录: ' + PAPERS_DIR);
+  console.log(' PDF目录: ' + settingDir(readSettings(), 'pdfDir', path.relative(ROOT, PDFS_DIR)));
   console.log(' 按 Ctrl+C 停止');
   console.log('========================================');
   try { const n = dbapi.resetOrphanJobs(); if (n) console.log(` ⚠ 已重置 ${n} 个中断的采集任务`); } catch (e) {}
