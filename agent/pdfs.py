@@ -53,7 +53,7 @@ def download_pdfs(ids=None, limit=0):
             skipped += 1
             _p(f"PDFEXISTS::{title}")
             continue
-        pdf_url = util.infer_pdf_url(r)
+        pdf_url = util.resolve_pdf_url(r, config.UNPAYWALL_EMAIL)
         if not pdf_url:
             skipped += 1
             _p(f"PDFNOURL::{title}")
