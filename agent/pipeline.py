@@ -116,7 +116,7 @@ def _p(msg):
 
 
 def _download_pdf_for_stub(stub, slug):
-    pdf_url = util.resolve_pdf_url(stub, config.UNPAYWALL_EMAIL)   # arXiv/元数据 → Unpaywall(按 DOI 找开放获取)
+    pdf_url = util.resolve_pdf_url(stub, config.UNPAYWALL_EMAIL, config.S2_API_KEY)   # arXiv/元数据 → Unpaywall → S2 OA → OpenReview
     if pdf_url:
         stub.pdf_url = pdf_url
     title = (stub.title or "paper").replace("\n", " ")[:48]

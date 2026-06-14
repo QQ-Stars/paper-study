@@ -63,12 +63,65 @@ def unpaywall_pdf_url(doi, email="") -> str:
         return ""
 
 
-def resolve_pdf_url(obj, email="") -> str:
-    """综合解析 PDF 直链：先用已有元数据 / arXiv，再用 Unpaywall(按 DOI 找开放获取)。"""
+def s2_open_pdf(s2_id, api_key="") -> str:
+    """用 Semantic Scholar(带 key 更稳)按 paperId 查 openAccessPdf 直链。"""
+    s2_id = str(s2_id or "").strip()
+    if not s2_id:
+        return ""
+    try:
+        hdr = {**UA, "x-api-key": api_key} if api_key else UA
+        r = httpx.get(f"https://api.semanticscholar.org/graph/v1/paper/{s2_id}",
+                      params={"fields": "openAccessPdf"}, headers=hdr, timeout=25, follow_redirects=True)
+        if r.status_code != 200:
+            return ""
+        return ((r.json().get("openAccessPdf") or {}).get("url") or "").strip()
+    except Exception:
+        return ""
+
+
+def _norm_title(s) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(s or "").lower())
+
+
+def openreview_pdf(title) -> str:
+    """按标题在 OpenReview(ICLR/NeurIPS 等)检索，标题严格匹配才返回 PDF 直链。"""
+    title = str(title or "").strip()
+    if len(title) < 8:
+        return ""
+    want = _norm_title(title)
+    for base in ("https://api2.openreview.net", "https://api.openreview.net"):
+        try:
+            r = httpx.get(f"{base}/notes/search", params={"term": title, "limit": 8}, timeout=25, headers=UA)
+            if r.status_code != 200:
+                continue
+            for n in r.json().get("notes", []):
+                c = n.get("content") or {}
+                t = c.get("title"); t = t.get("value") if isinstance(t, dict) else t
+                if not t or _norm_title(t) != want:
+                    continue
+                pdf = c.get("pdf"); pdf = pdf.get("value") if isinstance(pdf, dict) else pdf
+                if not pdf:                    # 没有真正的 PDF 附件就跳过（避免 ?id= 拿到 404）
+                    continue
+                if n.get("id"):
+                    return f"https://openreview.net/pdf?id={n['id']}"
+                return f"https://openreview.net{pdf}" if str(pdf).startswith("/") else str(pdf)
+        except Exception:
+            continue
+    return ""
+
+
+def resolve_pdf_url(obj, email="", s2_key="") -> str:
+    """综合解析 PDF 直链：arXiv/元数据 → Unpaywall(DOI) → S2 openAccessPdf → OpenReview(标题)。"""
     url = infer_pdf_url(obj)
     if url:
         return url
-    return unpaywall_pdf_url(_field(obj, "doi"), email)
+    url = unpaywall_pdf_url(_field(obj, "doi"), email)
+    if url:
+        return url
+    url = s2_open_pdf(_field(obj, "s2_id"), s2_key)
+    if url:
+        return url
+    return openreview_pdf(_field(obj, "title"))
 
 
 def _looks_like_pdf(path) -> bool:
