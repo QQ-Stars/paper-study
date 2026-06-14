@@ -509,6 +509,7 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .sch-toggle input:checked + .sch-slider::before{transform:translateX(16px)}
 .sch-del,.job-del{flex:0 0 auto}
 
+#jobs{flex:1;min-height:0;overflow-y:auto;padding:26px 34px 48px;animation:fade .4s ease;max-width:1300px;margin:0 auto;width:100%}
 .jobs-list{display:flex;flex-direction:column;gap:10px;margin-top:4px}
 .job-card{border:1px solid var(--border);border-radius:12px;padding:13px 15px;background:var(--surface)}
 .job-card[data-status=review]{border-color:color-mix(in srgb,var(--warn) 40%,var(--border))}
@@ -529,7 +530,7 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .job-cands{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border-2)}
 .jc-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
 .jc-tip{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);margin-right:auto}
-.jc-list{display:flex;flex-direction:column;gap:7px}
+.jc-list{display:flex;flex-direction:column;gap:7px;max-height:460px;overflow-y:auto;padding-right:4px}
 .jc-log{margin-top:10px;padding:10px 12px;background:var(--surface-2);border-radius:9px;font-family:var(--font-mono);font-size:11px;color:var(--ink-2);white-space:pre-wrap;max-height:160px;overflow-y:auto}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 var(--accent-soft)}50%{box-shadow:0 0 0 5px var(--accent-soft)}}
 .cand-panel{margin-top:16px;animation:fade .3s ease}
