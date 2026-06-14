@@ -61,7 +61,19 @@ const server = http.createServer(async (req, res) => {
   try {
     // ---- API（SQLite）----
     if (p === '/api/papers') {
-      return send(res, 200, JSON.stringify(dbapi.listPapers()), MIME['.json']);
+      const rows = dbapi.listPapers();
+      // 标注 PDF 是否在本地：DB 记录的 pdf_path → 默认目录 → 自定义目录 → 种子目录
+      const custom = readSettings().pdfDir;
+      const dirs = [PDFS_DIR];                       // 默认优先
+      if (custom) dirs.push(resolveDir(custom));      // 然后自定义
+      dirs.push(PAPERS_DIR);                           // 最后种子目录
+      for (const r of rows) {
+        let has = false;
+        if (r.pdf_path) { const abs = path.isAbsolute(r.pdf_path) ? r.pdf_path : path.join(ROOT, r.pdf_path); if (fs.existsSync(abs)) has = true; }
+        if (!has) for (const dir of dirs) { if (fs.existsSync(path.join(dir, r.id + '.pdf'))) { has = true; break; } }
+        r.hasPdf = has;
+      }
+      return send(res, 200, JSON.stringify(rows), MIME['.json']);
     }
     if (p === '/api/note' && req.method === 'GET') {
       return send(res, 200, dbapi.getNote(safeBase(u.searchParams.get('id'))), MIME['.md']);

@@ -231,7 +231,7 @@ function renderHome() {
   if (sem) list.sort((a, b) => semRank.get(b.id) - semRank.get(a.id));
   else list.sort(cmpHome);
   const emptyMsg = sem ? '语义检索没有命中（试试换种说法）。' : (favOnly ? '还没有收藏的论文。在阅读界面点「☆ 收藏」即可。' : '没有匹配的论文。');
-  $('#homeBody').innerHTML = list.map((p, i) => rowHTML(p, i + 1)).join('') || `<tr><td colspan="10" class="empty-row">${emptyMsg}</td></tr>`;
+  $('#homeBody').innerHTML = list.map((p, i) => rowHTML(p, i + 1)).join('') || `<tr><td colspan="11" class="empty-row">${emptyMsg}</td></tr>`;
   document.querySelectorAll('#homeBody tr[data-id]').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
   document.querySelectorAll('#homeBody .fav-star').forEach(s => s.onclick = (e) => { e.stopPropagation(); toggleFavorite(s.dataset.id); });
   document.querySelectorAll('#homeTable th[data-sort]').forEach(th => {
@@ -456,12 +456,14 @@ function semScoreBadge(id) {
   return `<span class="sem-score" title="语义相关度 ${pct}%">${pct}</span>`;
 }
 function ccfBadge(ccf) { return ccf ? `<span class="ccf ccf-${ccf}" title="CCF ${ccf} 类">${ccf}</span>` : ''; }
+function pdfBadge(has) { return has ? `<span class="pdf-flag" title="PDF 已在本地，可直接阅读">📄</span>` : `<span class="pdf-flag off" title="本地暂无 PDF（可在「管理」页「补下载缺失 PDF」）">📄</span>`; }
 function rowHTML(p, idx) {
   return `<tr data-id="${p.id}">
     <td><span class="ht-idx">${idx}</span></td>
     <td class="ht-title" title="${esc(p.title)}">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${p.title}</td>
     <td><span class="venue v-${p.venue}">${p.venue}</span></td>
     <td class="ht-ccf">${ccfBadge(p.ccf)}</td>
+    <td class="ht-pdf">${pdfBadge(p.hasPdf)}</td>
     <td>${p.year}</td>
     <td>${p.type}</td>
     <td>${p.topic || ''}</td>
@@ -509,7 +511,7 @@ function paperItem(p) {
   const order = p.order ? `<span class="order-badge">${p.order}</span>` : '';
   d.innerHTML =
     `<div class="pi-top">${order}<div class="pi-title">${p.title}</div><span class="fav-star ${p.favorite ? 'on' : ''}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span><span class="status-dot ${p.status}" title="${p.status}"></span></div>
-     <div class="pi-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span>${ccfBadge(p.ccf)}<span class="dir">${p.type}${p.topic ? ' · ' + p.topic : ''}</span>${semScoreBadge(p.id)}</div>`;
+     <div class="pi-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span>${ccfBadge(p.ccf)}${pdfBadge(p.hasPdf)}<span class="dir">${p.type}${p.topic ? ' · ' + p.topic : ''}</span>${semScoreBadge(p.id)}</div>`;
   d.querySelector('.fav-star').onclick = (e) => { e.stopPropagation(); toggleFavorite(p.id); };
   return d;
 }
@@ -1025,7 +1027,7 @@ function renderManage() {
   list.sort(cmp);
   $('#mCount').textContent = `共 ${list.length}`;
   $('#mList').innerHTML = list.map(p => {
-    const meta = [`<span class="venue v-${p.venue}">${p.venue} ${p.year}</span>${ccfBadge(p.ccf)}`, p.type];
+    const meta = [`<span class="venue v-${p.venue}">${p.venue} ${p.year}</span>${ccfBadge(p.ccf)}${pdfBadge(p.hasPdf)}`, p.type];
     if (p.topic) meta.push(p.topic);
     if (p.relevance != null) meta.push('rel ' + p.relevance);
     if (p.citations != null) meta.push(p.citations + ' cite');
