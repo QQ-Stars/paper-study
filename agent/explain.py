@@ -57,7 +57,8 @@ def explain_paper(pid: str, deep: bool = False) -> str:
             _p(f"STAGE::pdf::读取 PDF 全文（共 {pages} 页）…")
             try:
                 fulltext = extract.full_text(pdf, r.get("abstract"), config.EXPLAIN_MAX_CHARS)
-                _p(f"PDFOK::已读取全文 {len(fulltext)} 字")
+                fulltext, cut = extract.strip_references(fulltext)
+                _p(f"PDFOK::已读取全文 {len(fulltext)} 字" + ("（已跳过参考文献）" if cut else ""))
             except Exception as e:
                 _p(f"PDFERR::{e}（改用摘要生成）")
         else:

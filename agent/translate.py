@@ -28,23 +28,6 @@ def _find_pdf(r: dict):
     return None
 
 
-# 参考文献 / 致谢 等“文末”标题（整行就是这个词，允许前面有 #、数字、加粗标记）
-_TAIL = re.compile(
-    r'^[\s#>*_\-.0-9]*\**\s*'
-    r'(references?|bibliography|参\s*考\s*文\s*献|acknowledge?ments?|致\s*谢)'
-    r'\s*\**\s*:?\s*$', re.I)
-
-
-def _strip_tail(md: str):
-    """裁掉参考文献/致谢及其后内容（仅当它出现在全文后半段时，避免误伤正文里的提及）。"""
-    lines = md.split("\n")
-    n = len(lines)
-    for i, ln in enumerate(lines):
-        if i > n * 0.45 and _TAIL.match(ln.strip()):
-            return "\n".join(lines[:i]).rstrip(), True
-    return md, False
-
-
 def _is_delim(line: str) -> bool:
     """Markdown 表格的分隔行，如 |:---|:---|。"""
     s = line.strip()
@@ -111,7 +94,7 @@ def translate_paper(pid: str, workers: int = 4) -> str:
         _p("PDFMISS::未找到本地PDF，无法进行全文翻译")
         raise SystemExit(5)
 
-    body, stripped = _strip_tail(body)
+    body, stripped = extract.strip_references(body)
     if stripped:
         _p("STRIP::已跳过参考文献/致谢部分")
     body, n_tbl = _strip_tables(body)
