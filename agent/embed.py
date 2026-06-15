@@ -68,9 +68,17 @@ def embed_texts(texts):
 
 
 def _paper_text(row):
+    # 优先用「讲解」(信息最全、多为中文，利于中文检索)，没有则退摘要，再退一句话总结，最后仅标题。
     title = (row["title"] or "").strip()
-    extra = (row["tldr"] or row["abstract"] or "").strip()
-    return (title + ". " + extra).strip()[:2000]
+    body = (_col(row, "explainer") or _col(row, "abstract") or _col(row, "tldr") or "").strip()
+    return (title + ". " + body).strip()[:5000]
+
+
+def _col(row, name):
+    try:
+        return row[name]
+    except (KeyError, IndexError):
+        return None
 
 
 def _index(con, rows):
@@ -101,7 +109,7 @@ def reindex(scope="missing"):
     """CLI：建立/更新向量索引。all=全量重建；missing=只补未索引。结果 JSON→stdout。"""
     con = db.connect()
     db.ensure_vectors_table(con)
-    allrows = con.execute("SELECT id,title,tldr,abstract FROM papers").fetchall()
+    allrows = con.execute("SELECT id,title,tldr,abstract,explainer FROM papers").fetchall()
     if scope == "all":
         con.execute("DELETE FROM paper_vectors")
         con.commit()
@@ -132,7 +140,7 @@ def rank(query, k=30, exclude=None):
     qv = embed_texts([query])[0]
     qdim = int(qv.shape[0])
     have = {pid: dim for pid, dim in con.execute("SELECT paper_id, dim FROM paper_vectors").fetchall()}
-    rows = con.execute("SELECT id,title,tldr,abstract FROM papers").fetchall()
+    rows = con.execute("SELECT id,title,tldr,abstract,explainer FROM papers").fetchall()
     todo = [r for r in rows if have.get(r["id"]) != qdim]   # 缺失 / 维度不符 → (重)嵌
     if todo:
         _p("STAGE::index")

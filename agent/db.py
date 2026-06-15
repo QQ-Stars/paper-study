@@ -106,6 +106,11 @@ def insert_paper(con, row: dict):
 
 def set_explainer(con, pid: str, md: str):
     con.execute("UPDATE papers SET explainer=?, updated_at=datetime('now') WHERE id=?", (md, pid))
+    # 讲解是语义检索的嵌入文本来源 → 讲解变了就丢弃旧向量，下次语义检索按新讲解自动重嵌该篇。
+    try:
+        con.execute("DELETE FROM paper_vectors WHERE paper_id=?", (pid,))
+    except Exception:
+        pass
     con.commit()
     try:
         config.artifact_path("explainer", pid).write_text(md or "", encoding="utf-8")
