@@ -34,7 +34,13 @@ const resolvePdfById = (id) => {
   for (const dir of dirs) { const f = path.join(dir, id + '.pdf'); if (fs.existsSync(f)) return f; }
   return null;
 };
-const pyExe = () => { const w = path.join(ROOT, '.venv', 'Scripts', 'python.exe'); return fs.existsSync(w) ? w : 'python'; };
+const pyExe = () => {
+  for (const p of [path.join(ROOT, '.venv', 'Scripts', 'python.exe'),   // Windows venv
+                   path.join(ROOT, '.venv', 'bin', 'python')]) {         // Linux venv（Docker 容器内）
+    if (fs.existsSync(p)) return p;
+  }
+  return process.platform === 'win32' ? 'python' : 'python3';            // 退回系统解释器
+};
 const spawnAgent = (args, opts = {}) => spawn(pyExe(), ['-m', 'agent', ...args], { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }, ...opts });
 
 // ---- 设置（模型/数据源），存 data/settings.json（gitignore），Python Agent 也读它 ----
@@ -132,8 +138,7 @@ const server = http.createServer(async (req, res) => {
       const b = JSON.parse(await readBody(req));
       const sources = (Array.isArray(b.sources) ? b.sources : []).filter(s => ['semanticscholar', 'arxiv', 'openalex', 'dblp'].includes(s));
       if (!b.query || !sources.length) return send(res, 400, JSON.stringify({ ok: false, error: '缺少检索方向或数据源' }), MIME['.json']);
-      const pyWin = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
-      const py = fs.existsSync(pyWin) ? pyWin : 'python';
+      const py = pyExe();
       const args = ['-m', 'agent', 'ingest', '--query', String(b.query), '--sources', sources.join(','),
         '--years', String(b.years || '2024-2026'), '--max', String(Math.min(parseInt(b.max) || 10, 50)),
         '--min-relevance', String(b.minRelevance == null ? 0.5 : b.minRelevance)];
@@ -418,8 +423,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
     if (p === '/api/test-llm' && req.method === 'POST') {
-      const pyWin = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
-      const py = fs.existsSync(pyWin) ? pyWin : 'python';
+      const py = pyExe();
       let out = '';
       const child = spawn(py, ['-m', 'agent', 'ping'], { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
       child.stdout.on('data', d => out += d.toString());

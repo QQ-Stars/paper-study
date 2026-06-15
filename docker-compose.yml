@@ -1,0 +1,24 @@
+# 单机自用：`docker compose up -d --build` 一条命令起服务 → http://localhost:5173
+# 数据与模型缓存挂卷持久化；API Key 放 data/settings.json（随卷带入，不进镜像）。
+services:
+  app:
+    build:
+      context: .
+      args:
+        # 基础镜像；国内拉不到 Docker Hub 时设环境变量 NODE_IMAGE 覆盖，如：
+        #   NODE_IMAGE=docker.m.daocloud.io/library/node:20-bookworm-slim docker compose up -d --build
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-bookworm-slim}
+    image: paper-study:latest
+    container_name: paper-study
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./data:/app/data           # 论文库 app.db / pdfs / settings.json（含 LLM / S2 / 嵌入 key）
+      - ./.models:/app/.models     # 本地嵌入模型缓存（用外部 bge-m3 API 时可为空）
+    environment:
+      - PORT=5173
+      # 也可改用环境变量配置密钥（data/settings.json 优先级更高）：
+      # - LLM_API_KEY=
+      # - S2_API_KEY=
+      # - EMBED_API_KEY=
+    restart: unless-stopped
