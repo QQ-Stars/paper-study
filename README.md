@@ -100,10 +100,10 @@ python -m agent ping                                # 测大模型连通性
 
 把论文库以 [MCP](https://modelcontextprotocol.io) 工具暴露给 **Claude Code / Claude Desktop** 等客户端，在对话里检索文献、读讲解与属性、做研究综述、找研究空白。stdio 传输，**只读库**；服务用 `__file__` 定位 `data/app.db`，与启动目录无关。
 
-注册到 Claude Code（换成你自己的绝对路径）：
+注册到 Claude Code（换成你自己的绝对路径；用**绝对文件路径**启动，与工作目录无关）：
 
 ```bash
-claude mcp add paper-study -- F:/paper/研究方向细化/study-app/.venv/Scripts/python.exe -m agent.mcp_server
+claude mcp add paper-study -- F:/paper/研究方向细化/study-app/.venv/Scripts/python.exe F:/paper/研究方向细化/study-app/agent/mcp_server.py
 ```
 
 或写进 Claude Desktop 的 `claude_desktop_config.json`：
@@ -113,11 +113,13 @@ claude mcp add paper-study -- F:/paper/研究方向细化/study-app/.venv/Script
   "mcpServers": {
     "paper-study": {
       "command": "F:/paper/研究方向细化/study-app/.venv/Scripts/python.exe",
-      "args": ["-m", "agent.mcp_server"]
+      "args": ["F:/paper/研究方向细化/study-app/agent/mcp_server.py"]
     }
   }
 }
 ```
+
+> 也可在 `study-app/` 目录内用 `python -m agent.mcp_server` 启动（开发自测用）。
 
 **工具（8 个）**：
 

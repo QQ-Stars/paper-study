@@ -2,11 +2,12 @@
 用于对话式检索、读讲解/属性、做研究综述与找研究空白。
 
 运行（stdio）：
-    cd study-app && .venv/Scripts/python.exe -m agent.mcp_server
+    cd study-app && .venv/Scripts/python.exe -m agent.mcp_server          # 开发自测（需在 study-app 目录）
+    .venv/Scripts/python.exe F:/.../study-app/agent/mcp_server.py         # 绝对文件路径启动（与工作目录无关，注册用这个）
 
 注册到 Claude Code：
-    claude mcp add paper-study -- F:/paper/研究方向细化/study-app/.venv/Scripts/python.exe -m agent.mcp_server
-（或写进 claude_desktop_config.json，见 README）
+    claude mcp add paper-study -- <venv-python 绝对路径> <agent/mcp_server.py 绝对路径>
+（或写进 claude_desktop_config.json，见 README「MCP 服务」）
 
 设计：所有工具只读库，复用 agent.db / agent.embed；语义检索调用 embed.rank。
 注意：MCP stdio 用 stdout 传协议，故模型加载等任何输出都重定向到 stderr，避免污染。
