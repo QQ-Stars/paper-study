@@ -62,13 +62,13 @@
 - ☑ **检索词多样化**（需求2）：`expand_queries` 6 角度、temp 0.6、去重——同步采集一并受益
 - **交付**：✅ 网页发起后台采集、定时养库、评审后入库；已端到端验证（confirm 1/3 → 恰好 1 篇入库）。
 
-## P6 · 部署上线  ☐
-- ☐ `Dockerfile` + `docker-compose.yml`（web + agent worker + 共享卷）
+## P6 · 部署上线  ◐
+- ☑ **单机自用 Docker**：`Dockerfile`（node:20-slim + python3/venv 同容器，better-sqlite3 原生编译）+ `docker-compose.yml`（data/.models 挂卷持久化、PORT 可配）+ `.dockerignore`（排除宿主 node_modules/.venv，避免 Windows 产物污染 Linux 镜像）；`server.js` 的 `pyExe()` 兼容 `.venv/bin/python`。→ `docker compose up -d --build` 一键起服务；密钥放 data/settings.json 不进镜像；基础镜像可经 `NODE_IMAGE` build-arg 换国内源
 - ☐ `.env` 密钥管理；对象存储托管 PDF（R2/OSS）
 - ☐ 账号登录（多用户：笔记/进度按用户隔离）
 - ☐ 反向代理 + 自动 HTTPS（Caddy）+ 域名
 - ☐ 备份策略（SQLite/Postgres）
-- **交付**：一个可公开访问、稳定运行的正规产品。
+- **交付**：✅ 单机/个人服务器一条命令自托管；对外公开（多用户/HTTPS/对象存储）按需再做。
 
 ## P7 · 增强（可选）  ◐
 - ☑ 阅读/相似推荐（Semantic Scholar Recommendations，见 P4 相似论文）
@@ -82,5 +82,5 @@
 ## 当前焦点
 P1–P5 全部交付（数据库、采集 Agent、多源、讲解、翻译、会议核实、收藏、UI、语义检索、相似论文、本地 PDF 导入、**后台任务 + 定时 + 评审入库**）。
 另：PDF 多源解析链已落地（arXiv → Unpaywall → Semantic Scholar → OpenReview），库内 124/130 篇有本地 PDF。
-已完成：**PDF 解析质量升级**（讲解裁参考文献 + first_pages 结构化）、**P7 MCP server**（库以工具暴露给 Claude，对话式检索/读讲解/找空白）。
-**下一步候选**：P6 **部署上线**（Docker / 多用户 / 对象存储 / HTTPS，仅在要对外共享或远程访问时才需要）；或继续按需做 P7 其余增强。
+已完成：**PDF 解析质量升级**（讲解裁参考文献 + first_pages 结构化）、**P7 MCP server**（库以工具暴露给 Claude，对话式检索/读讲解/找空白）、**语义检索可换外部嵌入 API**（硅基流动 bge-m3，嵌入文本升级为「标题+讲解」）、**P6 单机自用 Docker**（`docker compose up -d --build` 一键起；已实测容器内 138 篇库、Python 依赖、Node→Agent 调用、bge-m3 检索全通）。
+**下一步候选**：P6 其余（多用户隔离 / HTTPS / 对象存储，仅对外公开时才需要）；或继续 P7 增强 / 用库做研究找空白。

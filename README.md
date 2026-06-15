@@ -47,6 +47,30 @@ node server.js
 
 ---
 
+## 用 Docker 部署（单机自用）
+
+把 Node + Python 打进一个容器，一条命令起服务。**API Key 不进镜像**——放在 `data/settings.json`，随数据卷挂载带入。
+
+```bash
+cd study-app
+docker compose up -d --build      # 构建并后台启动 → http://localhost:5173
+docker compose logs -f            # 看日志
+docker compose down               # 停止
+```
+
+- **数据持久化**：`./data`（app.db / pdfs / settings.json）与 `./.models`（本地嵌入缓存）挂为卷，容器重建不丢库。
+- **密钥**：LLM / S2 / 嵌入 key 填在 `data/settings.json`，或用 `docker-compose.yml` 的 `environment` 传 `LLM_API_KEY` / `S2_API_KEY` / `EMBED_API_KEY` 等环境变量。
+- **改端口**：改 `docker-compose.yml` 的 `ports: "5173:5173"` 左侧，或设 `PORT`。
+- **国内拉不到基础镜像**：默认从 Docker Hub 拉 `node:20-bookworm-slim`；被墙时用国内源构建：
+  ```bash
+  NODE_IMAGE=docker.m.daocloud.io/library/node:20-bookworm-slim docker compose up -d --build
+  ```
+  （Windows PowerShell：`$env:NODE_IMAGE="docker.m.daocloud.io/library/node:20-bookworm-slim"; docker compose up -d --build`）
+
+> 多用户隔离、HTTPS、对象存储托管 PDF 等见 [ROADMAP P6](docs/ROADMAP.md)——单机自用不需要。
+
+---
+
 ## 架构
 
 ```

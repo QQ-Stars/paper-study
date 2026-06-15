@@ -1,0 +1,21 @@
+# 关键：绝不把宿主机的 node_modules / .venv 带进镜像——它们是 Windows 平台产物，
+# 会覆盖镜像内为 Linux 编译/安装的 better-sqlite3 与 Python venv，导致运行崩溃。
+node_modules
+.venv
+
+# 体积大 / 可再生 / 由数据卷提供
+data
+.models
+
+# 密钥与本地杂项
+.env
+.git
+.gitignore
+.github
+.claude
+.vscode
+**/__pycache__
+*.pyc
+*.pyo
+*.log
+npm-debug.log*
