@@ -388,7 +388,11 @@ const server = http.createServer(async (req, res) => {
         resolvedPdfDir: settingDir(s, 'pdfDir', path.relative(ROOT, PDFS_DIR)),
         resolvedExplainerDir: settingDir(s, 'explainerDir', path.relative(ROOT, EXPLAINERS_DIR)),
         resolvedTranslationDir: settingDir(s, 'translationDir', path.relative(ROOT, TRANSLATIONS_DIR)),
-        researchTheme: s.researchTheme || ''
+        researchTheme: s.researchTheme || '',
+        embedProvider: s.embedProvider || 'local',
+        embedApiBase: s.embedApiBase || '',
+        embedApiModel: s.embedApiModel || '',
+        embedKeyTail: maskKey(s.embedApiKey), hasEmbedKey: !!s.embedApiKey
       }), MIME['.json']);
     }
     if (p === '/api/settings' && req.method === 'POST') {
@@ -403,6 +407,10 @@ const server = http.createServer(async (req, res) => {
       if (b.explainerDir !== undefined) s.explainerDir = b.explainerDir.trim();
       if (b.translationDir !== undefined) s.translationDir = b.translationDir.trim();
       if (b.researchTheme !== undefined) s.researchTheme = b.researchTheme.trim();
+      if (b.embedProvider) s.embedProvider = b.embedProvider;
+      if (b.embedApiBase !== undefined) s.embedApiBase = b.embedApiBase.trim();
+      if (b.embedApiModel !== undefined) s.embedApiModel = b.embedApiModel.trim();
+      if (b.embedApiKey) s.embedApiKey = b.embedApiKey;          // 非空才更新
       for (const key of ['pdfDir', 'explainerDir', 'translationDir']) {
         if (s[key]) fs.mkdirSync(resolveDir(s[key]), { recursive: true });
       }

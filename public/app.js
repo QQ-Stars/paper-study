@@ -1502,6 +1502,11 @@ async function loadSettings() {
    $('#setExplainerDir').value = s.explainerDir || '';
    $('#setTranslationDir').value = s.translationDir || '';
    if ($('#setTheme')) $('#setTheme').value = s.researchTheme || '';
+   if ($('#setEmbedProvider')) $('#setEmbedProvider').value = s.embedProvider || 'local';
+   if ($('#setEmbedBase')) $('#setEmbedBase').value = s.embedApiBase || '';
+   if ($('#setEmbedModel')) $('#setEmbedModel').value = s.embedApiModel || '';
+   if ($('#setEmbedKey')) $('#setEmbedKey').value = '';
+   if ($('#setEmbedTip')) $('#setEmbedTip').textContent = s.hasEmbedKey ? `当前已配置：${s.embedKeyTail}` : '未配置（本地模式无需 Key）';
     $('#setKeyTip').textContent = s.hasApiKey ? `当前已配置：${s.apiKeyTail}` : '⚠️ 未配置 API Key';
     $('#setS2Tip').textContent = s.hasS2Key ? `当前已配置：${s.s2KeyTail}` : '未配置（不填也能用，仅高峰可能限流）';
     const meta = $('#setSummaryMeta'); if (meta) meta.textContent = `${s.provider} · ${s.model || '—'}` + (s.hasApiKey ? '' : ' · ⚠ 未配置 Key');
@@ -1523,13 +1528,18 @@ async function saveSettings() {
    pdfDir: $('#setPdfDir').value.trim(),
    explainerDir: $('#setExplainerDir').value.trim(),
    translationDir: $('#setTranslationDir').value.trim(),
-   researchTheme: $('#setTheme') ? $('#setTheme').value.trim() : ''
+   researchTheme: $('#setTheme') ? $('#setTheme').value.trim() : '',
+   embedProvider: $('#setEmbedProvider') ? $('#setEmbedProvider').value : 'local',
+   embedApiBase: $('#setEmbedBase') ? $('#setEmbedBase').value.trim() : '',
+   embedApiModel: $('#setEmbedModel') ? $('#setEmbedModel').value.trim() : ''
   };
   const ak = $('#setApiKey').value.trim(), sk = $('#setS2Key').value.trim();
+  const ek = $('#setEmbedKey') ? $('#setEmbedKey').value.trim() : '';
   const badKey = (k) => k && !/^[\x21-\x7E]+$/.test(k);   // 合法 key 全是无空格的可见 ASCII；含空格/中文 → 拦截
-  if (badKey(ak) || badKey(sk)) { const h = $('#setHint'); h.textContent = '⚠ API Key 含空格或非英文字符，看着不像 key，已拦截'; setTimeout(() => h.textContent = '', 4000); return; }
+  if (badKey(ak) || badKey(sk) || badKey(ek)) { const h = $('#setHint'); h.textContent = '⚠ API Key 含空格或非英文字符，看着不像 key，已拦截'; setTimeout(() => h.textContent = '', 4000); return; }
   if (ak) body.apiKey = ak;
   if (sk) body.s2ApiKey = sk;
+  if (ek) body.embedApiKey = ek;
   await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const h = $('#setHint'); h.textContent = '已保存 ✓（下次采集生效）'; setTimeout(() => h.textContent = '', 3000);
   loadSettings();

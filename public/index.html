@@ -321,6 +321,21 @@
               <div class="set-tip">· arXiv 无需 key（公开 API）<br>· 没有 S2 key 也能用，只是高峰期可能限流</div>
             </div>
             <div class="set-card">
+              <div class="settings-sub">语义检索嵌入<span class="sub-note">🔮 语义检索用的向量模型</span></div>
+              <div class="m-field"><label>来源</label>
+                <select id="setEmbedProvider">
+                  <option value="local">本地 model2vec（默认 · 无需联网/Key）</option>
+                  <option value="api">外部 API（OpenAI 兼容 · 如硅基流动 bge-m3）</option>
+                </select></div>
+              <div class="m-row2">
+                <div class="m-field"><label>API Base URL</label><input id="setEmbedBase" placeholder="https://api.siliconflow.cn/v1" /></div>
+                <div class="m-field"><label>模型</label><input id="setEmbedModel" placeholder="BAAI/bge-m3" /></div>
+              </div>
+              <div class="m-field"><label>API Key</label><input id="setEmbedKey" type="password" placeholder="留空＝不修改" autocomplete="off" /></div>
+              <div class="set-tip" id="setEmbedTip"></div>
+              <div class="set-tip">外部模型（如 bge-m3，8K 上下文、多语种）通常比本地小模型更准。切来源/模型后维度变化，<b>下次语义检索会自动重嵌全库</b>。</div>
+            </div>
+            <div class="set-card">
              <div class="settings-sub">本地存储</div>
              <div class="m-field"><label>PDF 下载目录（留空＝默认 data/pdfs）</label><input id="setPdfDir" placeholder="如 D:\\papers，留空用默认" /></div>
               <div class="m-field"><label>论文讲解保存目录（留空＝默认 data/explainers）</label><input id="setExplainerDir" placeholder="留空用默认" /></div>
