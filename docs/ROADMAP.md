@@ -73,11 +73,14 @@
 ## P7 · 增强（可选）  ◐
 - ☑ 阅读/相似推荐（Semantic Scholar Recommendations，见 P4 相似论文）
 - ☑ **洞察视图**：研究趋势（年份 × 方向堆叠柱）+ **引用关系图**（`agent/citegraph.py` 抓 S2 参考文献建库内互引边 `cite_edges`，ECharts 力导向图，节点大小=被库内引用数）
-- ☐ 把论文库包成 **MCP server**，让 Claude 等客户端可"对话式"检索/分类/管理论文
+- ☑ 把论文库包成 **MCP server**（`agent/mcp_server.py`，FastMCP/stdio，只读库）：8 个工具
+  `search_papers` / `semantic_search` / `related_papers` / `get_paper` / `get_explainer` / `get_translation` / `list_categories` / `library_overview`，
+  让 Claude 等客户端对话式检索、读讲解与属性、做综述 / 找研究空白（注册见 README「MCP 服务」）
 
 ---
 
 ## 当前焦点
 P1–P5 全部交付（数据库、采集 Agent、多源、讲解、翻译、会议核实、收藏、UI、语义检索、相似论文、本地 PDF 导入、**后台任务 + 定时 + 评审入库**）。
 另：PDF 多源解析链已落地（arXiv → Unpaywall → Semantic Scholar → OpenReview），库内 124/130 篇有本地 PDF。
-**下一步候选**：① P7 把论文库包成 **MCP server**（让 Claude 对话式检索/管理库，最贴合本人用法）；② **PDF 解析质量升级**（pymupdf4llm 已装，提升讲解/翻译质量）；③ P6 **部署上线**（Docker/多用户/HTTPS，仅在要对外共享时才需要）。
+已完成：**PDF 解析质量升级**（讲解裁参考文献 + first_pages 结构化）、**P7 MCP server**（库以工具暴露给 Claude，对话式检索/读讲解/找空白）。
+**下一步候选**：P6 **部署上线**（Docker / 多用户 / 对象存储 / HTTPS，仅在要对外共享或远程访问时才需要）；或继续按需做 P7 其余增强。

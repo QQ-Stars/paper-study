@@ -96,40 +96,43 @@ def reindex(scope="missing"):
     sys.stdout.flush()
 
 
-def semsearch(query, k=30):
+def rank(query, k=30, exclude=None):
+    """语义检索核心：返回 [{'id','score'}, ...]（按余弦降序）。不打印，供 CLI / MCP 复用。
+    自动补齐未索引论文；exclude 可排除某个 paper_id（用于“库内相似论文”剔除自身）。进度→stderr。"""
     import numpy as np
     con = db.connect()
     db.ensure_vectors_table(con)
-    # 自动补齐未索引论文（采集/导入后无需手动重建）
     miss = con.execute("SELECT id,title,tldr,abstract FROM papers "
                        "WHERE id NOT IN (SELECT paper_id FROM paper_vectors)").fetchall()
     if miss:
         _p("STAGE::index")
-        try:
-            _index(con, miss)
-        except Exception as e:
-            _p(f"EMBEDERR::{e}")
-            sys.stdout.write(json.dumps({"ok": False, "error": str(e), "results": []}, ensure_ascii=False))
-            sys.stdout.flush(); con.close(); return
+        _index(con, miss)
     _p("STAGE::query")
-    try:
-        qv = embed_texts([query])[0]
-    except Exception as e:
-        _p(f"EMBEDERR::{e}")
-        sys.stdout.write(json.dumps({"ok": False, "error": str(e), "results": []}, ensure_ascii=False))
-        sys.stdout.flush(); con.close(); return
+    qv = embed_texts([query])[0]
     rows = con.execute("SELECT paper_id, vector FROM paper_vectors").fetchall()
     con.close()
     ids, mat = [], []
     for r in rows:
+        if exclude and r["paper_id"] == exclude:
+            continue
         v = np.frombuffer(r["vector"], dtype="float32")
         if v.shape[0] == qv.shape[0]:        # 跳过换模型后维度不符的旧向量
             ids.append(r["paper_id"]); mat.append(v)
     if not mat:
-        sys.stdout.write(json.dumps({"ok": True, "results": []}, ensure_ascii=False)); sys.stdout.flush(); return
+        return []
     sims = np.vstack(mat) @ qv
     order = np.argsort(-sims)[:max(1, int(k))]
-    res = [{"id": ids[i], "score": round(float(sims[i]), 4)} for i in order]
+    return [{"id": ids[i], "score": round(float(sims[i]), 4)} for i in order]
+
+
+def semsearch(query, k=30):
+    """CLI 包装：调用 rank() 并把结果 JSON 打到 stdout（前端语义检索用）。"""
+    try:
+        res = rank(query, k)
+    except Exception as e:
+        _p(f"EMBEDERR::{e}")
+        sys.stdout.write(json.dumps({"ok": False, "error": str(e), "results": []}, ensure_ascii=False))
+        sys.stdout.flush(); return
     _p(f"DONE::{len(res)}")
     sys.stdout.write(json.dumps({"ok": True, "results": res}, ensure_ascii=False))
     sys.stdout.flush()
