@@ -55,6 +55,15 @@ EMBED_MODEL = _S.get("embedModel") or os.getenv("EMBED_MODEL") or "minishlab/pot
 MODEL_DIR = ROOT / ".models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
+# 语义检索嵌入来源：local=本地 model2vec（默认，无需联网/Key）；
+# api=OpenAI 兼容的外部嵌入 API（如硅基流动 SiliconFlow 的 BAAI/bge-m3，上下文 8K、多语种）。
+# 在网页 ⚙ 设置里改；切换来源/模型会改变向量维度 → 下次语义检索自动重嵌全库（见 embed.rank 的自愈）。
+EMBED_PROVIDER = (_S.get("embedProvider") or os.getenv("EMBED_PROVIDER") or "local").strip().lower()
+EMBED_API_BASE = (_S.get("embedApiBase") or os.getenv("EMBED_API_BASE")
+                  or "https://api.siliconflow.cn/v1").strip().rstrip("/")
+EMBED_API_KEY = (_S.get("embedApiKey") or os.getenv("EMBED_API_KEY") or "").strip()
+EMBED_API_MODEL = (_S.get("embedApiModel") or os.getenv("EMBED_API_MODEL") or "BAAI/bge-m3").strip()
+
 DB_PATH = os.getenv("DB_PATH") or str(ROOT / "data" / "app.db")
 # Artifact directories. Relative paths are resolved from project root.
 PDF_DIR = _dir_from_settings("pdfDir", "data/pdfs")
