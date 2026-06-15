@@ -51,12 +51,16 @@
 - ☑ **本地 PDF 批量导入** `agent/importer.py`：管理页填文件夹 → Node 递归扫 PDF → 勾选 → 大模型抽标题/摘要(parse_pdf_meta) →（可选 S2 补全会议/年份/引用）→ 分类 → 入库；**PDF 原地引用不复制**，按 pdf_path/arxiv_id/标题三重去重（重复扫描幂等）
 - **交付**：✅ 一个方向一网打尽——多源采集 + 语义找相似/相关 + 把手头一堆 PDF 一键变成分好类、可读可译的库。
 
-## P5 · 后台任务 + 定时 + 网页触发  ☐
-- ☐ `ingest_jobs` 表 + Python worker（轮询执行）
-- ☐ Node API：`POST /api/ingest`（发起任务）、`GET /api/jobs`（看进度）
-- ☐ 前端：搜索框旁"抓取该方向"按钮 + 任务进度
-- ☐ 定时调度（如每周抓新接收的相关论文）
-- **交付**：网页点一下就采集；系统能"自己养着自己长"。
+## P5 · 后台任务 + 定时 + 网页触发  ☑
+> 独立「采集」页：后台跑、评审门、定时三合一。管理页的即时采集保留并存。
+
+- ☑ `ingest_jobs` 表扩列（only_a/queries/schedule_id）+ 新表 `job_candidates`（暂存待确认候选）、`job_schedules`（定时规格）；启动时 `resetOrphanJobs` 把残留 running 重置为 failed
+- ☑ `agent/jobs.py` → `run_job(job_id)`：后台扩词检索（`expand_n=12`、只取不在库的新候选）→ 暂存 job_candidates → 置 `review` 等人工确认
+- ☑ Node API：`POST/GET /api/jobs`（发起/列表）、`/api/jobs/detail|confirm|delete`；`/api/schedules` 增删/启停
+- ☑ 前端「采集」页：发起后台采集 + 任务卡（状态徽标/轮询/可滚动）+ **评审门**——候选勾选「确认入库」才真正入库
+- ☑ 定时调度：Node `setInterval(checkSchedules, 10min)` + 启动延迟跑一次；到期自动建 job 跑、`next_run` 顺延
+- ☑ **检索词多样化**（需求2）：`expand_queries` 6 角度、temp 0.6、去重——同步采集一并受益
+- **交付**：✅ 网页发起后台采集、定时养库、评审后入库；已端到端验证（confirm 1/3 → 恰好 1 篇入库）。
 
 ## P6 · 部署上线  ☐
 - ☐ `Dockerfile` + `docker-compose.yml`（web + agent worker + 共享卷）
@@ -74,5 +78,6 @@
 ---
 
 ## 当前焦点
-P1–P4 全部交付（数据库、采集 Agent、多源、讲解、翻译、会议核实、收藏、UI、语义检索、相似论文、本地 PDF 导入）。
-**下一步**：P5 后台任务 + 定时（`ingest_jobs` worker / 网页发起采集 / 定时抓新论文），或按需先做 P6 部署。
+P1–P5 全部交付（数据库、采集 Agent、多源、讲解、翻译、会议核实、收藏、UI、语义检索、相似论文、本地 PDF 导入、**后台任务 + 定时 + 评审入库**）。
+另：PDF 多源解析链已落地（arXiv → Unpaywall → Semantic Scholar → OpenReview），库内 124/130 篇有本地 PDF。
+**下一步候选**：① P7 把论文库包成 **MCP server**（让 Claude 对话式检索/管理库，最贴合本人用法）；② **PDF 解析质量升级**（pymupdf4llm 已装，提升讲解/翻译质量）；③ P6 **部署上线**（Docker/多用户/HTTPS，仅在要对外共享时才需要）。
