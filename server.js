@@ -225,6 +225,40 @@ const server = http.createServer(async (req, res) => {
       ch.on('close', code => { emit({ type: 'result', ok: code === 0 && !!out.trim(), markdown: out, error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '生成失败') }); res.end(); });
       return;
     }
+    // 批量生成讲解 · 缺讲解论文计数（GET）：给「一键生成讲解」按钮显示可生成篇数
+    if (p === '/api/explain-batch' && req.method === 'GET') {
+      const rows = dbapi.db.prepare("SELECT id FROM papers WHERE explainer IS NULL OR TRIM(explainer)=''").all();
+      let withPdf = 0;
+      for (const r of rows) { if (resolvePdfById(r.id)) withPdf++; }
+      return send(res, 200, JSON.stringify({ pending: rows.length, withPdf, noPdf: rows.length - withPdf }), MIME['.json']);
+    }
+    // 批量生成讲解（LLM，逐篇通读本地 PDF 全文，与单篇「读PDF全文」逻辑一致）：NDJSON 流
+    //   progress: BATCH::total::N::skip::M / ITEM::i::N::(start|done|fail)::id::info / STAGE:: / 末尾重建索引
+    //   result:   { ok, summary:{ total, done, failed[], skipped_no_pdf[] } }
+    if (p === '/api/explain-batch' && req.method === 'POST') {
+      const b = JSON.parse((await readBody(req)) || '{}');
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const args = ['explain-batch'];
+      const lim = parseInt(b.limit); if (lim && lim > 0) args.push('--limit', String(lim));
+      let out = '', err = '', aborted = false;
+      const ch = spawnAgent(args);
+      ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (l.trim()) { err += l + '\n'; emit({ type: 'progress', line: l }); } }));
+      ch.stdout.on('data', d => out += d.toString());
+      req.on('close', () => { if (!res.writableEnded) { aborted = true; try { ch.kill(); } catch (e) {} } });  // 关页/停止 → 杀子进程（已生成的已落库）
+      ch.on('error', e => { if (!aborted) { emit({ type: 'result', ok: false, error: String(e) }); res.end(); } });
+      ch.on('close', code => {
+        if (aborted) return;
+        let summary = null; try { summary = JSON.parse(out); } catch (e) {}
+        const finish = () => { emit({ type: 'result', ok: code === 0 && !!summary, summary, error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '批量生成失败') }); res.end(); };
+        if (summary && summary.done > 0) {   // 新讲解作废了旧向量 → 末尾补建语义索引，保持检索 / MCP 最新
+          emit({ type: 'progress', line: 'STAGE::reindex::重建语义索引…' });
+          const ch2 = spawnAgent(['embed', '--scope', 'missing']);
+          ch2.on('close', finish); ch2.on('error', finish);
+        } else finish();
+      });
+      return;
+    }
     // 全文翻译（LLM，分块并发）：NDJSON 流，progress(TOTAL/CHUNK…) + 最终 result.markdown（已写入 DB）
     if (p === '/api/translate' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));

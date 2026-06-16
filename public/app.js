@@ -184,7 +184,7 @@ function showView(v) {
   $('#insights').classList.toggle('hidden', v !== 'insights');
   $('#jobs').classList.toggle('hidden', v !== 'jobs');
   $('#layout').classList.toggle('hidden', v !== 'read');
-  if (v === 'home') renderHome();
+  if (v === 'home') { renderHome(); refreshExplainBatch(); }
   if (v === 'manage') renderManage();
   if (v === 'insights') renderInsights();
   if (v === 'jobs') renderJobs(); else stopJobsPoll();
@@ -921,6 +921,7 @@ function bindUI() {
   });
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dataset.tab));
   $('#genExplainerBtn').onclick = generateExplainer;
+  { const r = $('#ebRun'), s = $('#ebStop'); if (r) r.onclick = runExplainBatch; if (s) s.onclick = () => { if (ebAbort) ebAbort.abort(); }; }
   $('#genTransBtn').onclick = generateTranslation;
   $('#findSimBtn').onclick = findSimilar;
   $('#btnEdit').onclick = () => { setSegActive('#tab-note .seg-sm', $('#btnEdit')); showNoteMode('edit'); $('#noteEdit').focus(); };
@@ -1478,6 +1479,84 @@ async function reloadPapers() {
   buildYearFilters();
   renderSidebar();
   renderHome();
+}
+
+// ====== 一键生成讲解（批量，逐篇通读本地 PDF 全文，与单篇「读PDF全文」逻辑一致）======
+let ebAbort = null;
+async function refreshExplainBatch() {
+  const runBtn = $('#ebRun'); if (!runBtn || ebAbort) return;   // 正在跑时不要覆盖按钮态
+  try {
+    const r = await (await fetch('/api/explain-batch')).json();
+    const n = r.withPdf || 0, tip = $('#ebTip');
+    runBtn.disabled = n === 0;
+    runBtn.textContent = n > 0 ? `生成缺失讲解（${n} 篇）` : '讲解已齐全 ✓';
+    if (tip) tip.textContent = (r.pending || 0) === 0
+      ? '所有论文都已有讲解。'
+      : `当前 ${r.pending} 篇缺讲解，其中 ${n} 篇有本地 PDF 可生成` + (r.noPdf ? `、${r.noPdf} 篇无 PDF 将跳过` : '') +
+        '。逐篇通读全文 PDF 生成（与单篇「读PDF全文」一致），可随时停止，已生成的自动保存。';
+  } catch (e) {}
+}
+async function runExplainBatch() {
+  const runBtn = $('#ebRun'), stopBtn = $('#ebStop'), prog = $('#ebProgress');
+  const fill = $('#ebBarFill'), stat = $('#ebStat'), now = $('#ebNow');
+  const limit = parseInt(($('#ebLimit') || {}).value) || 0;
+  runBtn.disabled = true; const oldTxt = runBtn.textContent; runBtn.textContent = '生成中…';
+  stopBtn.classList.remove('hidden'); prog.classList.remove('hidden');
+  fill.style.width = '0%'; stat.textContent = '准备中…'; now.textContent = '';
+  let total = 0, done = 0, fail = 0, skip = 0;
+  const setBar = (i) => { fill.style.width = (total ? Math.round(i / total * 100) : 0) + '%'; };
+  const onEvent = (ev) => {
+    if (ev.type === 'progress') {
+      const L = ev.line; let m;
+      if ((m = /^BATCH::total::(\d+)::skip::(\d+)/.exec(L))) {
+        total = +m[1]; skip = +m[2];
+        stat.textContent = `共 ${total} 篇待生成` + (skip ? `，${skip} 篇无 PDF 已跳过` : '');
+      } else if ((m = /^ITEM::(\d+)::(\d+)::start::[^:]*::(.*)$/.exec(L))) {
+        now.textContent = `（${m[1]}/${total || m[2]}）正在：${m[3]}`;
+      } else if (/^STAGE::pdf/.test(L)) {
+        now.textContent = now.textContent.replace(/ —— .*$/, '') + ' —— 读取 PDF 全文…';
+      } else if (/^STAGE::generate/.test(L)) {
+        now.textContent = now.textContent.replace(/ —— .*$/, '') + ' —— 大模型撰写中…';
+      } else if ((m = /^ITEM::(\d+)::\d+::done::/.exec(L))) {
+        done++; setBar(+m[1]); stat.textContent = `已完成 ${done} / ${total}` + (fail ? `，失败 ${fail}` : '');
+      } else if ((m = /^ITEM::(\d+)::\d+::fail::/.exec(L))) {
+        fail++; setBar(+m[1]); stat.textContent = `已完成 ${done} / ${total}，失败 ${fail}`;
+      } else if (/^STAGE::reindex/.test(L)) {
+        stat.textContent = `已完成 ${done} / ${total}，正在重建语义索引…`; now.textContent = '';
+      }
+    } else if (ev.type === 'result') {
+      const s = ev.summary || {}; fill.style.width = '100%';
+      const nf = (s.failed || []).length, ns = (s.skipped_no_pdf || []).length;
+      stat.textContent = ev.ok
+        ? `✅ 完成：生成 ${s.done != null ? s.done : done} 篇` + (nf ? `，失败 ${nf}` : '') + (ns ? `，跳过 ${ns}（无 PDF）` : '')
+        : `结束：${ev.error || '部分失败'}`;
+      now.textContent = '';
+    }
+  };
+  ebAbort = new AbortController();
+  try {
+    const resp = await fetch('/api/explain-batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit }), signal: ebAbort.signal
+    });
+    const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    for (; ;) {
+      const { done: rd, value } = await reader.read(); if (rd) break;
+      buf += dec.decode(value, { stream: true }); let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (line) { try { onEvent(JSON.parse(line)); } catch (e) {} }
+      }
+    }
+    if (buf.trim()) { try { onEvent(JSON.parse(buf.trim())); } catch (e) {} }
+  } catch (e) {
+    if (ebAbort && ebAbort.signal.aborted) stat.textContent = '已停止（已生成的讲解已保存，可再次点击续跑）';
+    else stat.textContent = '出错：' + String(e);
+  } finally {
+    ebAbort = null; stopBtn.classList.add('hidden'); runBtn.textContent = oldTxt;
+    await reloadPapers();          // 刷新表格 + 看板讲解覆盖率
+    await refreshExplainBatch();   // 刷新「可生成篇数」
+  }
 }
 
 async function deletePaper(id) {

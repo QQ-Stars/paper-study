@@ -55,6 +55,9 @@ def main():
     exp.add_argument("--id", required=True, help="论文 id (slug)")
     exp.add_argument("--deep", action="store_true", help="读取本地PDF正文(更准，更慢)")
 
+    eb = sub.add_parser("explain-batch", help="批量为缺讲解的论文生成讲解(通读本地PDF全文)；无本地PDF的跳过。进度→stderr，汇总JSON→stdout")
+    eb.add_argument("--limit", type=int, default=0, help="本次最多生成多少篇，0=全部")
+
     tr = sub.add_parser("translate", help="全文翻译(LLM)：PDF→去参考文献→分块译中文，写入 translations，md→stdout")
     tr.add_argument("--id", required=True, help="论文 id (slug)")
 
@@ -130,6 +133,9 @@ def main():
     elif args.cmd == "explain":
         from . import explain
         explain.explain_paper(args.id, args.deep)
+    elif args.cmd == "explain-batch":
+        from . import explain
+        explain.explain_batch(limit=args.limit)
     elif args.cmd == "translate":
         from . import translate
         translate.translate_paper(args.id)
