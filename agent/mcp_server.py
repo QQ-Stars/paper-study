@@ -149,18 +149,22 @@ def search_papers(query: str = "", type: str = "", topic: str = "", venue: str =
 def semantic_search(query: str, k: int = 15) -> dict:
     """语义检索：用自然语言描述（中/英），按含义相似度找论文（比关键词更适合“关于X的工作”这类问法）。
     返回 {count, results:[精简字段 + score(余弦相似度)]}，按相似度降序。"""
-    with contextlib.redirect_stdout(sys.stderr):     # 防模型下载/进度污染 stdio 协议
-        ranked = embed.rank(query, k)
-    if not ranked:
-        return {"count": 0, "results": []}
+    with contextlib.redirect_stdout(sys.stderr):     # 防本地嵌入模型(下载/进度)污染 stdio 协议
+        ranked = embed.rank(query, k, reindex_stale=False)   # 只读：服务进程不做同步重嵌(交给网页端自愈)
     con = db.connect()
+    n_vec = _one(con, "SELECT COUNT(*) FROM paper_vectors") or 0
+    n_pap = _one(con, "SELECT COUNT(*) FROM papers") or 0
     out = []
     for it in ranked:
         row = con.execute("SELECT * FROM papers WHERE id=?", (it["id"],)).fetchone()
         if row:
             d = _compact(row); d["score"] = it["score"]; out.append(d)
     con.close()
-    return {"count": len(out), "results": out}
+    res = {"count": len(out), "indexed": n_vec, "total": n_pap, "results": out}
+    if n_vec < n_pap:
+        res["note"] = (f"语义索引覆盖 {n_vec}/{n_pap} 篇；未入索引的论文不会出现在语义结果里"
+                       "（可在网页端做一次语义检索或重建索引以补全）。")
+    return res
 
 
 @mcp.tool()
@@ -175,7 +179,7 @@ def related_papers(id: str, k: int = 8) -> dict:
     seed_text = (row["title"] or "") + ". " + (row["tldr"] or row["abstract"] or "")
     con.close()
     with contextlib.redirect_stdout(sys.stderr):
-        ranked = embed.rank(seed_text, k, exclude=id)
+        ranked = embed.rank(seed_text, k, exclude=id, reindex_stale=False)   # 只读，理由同 semantic_search
     con = db.connect()
     out = []
     for it in ranked:
@@ -318,7 +322,24 @@ def library_overview() -> dict:
     }
 
 
+def _prewarm():
+    """启动阶段(单线程、事件循环未起)先把含 C 扩展/较重的模块导入好。
+    否则首次 semantic_search/related_papers 会在 asyncio 事件循环线程上懒加载 numpy 的
+    C 扩展，在 Windows 上与运行中的事件循环死锁而整个服务挂起(已用 faulthandler 定位)。"""
+    import numpy  # noqa: F401  embed 已模块级导入 numpy，这里再确保一次
+    try:
+        import httpx  # noqa: F401  外部嵌入 API(_api_embed)用
+    except Exception:
+        pass
+    if config.EMBED_PROVIDER != "api":
+        try:
+            embed.model()          # 本地嵌入模型：启动时加载好(首次可能下载)，免得首查时在事件循环线程加载
+        except Exception:
+            pass
+
+
 def main():
+    _prewarm()
     mcp.run()      # 默认 stdio
 
 

@@ -10,6 +10,9 @@
 import os
 import sys
 import json
+import numpy as np          # 模块级导入：务必在(可能的)事件循环启动前完成 numpy 的 C 扩展加载。
+                            # MCP(FastMCP) 把同步工具跑在 asyncio 事件循环线程上，若首次 semantic_search
+                            # 时才懒加载 numpy，在 Windows 上其 C 扩展 DLL 加载会与运行中的事件循环死锁而挂起。
 from . import config, db
 
 # 下载缓存留项目内，且必须在导入 model2vec 之前设好
@@ -33,7 +36,6 @@ def model():
 
 
 def _l2norm(V):
-    import numpy as np
     V = np.asarray(V, dtype="float32")
     if V.ndim == 1:
         V = V[None, :]
@@ -43,19 +45,27 @@ def _l2norm(V):
 
 
 def _api_embed(texts):
-    """OpenAI 兼容的外部嵌入 API（如硅基流动 bge-m3）。批量请求 /embeddings，返回 L2 归一矩阵。"""
+    """OpenAI 兼容的外部嵌入 API（如硅基流动 bge-m3）。批量请求 /embeddings，返回 L2 归一矩阵。
+    对瞬时传输错误(SSL EOF / 连接被重置 / 读超时)做有限重试，避免偶发网络抖动直接失败。"""
+    import time
     import httpx
     base, key, mdl = config.EMBED_API_BASE, config.EMBED_API_KEY, config.EMBED_API_MODEL
+    hdr = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     vecs, B = [], 32                         # 多数嵌入 API 单次 input 数组上限 ~32/64，取 32 稳妥
     with httpx.Client(timeout=60) as cli:
         for i in range(0, len(texts), B):
             batch = [(t if (t and t.strip()) else " ") for t in texts[i:i + B]]
-            r = cli.post(f"{base}/embeddings",
-                         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                         json={"model": mdl, "input": batch})
-            r.raise_for_status()
-            data = sorted(r.json().get("data") or [], key=lambda d: d.get("index", 0))
-            vecs.extend(d["embedding"] for d in data)
+            for attempt in range(3):         # 1 次 + 2 次重试，退避 1s/2s
+                try:
+                    r = cli.post(f"{base}/embeddings", headers=hdr, json={"model": mdl, "input": batch})
+                    r.raise_for_status()
+                    data = sorted(r.json().get("data") or [], key=lambda d: d.get("index", 0))
+                    vecs.extend(d["embedding"] for d in data)
+                    break
+                except httpx.TransportError:      # SSL EOF / 连接重置 / 读写超时等瞬时错误 → 重试
+                    if attempt == 2:
+                        raise
+                    time.sleep(attempt + 1)
     return _l2norm(vecs)
 
 
@@ -129,11 +139,13 @@ def reindex(scope="missing"):
     sys.stdout.flush()
 
 
-def rank(query, k=30, exclude=None):
+def rank(query, k=30, exclude=None, reindex_stale=True):
     """语义检索核心：返回 [{'id','score'}, ...]（按余弦降序）。不打印，供 CLI / MCP 复用。
     先嵌 query 得当前维度，再把「缺失 或 维度不符(换了嵌入模型/来源)」的论文重嵌 → 自动适配换模型；
-    exclude 可排除某 paper_id（库内相似论文剔除自身）。进度→stderr。"""
-    import numpy as np
+    exclude 可排除某 paper_id（库内相似论文剔除自身）。进度→stderr。
+    reindex_stale=False：只读模式——不在查询时重嵌缺失/失维的论文（仅按现有向量排序）。
+      给 MCP 服务用：查询应快且只读，重嵌交给网页端（语义检索/讲解变更时自愈），避免在
+      服务进程里做同步写库+大量进度输出而卡住。"""
     con = db.connect()
     db.ensure_vectors_table(con)
     _p("STAGE::query")
@@ -142,7 +154,7 @@ def rank(query, k=30, exclude=None):
     have = {pid: dim for pid, dim in con.execute("SELECT paper_id, dim FROM paper_vectors").fetchall()}
     rows = con.execute("SELECT id,title,tldr,abstract,explainer FROM papers").fetchall()
     todo = [r for r in rows if have.get(r["id"]) != qdim]   # 缺失 / 维度不符 → (重)嵌
-    if todo:
+    if todo and reindex_stale:
         _p("STAGE::index")
         _index(con, todo)
     allv = con.execute("SELECT paper_id, vector FROM paper_vectors").fetchall()
