@@ -49,6 +49,24 @@
   <section id="home">
     <div class="page-head"><h1>总览<em>Overview</em></h1><span class="ph-line"></span></div>
     <div id="dash" class="dash"></div>
+    <!-- 一键生成讲解：为缺讲解且有本地 PDF 的论文，通读全文 PDF 生成讲解（同单篇逻辑） -->
+    <div id="explainBatch" class="ebatch">
+      <div class="eb-main">
+        <div class="eb-info">
+          <span class="eb-title">✨ 一键生成讲解</span>
+          <span id="ebTip" class="eb-tip">为还没有讲解的论文，通读其本地 PDF 全文调用大模型生成讲解（与单篇「读PDF全文」完全一致）。无本地 PDF 的会跳过；可随时停止，已生成的自动保存。</span>
+        </div>
+        <div class="eb-ctrl">
+          <label class="eb-lim" title="留空＝本次生成全部缺失讲解">上限 <input id="ebLimit" type="number" min="1" placeholder="全部" /></label>
+          <button id="ebRun" class="mini primary" disabled>生成缺失讲解</button>
+          <button id="ebStop" class="mini ghost hidden">■ 停止</button>
+        </div>
+      </div>
+      <div id="ebProgress" class="eb-progress hidden">
+        <div class="eb-bar"><div id="ebBarFill" class="eb-bar-fill"></div></div>
+        <div class="eb-status"><span id="ebStat">准备中…</span> <span id="ebNow" class="eb-now"></span></div>
+      </div>
+    </div>
     <div class="table-card">
       <table id="homeTable">
         <thead><tr>
