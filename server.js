@@ -273,6 +273,22 @@ const server = http.createServer(async (req, res) => {
       ch.on('close', code => { emit({ type: 'result', ok: code === 0 && !!out.trim(), markdown: out, error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '翻译失败') }); res.end(); });
       return;
     }
+    // 划词翻译：选中一小段 PDF 文字 → 译中文（单次 JSON，非流式；文本经 stdin 传给 agent 避免转义/长度问题）
+    if (p === '/api/translate-text' && req.method === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const text = String(b.text || '').trim();
+      if (!text) return send(res, 400, JSON.stringify({ ok: false, error: '缺少文本' }), MIME['.json']);
+      if (text.length > 6000) return send(res, 413, JSON.stringify({ ok: false, error: '选区过长，请缩短后再试' }), MIME['.json']);
+      let out = '', err = '', done = false;
+      const finish = (obj) => { if (done) return; done = true; send(res, 200, JSON.stringify(obj), MIME['.json']); };
+      const ch = spawnAgent(['translate-text']);
+      ch.stdout.on('data', d => out += d.toString());
+      ch.stderr.on('data', d => err += d.toString());
+      ch.on('error', e => finish({ ok: false, error: String(e) }));
+      ch.on('close', code => finish({ ok: code === 0 && !!out.trim(), text: out.trim(), error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '翻译失败') }));
+      ch.stdin.write(text, 'utf8'); ch.stdin.end();
+      return;
+    }
     // 相似论文推荐（S2 Recommendations）：NDJSON 流，progress… + 最终 result.candidates
     if (p === '/api/recommend' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
