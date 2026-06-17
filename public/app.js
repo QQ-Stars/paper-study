@@ -16,7 +16,7 @@ let currentView = 'home';
 let homeSort = { key: 'year', dir: 1 };
 let manageSrc = 'all';
 let chProgress = null, chDir = null, chVenue = null;
-let chTrend = null, chCite = null;     // 洞察：趋势 / 引用图
+let chTrend = null, chTree = null, chCited = null, chCite = null;  // 洞察：趋势面积 / 馆藏树图 / 被引 / 引用图
 
 const $ = (s) => document.querySelector(s);
 const md = (t) => (window.marked ? window.marked.parse(t || '') :
@@ -186,6 +186,7 @@ function showView(v) {
   $('#insights').classList.toggle('hidden', v !== 'insights');
   $('#jobs').classList.toggle('hidden', v !== 'jobs');
   $('#layout').classList.toggle('hidden', v !== 'read');
+  const tf = document.getElementById('topFilters'); if (tf) tf.classList.toggle('hidden', v !== 'home');
   if (v === 'home') { renderHome(); refreshExplainBatch(); }
   if (v === 'manage') renderManage();
   if (v === 'insights') renderInsights();
@@ -212,9 +213,9 @@ function buildDashShell() {
         <div><span>2024 / 25 / 26</span><b id="kpiYears">0 / 0 / 0</b></div>
       </div>
     </div>
-    <div class="chart-card"><div class="chart-title">学习进度</div><div id="chartProgress" class="echart"></div></div>
-    <div class="chart-card"><div class="chart-title">研究方向分布</div><div id="chartDir" class="echart"></div></div>
-    <div class="chart-card"><div class="chart-title">会议分布</div><div id="chartVenue" class="echart"></div></div>`;
+    <div class="chart-card d-prog"><div class="chart-title">学习进度</div><div id="chartProgress" class="echart"></div></div>
+    <div class="chart-card d-venue"><div class="chart-title">会议分布</div><div id="chartVenue" class="echart"></div></div>
+    <div class="chart-card dash-wide"><div class="chart-title">研究方向分布</div><div id="chartDir" class="echart"></div></div>`;
   if (window.echarts) {
     chProgress = echarts.init($('#chartProgress'));
     chDir = echarts.init($('#chartDir'));
@@ -308,14 +309,14 @@ function topGroups(list, keyFn, max = 7) {
   const cap = literalOther ? max - 1 : max;
   let merged = [];
   if (entries.length > cap) { merged = entries.slice(cap - 1); entries = entries.slice(0, cap - 1); }
-  const palette = ['#bd5b3a', '#3f7d5b', '#5b7387', '#b07a2e', '#8a5a5a', '#6f8f6a', '#9a8b72'];
+  const palette = ['#5b54e6', '#0ea371', '#11a8c4', '#e0902a', '#8b5cf6', '#6b7f99', '#e0607f'];
   const out = entries.map(([name, value], i) => ({ name, value, color: palette[i % palette.length] }));
   const otherTotal = literalOther + merged.reduce((s, [, v]) => s + v, 0);
   if (otherTotal) {
     const breakdown = merged.map(([name, value]) => ({ name, value }));
     if (literalOther) breakdown.push({ name: '（未细分）', value: literalOther });
     breakdown.sort((a, b) => b.value - a.value);
-    out.push({ name: '其他', value: otherTotal, color: '#9a8b72', breakdown });
+    out.push({ name: '其他', value: otherTotal, color: '#9aa1b5', breakdown });
   }
   return out;
 }
@@ -348,10 +349,12 @@ function barOption(items, t2, t3) {
     }]
   };
 }
-// ====== 洞察：研究趋势 + 引用关系图 ======
+// ====== 洞察：研究趋势(堆叠面积) + 馆藏构成(树图) + 被引Top10 + 引用关系图 ======
 function buildInsightsShell() {
-  if (chTrend || !window.echarts) return;
+  if (chCite || !window.echarts) return;
+  chTree = echarts.init($('#chartTree'));
   chTrend = echarts.init($('#chartTrend'));
+  chCited = echarts.init($('#chartCited'));
   chCite = echarts.init($('#chartCite'));
   chCite.on('click', (params) => {
     if (params.dataType === 'node') { const p = PAPERS.find(x => x.id === params.data.id); if (p) openPaper(p); }
@@ -359,12 +362,44 @@ function buildInsightsShell() {
 }
 async function renderInsights() {
   buildInsightsShell();
+  renderTree();
   renderTrend();
   try {
     const g = await (await fetch('/api/citegraph')).json();
-    if (g && g.edgeCount > 0) renderCite(g); else showCitePrompt();
-  } catch (e) { showCitePrompt(); }
+    if (g && g.edgeCount > 0) { renderCite(g); renderCited(g); }
+    else { showCitePrompt(); renderCited(null); }
+  } catch (e) { showCitePrompt(); renderCited(null); }
 }
+// 馆藏构成：研究方向 → 主题 的矩形树图（块大小=论文数，颜色=方向）
+function renderTree() {
+  if (!chTree) return;
+  const dirItems = topGroups(PAPERS, p => (p.type || '').split('·')[0], 7);
+  const topNames = new Set(dirItems.filter(d => d.name !== '其他').map(d => d.name));
+  const bucketDir = (p) => { const k = (p.type || '').split('·')[0] || '其他'; return topNames.has(k) ? k : '其他'; };
+  const tree = {};
+  PAPERS.forEach(p => { const d = bucketDir(p), t = (p.topic || '').trim() || '未分'; (tree[d] = tree[d] || {})[t] = (tree[d][t] || 0) + 1; });
+  const data = dirItems.map(d => {
+    const kids = Object.entries(tree[d.name] || {}).sort((a, b) => b[1] - a[1]).map(([t, v]) => ({ name: t, value: v }));
+    return { name: d.name, value: d.value, itemStyle: { color: d.color }, children: kids.length ? kids : undefined };
+  });
+  chTree.setOption({
+    animationDuration: 600,
+    tooltip: { formatter: (p) => `${(p.treePathInfo || []).map(x => x.name).filter(Boolean).join(' / ') || p.name}　${p.value} 篇` },
+    series: [{
+      type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false }, visibleMin: 1,
+      top: 4, left: 4, right: 4, bottom: 4,
+      label: { show: true, color: '#fff', fontSize: 11, overflow: 'truncate', textBorderColor: 'rgba(0,0,0,.3)', textBorderWidth: 2 },
+      upperLabel: { show: true, height: 20, color: '#fff', fontSize: 11.5, fontWeight: 600, textBorderColor: 'rgba(0,0,0,.32)', textBorderWidth: 2 },
+      itemStyle: { borderColor: cssVar('--surface'), borderWidth: 2, gapWidth: 2, borderRadius: 4 },
+      levels: [
+        { itemStyle: { borderWidth: 0, gapWidth: 4, borderRadius: 8 } },
+        { colorSaturation: [0.3, 0.52], itemStyle: { gapWidth: 2, borderColorSaturation: 0.55 } }
+      ],
+      data
+    }]
+  });
+}
+// 研究趋势：各年份 × 研究方向 的堆叠渐变面积（看每个方向逐年消长）
 function renderTrend() {
   if (!chTrend) return;
   const t2 = cssVar('--ink-2'), t3 = cssVar('--ink-3');
@@ -372,20 +407,47 @@ function renderTrend() {
   const dirItems = topGroups(PAPERS, p => (p.type || '').split('·')[0], 6);
   const topNames = new Set(dirItems.filter(d => d.name !== '其他').map(d => d.name));
   const bucket = (p) => { const k = (p.type || '').split('·')[0] || '其他'; return topNames.has(k) ? k : '其他'; };
+  const hex8 = (c, a) => (c && c[0] === '#' && c.length === 7) ? c + a : c;
   const series = dirItems.map(d => ({
-    name: d.name, type: 'bar', stack: 'total', barWidth: '50%',
-    itemStyle: { color: d.color }, emphasis: { focus: 'series' },
+    name: d.name, type: 'line', stack: 'total', smooth: 0.4, symbol: 'none',
+    lineStyle: { width: 1.5, color: d.color },
+    areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: hex8(d.color, 'cc') }, { offset: 1, color: hex8(d.color, '1f') }]) },
+    emphasis: { focus: 'series' },
     data: years.map(y => PAPERS.filter(p => p.year === y && bucket(p) === d.name).length)
   }));
   chTrend.setOption({
     animationDuration: 700, animationEasing: 'cubicOut',
+    color: dirItems.map(d => d.color),
     legend: { top: 2, textStyle: { color: t2, fontSize: 11 }, itemWidth: 11, itemHeight: 11, itemGap: 12 },
-    grid: { left: 6, right: 16, top: 40, bottom: 4, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    xAxis: { type: 'category', data: years, axisTick: { show: false }, axisLine: { lineStyle: { color: cssVar('--border') } }, axisLabel: { color: t2, fontSize: 12 } },
+    grid: { left: 6, right: 18, top: 40, bottom: 4, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'line', lineStyle: { color: cssVar('--border-2') } } },
+    xAxis: { type: 'category', boundaryGap: false, data: years, axisTick: { show: false }, axisLine: { lineStyle: { color: cssVar('--border') } }, axisLabel: { color: t2, fontSize: 12 } },
     yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: cssVar('--surface-3') } }, axisLabel: { color: t3, fontSize: 11 } },
     series
   });
+}
+// 馆内被引 Top 10（来自引用图，未构建则提示）
+function renderCited(g) {
+  if (!chCited) return;
+  const t2 = cssVar('--ink-2');
+  const nodes = ((g && g.nodes) || []).filter(n => n.indeg > 0).sort((a, b) => b.indeg - a.indeg).slice(0, 10);
+  chCited.clear();
+  if (!nodes.length) {
+    chCited.setOption({ graphic: { type: 'text', left: 'center', top: 'center', style: { text: '构建引用图后\n显示馆内被引排行', fill: cssVar('--ink-3'), fontSize: 12, lineHeight: 20, textAlign: 'center' } } });
+    return;
+  }
+  const labels = nodes.map(n => (n.title.length > 20 ? n.title.slice(0, 20) + '…' : n.title)).reverse();
+  const rows = nodes.map(n => ({ value: n.indeg, id: n.id })).reverse();
+  chCited.setOption({
+    animationDuration: 600,
+    grid: { left: 6, right: 30, top: 6, bottom: 6, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (p) => `被库内 ${p[0].value} 篇引用` },
+    xAxis: { type: 'value', max: 'dataMax', axisLabel: { show: false }, splitLine: { show: false }, axisLine: { show: false }, axisTick: { show: false } },
+    yAxis: { type: 'category', data: labels, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: t2, fontSize: 11 } },
+    series: [{ type: 'bar', data: rows, barWidth: '60%', itemStyle: { color: cssVar('--primary'), borderRadius: [0, 6, 6, 0] }, label: { show: true, position: 'right', color: t2, fontSize: 11, fontWeight: 600, formatter: '{c}' } }]
+  });
+  chCited.off('click');
+  chCited.on('click', (p) => { const r = rows[p.dataIndex]; const pp = r && PAPERS.find(x => x.id === r.id); if (pp) openPaper(pp); });
 }
 function renderCite(g) {
   if (!chCite) return;
@@ -1133,7 +1195,7 @@ function bindUI() {
   $('#themeBtn').onclick = toggleTheme;
   $('#toggleLeft').onclick = () => togglePane('hide-left');
   $('#toggleRight').onclick = () => togglePane('hide-right');
-  let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (pdfDoc && currentView === 'read') layoutPages(++renderToken); [chProgress, chDir, chVenue, chTrend, chCite].forEach(c => c && c.resize()); }, 200); });
+  let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (pdfDoc && currentView === 'read') layoutPages(++renderToken); [chProgress, chDir, chVenue, chTrend, chTree, chCited, chCite].forEach(c => c && c.resize()); }, 200); });
 }
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
