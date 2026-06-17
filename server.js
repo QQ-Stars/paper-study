@@ -61,6 +61,63 @@ const send = (res, code, body, type) => { res.writeHead(code, { 'Content-Type': 
 const safeBase = (s) => path.basename(String(s || ''));
 const readBody = (req) => new Promise((r) => { let d = ''; req.on('data', c => d += c); req.on('end', () => r(d)); });
 
+// ---- 大模型直连（OpenAI 兼容协议）。与 agent/config.py 保持一致：settings.json 优先于 .env，再退供应商预设。
+//      用于划词翻译这类“小而快”的请求，免去每次 spawn Python 的解释器冷启动(约 1~2s，重启后首次更久)。----
+const LLM_PRESETS = {
+  deepseek:  ['https://api.deepseek.com', 'deepseek-v4-flash'],
+  qwen:      ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'],
+  openai:    ['https://api.openai.com/v1', 'gpt-4o-mini'],
+  anthropic: ['https://api.anthropic.com', 'claude-3-5-sonnet-latest'],
+};
+const llmConfig = () => {
+  const s = readSettings(), e = readEnv();
+  const provider = String(s.provider || e.LLM_PROVIDER || 'deepseek').toLowerCase();
+  const [pBase, pModel] = LLM_PRESETS[provider] || LLM_PRESETS.deepseek;
+  return {
+    apiKey: s.apiKey || e.LLM_API_KEY || '',
+    baseUrl: s.baseUrl || e.LLM_BASE_URL || pBase,
+    model: s.model || e.LLM_MODEL || pModel,
+  };
+};
+async function llmChat(messages, { temperature = 0.2, timeoutMs = 60000 } = {}) {
+  const { apiKey, baseUrl, model } = llmConfig();
+  if (!apiKey) throw new Error('未配置大模型 API Key');
+  const url = baseUrl.replace(/\/+$/, '') + '/chat/completions';
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({ model, messages, temperature }),
+      signal: ac.signal,
+    });
+    if (!r.ok) throw new Error('LLM ' + r.status + ': ' + (await r.text().catch(() => '')).slice(0, 200));
+    const j = await r.json();
+    return ((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim();
+  } finally { clearTimeout(timer); }
+}
+// 划词翻译系统提示——与 agent/llm.py 的 TRANSLATE_SNIPPET_SYSTEM 保持一致（改一处记得两边同步）。
+const TRANSLATE_SNIPPET_SYSTEM =
+  '你是专业的学术论文翻译。用户会给你一段从 PDF 里直接选取的英文文字' +
+  '（可能带换行、连字符断词，甚至从句子中间开始）。把它翻译成**通顺、地道的简体中文**。\n' +
+  '- **只输出译文本身**：不要重复原文、不要任何前后缀说明、不要加引号或代码块。\n' +
+  '- 合并 PDF 造成的硬换行与连字符断词（如 represen-\\ntation → representation），译成连贯句子，意译而非逐字硬译。\n' +
+  '- 专有名词、模型/数据集/方法名、缩写(如 LLaVA、POPE、Transformer、CVPR)保留英文。\n' +
+  '- 数学公式/变量/符号(如 $x$、\\alpha)保持原样不译。\n' +
+  '- 即使片段很短或从句中间开始，也要尽力译成中文，绝不原样返回英文。';
+// Node 直连失败（无 Key/网络/超时/空结果）时的回退：仍用 Python agent（冷启动慢但稳）。
+const translateTextViaPython = (text) => new Promise((resolve) => {
+  let out = '', err = '', done = false;
+  const finish = (o) => { if (!done) { done = true; resolve(o); } };
+  const ch = spawnAgent(['translate-text']);
+  ch.stdout.on('data', d => out += d.toString());
+  ch.stderr.on('data', d => err += d.toString());
+  ch.on('error', e => finish({ ok: false, error: String(e) }));
+  ch.on('close', code => finish({ ok: code === 0 && !!out.trim(), text: out.trim(), error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '翻译失败') }));
+  ch.stdin.write(text, 'utf8'); ch.stdin.end();
+});
+
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
   const p = u.pathname;
@@ -273,21 +330,22 @@ const server = http.createServer(async (req, res) => {
       ch.on('close', code => { emit({ type: 'result', ok: code === 0 && !!out.trim(), markdown: out, error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '翻译失败') }); res.end(); });
       return;
     }
-    // 划词翻译：选中一小段 PDF 文字 → 译中文（单次 JSON，非流式；文本经 stdin 传给 agent 避免转义/长度问题）
+    // 划词翻译：选中一小段 PDF 文字 → 译中文（单次 JSON，非流式）。
+    // 默认 Node 直连大模型（免 Python 冷启动，约快 1~2s）；出错/无 Key/空结果时回退 Python agent。
     if (p === '/api/translate-text' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
       const text = String(b.text || '').trim();
       if (!text) return send(res, 400, JSON.stringify({ ok: false, error: '缺少文本' }), MIME['.json']);
       if (text.length > 6000) return send(res, 413, JSON.stringify({ ok: false, error: '选区过长，请缩短后再试' }), MIME['.json']);
-      let out = '', err = '', done = false;
-      const finish = (obj) => { if (done) return; done = true; send(res, 200, JSON.stringify(obj), MIME['.json']); };
-      const ch = spawnAgent(['translate-text']);
-      ch.stdout.on('data', d => out += d.toString());
-      ch.stderr.on('data', d => err += d.toString());
-      ch.on('error', e => finish({ ok: false, error: String(e) }));
-      ch.on('close', code => finish({ ok: code === 0 && !!out.trim(), text: out.trim(), error: code === 0 ? '' : (err.trim().split(/\n/).pop() || '翻译失败') }));
-      ch.stdin.write(text, 'utf8'); ch.stdin.end();
-      return;
+      try {
+        const out = await llmChat([
+          { role: 'system', content: TRANSLATE_SNIPPET_SYSTEM },
+          { role: 'user', content: text },
+        ], { temperature: 0.2 });
+        if (out) return send(res, 200, JSON.stringify({ ok: true, text: out }), MIME['.json']);
+      } catch (e) { /* 落到下面的 Python 回退 */ }
+      const r = await translateTextViaPython(text);
+      return send(res, 200, JSON.stringify(r), MIME['.json']);
     }
     // 相似论文推荐（S2 Recommendations）：NDJSON 流，progress… + 最终 result.candidates
     if (p === '/api/recommend' && req.method === 'POST') {
