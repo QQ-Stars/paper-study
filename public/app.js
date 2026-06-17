@@ -710,6 +710,7 @@ async function addSimPaper(i, btn) {
 // ====== PDF.js 渲染（懒加载 + 缩放）======
 async function renderPdf(id) {
   const token = ++renderToken;
+  hideSelUI(); clearMerge();        // 切换论文：收起划词 UI 并清空合并缓冲
   const scroll = $('#pdfScroll');
   scroll.innerHTML = '<div class="pdf-loading">加载 PDF 中…</div>';
   if (!window.pdfjsLib) { scroll.innerHTML = '<div class="pdf-loading">PDF.js 未加载</div>'; return; }
@@ -755,7 +756,8 @@ async function layoutPages(token) {
 async function renderPage(holder) {
   const n = +holder.dataset.page;
   const page = await pdfDoc.getPage(n);
-  const vp = page.getViewport({ scale: curScale() });
+  const scale = curScale();
+  const vp = page.getViewport({ scale });
   holder.style.width = vp.width + 'px'; holder.style.height = vp.height + 'px';
   const dpr = window.devicePixelRatio || 1;
   const cv = document.createElement('canvas');
@@ -763,8 +765,155 @@ async function renderPage(holder) {
   cv.style.width = vp.width + 'px'; cv.style.height = vp.height + 'px';
   holder.appendChild(cv);
   await page.render({ canvasContext: cv.getContext('2d'), viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null }).promise;
+  // 文本层：透明、可选中的文字覆盖在 canvas 上 → 支持选中/复制/划词翻译（PDF.js 3.x 需 --scale-factor）
+  try {
+    const tc = await page.getTextContent();
+    const tl = document.createElement('div');
+    tl.className = 'textLayer';
+    tl.style.setProperty('--scale-factor', scale);
+    tl.style.width = vp.width + 'px'; tl.style.height = vp.height + 'px';
+    holder.appendChild(tl);
+    await pdfjsLib.renderTextLayer({ textContentSource: tc, container: tl, viewport: vp }).promise;
+  } catch (e) {}
 }
-function setZoom(f) { zoomFactor = Math.min(3, Math.max(0.5, f)); if (pdfDoc) layoutPages(++renderToken); }
+function setZoom(f) { zoomFactor = Math.min(3, Math.max(0.5, f)); hideSelUI(); if (pdfDoc) layoutPages(++renderToken); }
+
+// ====== 划词翻译（PDF 选段 → 小弹窗，调 LLM 译中文；双栏防溢出 + 多选合并）======
+let selBubbleEl = null, selPopEl = null, mergeBarEl = null;
+let selText = '', selRect = null, mergeBuf = [];
+function cleanSelection(s) {
+  return (s || '')
+    .replace(/-\s*\n\s*/g, '')      // 连字符断词：represen-\ntation → representation
+    .replace(/\s*\n\s*/g, ' ')       // 其余硬换行 → 空格
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+const _R = el => el.getBoundingClientRect();
+function _median(arr) { if (!arr.length) return 0; const a = [...arr].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; }
+function nodeSpan(node) { const el = node && (node.nodeType === 1 ? node : node.parentElement); return el ? el.closest('.textLayer span') : null; }
+// 找栏间缝（双栏 PDF）：按 x 统计每竖条被多少个 span 覆盖；栏内每行都覆盖 → 计数高，
+// 栏间缝只被横跨的标题/作者块覆盖几行 → 计数低。取中部计数最低的连续段为缝。找不到 → 单栏(null)。
+function findGutter(spans, pr) {
+  const N = 160, pw = pr.width || 1, cnt = new Array(N).fill(0);
+  for (const s of spans) { const r = _R(s); let a = Math.floor((r.left - pr.left) / pw * N), b = Math.ceil((r.right - pr.left) / pw * N); a = Math.max(0, a); b = Math.min(N - 1, b); for (let k = a; k <= b; k++) cnt[k]++; }
+  const side = []; for (let k = 0; k < N; k++) if ((k < N * 0.3 || k > N * 0.7) && cnt[k] > 0) side.push(cnt[k]);
+  const ref = _median(side); if (!ref) return null;                 // 没有明显栏 → 单栏
+  const thr = ref * 0.3;
+  let best = 0, bestMid = -1, run = 0, start = 0;                     // 中部最长的“低覆盖”连续段
+  for (let k = Math.floor(N * 0.33); k <= Math.ceil(N * 0.67); k++) { if (cnt[k] <= thr) { if (run === 0) start = k; run++; if (run > best) { best = run; bestMid = (start + k) / 2; } } else run = 0; }
+  return (best >= 2 && bestMid > 0) ? pr.left + (bestMid / N) * pw : null;
+}
+// 几何抽取：双栏里浏览器原生选择按 DOM 顺序走会溢出到另一栏并带上脚注；这里限定在起点所在栏、
+// 起止纵向范围内，并滤掉明显更小字号的脚注。返回 { text, rect, runSpans }，失败回退原生 toString。
+function extractSelection() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  const raw = sel.toString();
+  const fallback = () => raw.trim() ? { text: cleanSelection(raw), rect: range.getBoundingClientRect(), runSpans: null } : null;
+  const aSpan = nodeSpan(sel.anchorNode), fSpan = nodeSpan(sel.focusNode);
+  if (!aSpan || !fSpan) return fallback();
+  const tl = aSpan.closest('.textLayer'), page = tl && tl.closest('.pdf-page');
+  if (!page) return fallback();
+  const all = [...tl.querySelectorAll('span')].filter(s => s.textContent && s.textContent.trim());
+  const inSel = all.filter(s => range.intersectsNode(s));
+  if (!inSel.length) return fallback();
+  const pr = _R(page), gutter = findGutter(all, pr);
+  const colOf = s => { if (gutter == null) return 0; const r = _R(s); return (r.left + r.right) / 2 < gutter ? 0 : 1; };
+  const medFs = _median(inSel.map(s => _R(s).height)) || 1;
+  const aCol = colOf(aSpan), aTop = _R(aSpan).top, fTop = _R(fSpan).top;
+  // 单次拖拽 = 单栏：限定在起点所在栏 + 起止纵向范围内（终点即便滑进另一栏，也用其纵坐标定下界，
+  // 因为左右栏共用 y 轴），再滤掉明显更小字号的脚注/上标。跨栏续读请用「续选」多选合并。
+  const yLo = Math.min(aTop, fTop) - medFs * 0.6, yHi = Math.max(aTop, fTop) + medFs * 1.3;
+  const kept = inSel.filter(s => colOf(s) === aCol && _R(s).top >= yLo && _R(s).top <= yHi && _R(s).height >= medFs * 0.7);
+  if (!kept.length) return fallback();
+  kept.sort((x, y) => { const cx = colOf(x), cy = colOf(y); if (cx !== cy) return cx - cy; const rx = _R(x), ry = _R(y); if (Math.abs(rx.top - ry.top) > medFs * 0.5) return rx.top - ry.top; return rx.left - ry.left; });
+  let out = '', lastTop = null, lastCol = null;            // 换行处插 \n，交给 cleanSelection 去连字符 + 重排
+  for (const s of kept) { const r = _R(s), c = colOf(s); if (lastTop !== null && (c !== lastCol || r.top - lastTop > medFs * 0.5)) out += '\n'; out += s.textContent; lastTop = r.top; lastCol = c; }
+  const rects = kept.map(_R);
+  const rect = { left: Math.min(...rects.map(r => r.left)), top: Math.min(...rects.map(r => r.top)), right: Math.max(...rects.map(r => r.right)), bottom: Math.max(...rects.map(r => r.bottom)) };
+  rect.width = rect.right - rect.left; rect.height = rect.bottom - rect.top;
+  return { text: cleanSelection(out), rect, runSpans: kept };
+}
+function ensureSelEls() {
+  if (!selBubbleEl) {
+    selBubbleEl = document.createElement('div');
+    selBubbleEl.className = 'sel-bubble';
+    selBubbleEl.innerHTML = '<button class="sel-b-tr">🌐 翻译</button><button class="sel-b-add" title="加入合并缓冲，可继续选其它段落；也可按住 Alt 选中直接加入">➕ 续选</button>';
+    selBubbleEl.addEventListener('mousedown', e => e.preventDefault());   // 点按钮别清掉选区
+    selBubbleEl.querySelector('.sel-b-tr').addEventListener('click', () => { hideSelBubble(); doTranslate(selText, selRect); });
+    selBubbleEl.querySelector('.sel-b-add').addEventListener('click', () => { addToMerge(selText); hideSelBubble(); clearNativeSelection(); });
+    document.body.appendChild(selBubbleEl);
+  }
+  if (!selPopEl) { selPopEl = document.createElement('div'); selPopEl.className = 'sel-pop'; document.body.appendChild(selPopEl); }
+  if (!mergeBarEl) { mergeBarEl = document.createElement('div'); mergeBarEl.className = 'sel-merge'; mergeBarEl.addEventListener('mousedown', e => e.preventDefault()); document.body.appendChild(mergeBarEl); }
+}
+function hideSelBubble() { if (selBubbleEl) selBubbleEl.style.display = 'none'; }
+function hideSelUI() { hideSelBubble(); if (selPopEl) selPopEl.style.display = 'none'; }   // 不动合并缓冲条
+function clearNativeSelection() { try { const s = window.getSelection(); if (s) s.removeAllRanges(); } catch (e) {} }
+function reselectRun(run) {   // 把原生选区收紧到干净的同栏连续 run（高亮与译文一致，不再溢出）
+  try { const r = document.createRange(); r.setStartBefore(run[0]); r.setEndAfter(run[run.length - 1]); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); selRect = r.getBoundingClientRect(); } catch (e) {}
+}
+function onPdfMouseUp(e) {
+  const alt = !!(e && e.altKey);
+  setTimeout(() => {                  // 等浏览器把 selection 更新好
+    const got = extractSelection();
+    if (!got || !got.text || got.text.length < 2) { hideSelBubble(); return; }
+    selText = got.text; selRect = got.rect;
+    if (alt) { addToMerge(selText); clearNativeSelection(); hideSelBubble(); return; }   // 按住 Alt：直接进合并缓冲
+    if (got.runSpans && got.runSpans.length) reselectRun(got.runSpans);
+    showSelBubble();
+  }, 0);
+}
+function showSelBubble() {
+  ensureSelEls();
+  if (selPopEl) selPopEl.style.display = 'none';
+  const b = selBubbleEl; b.style.display = 'flex';
+  const bw = b.offsetWidth || 132, bh = b.offsetHeight || 30;
+  let x = selRect.left + selRect.width / 2 - bw / 2, y = selRect.bottom + 6;
+  x = Math.max(8, Math.min(x, innerWidth - bw - 8));
+  if (y + bh > innerHeight - 8) y = Math.max(8, selRect.top - bh - 6);
+  b.style.left = x + 'px'; b.style.top = y + 'px';
+}
+// 合并缓冲：累积多段，最后一并翻译（跨栏续读 / 跳过脚注用）
+function addToMerge(t) { t = (t || '').trim(); if (t) { mergeBuf.push(t); renderMergeBar(); } }
+function clearMerge() { mergeBuf = []; renderMergeBar(); }
+function renderMergeBar() {
+  ensureSelEls();
+  if (!mergeBuf.length) { mergeBarEl.style.display = 'none'; return; }
+  mergeBarEl.style.display = 'flex';
+  mergeBarEl.innerHTML = `<span class="sel-merge-n">合并翻译 · 已选 ${mergeBuf.length} 段</span><button class="sel-merge-go">翻译</button><button class="sel-merge-clr">清空</button>`;
+  mergeBarEl.querySelector('.sel-merge-go').onclick = () => doTranslate(mergeBuf.join('\n\n'), mergeBarEl.getBoundingClientRect());
+  mergeBarEl.querySelector('.sel-merge-clr').onclick = clearMerge;
+}
+function positionPopupAt(rect) {
+  const pw = 340; selPopEl.style.width = pw + 'px';
+  selPopEl.style.left = Math.max(8, Math.min(rect.left, innerWidth - pw - 8)) + 'px';
+  if (rect.bottom > innerHeight * 0.55) { selPopEl.style.top = 'auto'; selPopEl.style.bottom = (innerHeight - rect.top + 8) + 'px'; }
+  else { selPopEl.style.bottom = 'auto'; selPopEl.style.top = (rect.bottom + 8) + 'px'; }
+}
+async function doTranslate(text, rect) {
+  ensureSelEls();
+  text = (text || '').trim(); if (!text) return;
+  positionPopupAt(rect || { left: innerWidth / 2 - 170, top: 80, bottom: 120 });
+  selPopEl.style.display = 'block';
+  const srcHtml = `<div class="sel-pop-src">${esc(text.length > 180 ? text.slice(0, 180) + '…' : text)}</div>`;
+  selPopEl.innerHTML = srcHtml + '<div class="sel-pop-body"><span class="sel-spin"></span>翻译中…</div>';
+  try {
+    const r = await (await fetch('/api/translate-text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })).json();
+    if (!selPopEl || selPopEl.style.display === 'none') return;     // 期间被关掉了
+    if (r.ok && r.text) {
+      selPopEl.innerHTML = srcHtml + '<div class="sel-pop-trans markdown"></div><div class="sel-pop-foot"><button class="sel-copy mini">复制译文</button></div>';
+      renderMd(selPopEl.querySelector('.sel-pop-trans'), r.text);
+      const cp = selPopEl.querySelector('.sel-copy');
+      cp.onclick = () => { try { navigator.clipboard.writeText(r.text); cp.textContent = '已复制 ✓'; setTimeout(() => cp.textContent = '复制译文', 1200); } catch (e) {} };
+    } else {
+      selPopEl.innerHTML = srcHtml + '<div class="sel-pop-body err">翻译失败：' + esc(r.error || '未知错误') + '</div>';
+    }
+  } catch (e) {
+    if (selPopEl) selPopEl.innerHTML = srcHtml + '<div class="sel-pop-body err">翻译失败：' + esc(String(e)) + '</div>';
+  }
+}
 
 // ====== 交互绑定 ======
 // ====== 采集页：后台任务 + 定时（P5） ======
@@ -933,6 +1082,13 @@ function bindUI() {
   $('#favFilter').onclick = toggleFavFilter;
   $('#zoomIn').onclick = () => setZoom(zoomFactor + 0.15);
   $('#zoomOut').onclick = () => setZoom(zoomFactor - 0.15);
+  { const ps = $('#pdfScroll'); if (ps) { ps.addEventListener('mouseup', onPdfMouseUp); ps.addEventListener('scroll', hideSelUI, { passive: true }); } }
+  document.addEventListener('mousedown', (e) => {     // 点选区气泡/弹窗/合并条以外 → 收起划词翻译
+    if (selBubbleEl && selBubbleEl.contains(e.target)) return;
+    if (selPopEl && selPopEl.contains(e.target)) return;
+    if (mergeBarEl && mergeBarEl.contains(e.target)) return;
+    hideSelUI();
+  });
   $('#ingSearchBtn').onclick = () => { if ($('#ingExpand').checked) editQueries(); else runSearch(null); };
   $('#ingExpand').onchange = syncSearchBtnLabel; syncSearchBtnLabel();
   $('#ingEditBtn').onclick = editQueries;
@@ -962,7 +1118,7 @@ function bindUI() {
   $('#settingsBtn').onclick = openSettingsModal;
   $('#setClose').onclick = closeSettingsModal;
   $('#settingsModal').onclick = (e) => { if (e.target.id === 'settingsModal') closeSettingsModal(); };
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSettingsModal(); closePaperModal(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSettingsModal(); closePaperModal(); hideSelUI(); } });
   document.querySelectorAll('.ib-opts .src-chip').forEach(c => c.onclick = () => c.classList.toggle('active'));
   $('#jbStartBtn').onclick = startJob;
   $('#jbQuery').onkeydown = (e) => { if (e.key === 'Enter') startJob(); };

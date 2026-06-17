@@ -232,9 +232,43 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .pdf-open{font-family:var(--font-mono);color:var(--accent-ink);text-decoration:none;font-size:11px;margin-left:8px;letter-spacing:.02em}
 .pdf-open:hover{text-decoration:underline}
 #pdfScroll{flex:1;min-height:0;overflow-y:auto;padding:24px;display:flex;flex-direction:column;align-items:center;gap:18px;position:relative}
-.pdf-page{flex:0 0 auto;background:#fff;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.12),0 12px 30px -14px rgba(0,0,0,.3);overflow:hidden}
+.pdf-page{position:relative;flex:0 0 auto;background:#fff;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.12),0 12px 30px -14px rgba(0,0,0,.3);overflow:hidden}
 .pdf-page canvas{display:block}
 .pdf-loading{color:var(--ink-3);font-size:13px;margin-top:54px;font-family:var(--font-mono)}
+
+/* PDF 文本层：透明可选文字覆盖在 canvas 上（选中/复制/划词翻译用），PDF.js 3.x 靠 --scale-factor 定位 */
+.textLayer{position:absolute;left:0;top:0;overflow:hidden;line-height:1;opacity:1;z-index:2;text-align:initial;forced-color-adjust:none}
+.textLayer span,.textLayer br{color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0 0}
+/* 选中时把文本层文字保持透明（只显示高亮块），让下面 canvas 的清晰文字透出来——
+   否则浏览器会用选区前景色画出文本层的 sans-serif 回退字形，与 canvas 字形错位成「重影」 */
+.textLayer ::selection{background:rgba(182,83,49,.28);color:transparent}
+.textLayer ::-moz-selection{background:rgba(182,83,49,.28);color:transparent}
+.textLayer .endOfContent{display:block;position:absolute;inset:100% 0 0;z-index:-1;cursor:default;user-select:none}
+
+/* 划词翻译：选区气泡（翻译 / 续选）+ 译文小弹窗 + 合并缓冲条 */
+.sel-bubble{position:fixed;z-index:1000;display:none;gap:2px;padding:3px;background:var(--ink);border-radius:10px;box-shadow:0 6px 18px -5px rgba(0,0,0,.5);animation:fade .12s ease both}
+.sel-bubble button{border:0;background:transparent;color:#fff;font-family:var(--font-sans);font-size:12px;padding:5px 10px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.sel-bubble button:hover{background:rgba(255,255,255,.16)}
+.sel-bubble .sel-b-tr{background:var(--accent)}
+.sel-bubble .sel-b-tr:hover{background:var(--accent-ink)}
+.sel-merge{position:fixed;z-index:1000;left:50%;bottom:22px;transform:translateX(-50%);display:none;align-items:center;gap:10px;padding:7px 9px 7px 14px;background:var(--surface);border:1px solid var(--border-2);border-radius:12px;box-shadow:var(--card-shadow);animation:rise .16s cubic-bezier(.2,.7,.2,1) both}
+.sel-merge-n{font-size:12.5px;color:var(--ink-2);font-family:var(--font-mono);letter-spacing:.02em}
+.sel-merge button{border:0;border-radius:8px;font-size:12px;padding:6px 13px;cursor:pointer;font-family:var(--font-sans)}
+.sel-merge-go{background:var(--accent);color:#fff}
+.sel-merge-go:hover{background:var(--accent-ink)}
+.sel-merge-clr{background:var(--surface-2);color:var(--ink-2)}
+.sel-merge-clr:hover{color:var(--ink)}
+.sel-pop{position:fixed;z-index:1001;display:none;max-height:56vh;overflow:auto;padding:13px 15px;background:var(--surface);border:1px solid var(--border-2);border-radius:14px;box-shadow:var(--card-shadow);animation:rise .16s cubic-bezier(.2,.7,.2,1) both}
+.sel-pop-src{font-size:11.5px;color:var(--ink-3);font-style:italic;line-height:1.5;padding-bottom:9px;margin-bottom:9px;border-bottom:1px dashed var(--border-2)}
+.sel-pop-body{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
+.sel-pop-body.err{color:var(--accent-ink)}
+.sel-pop-trans{font-size:13.5px;line-height:1.72;color:var(--ink)}
+.sel-pop-trans p{margin:0 0 6px}
+.sel-pop-trans p:last-child{margin-bottom:0}
+.sel-pop-foot{display:flex;justify-content:flex-end;margin-top:10px}
+.sel-copy{padding:4px 10px;font-size:11.5px;border:1px solid var(--border-2);background:var(--surface-2);color:var(--ink-2);border-radius:7px;cursor:pointer}
+.sel-copy:hover{border-color:var(--accent);color:var(--accent-ink)}
+.sel-spin{flex:0 0 auto;width:14px;height:14px;border:2px solid var(--accent-soft);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
 #viewer .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:var(--ink-3)}
 .empty-ico{font-size:40px;opacity:.4}
 .empty-title{font-size:14.5px;font-weight:600;color:var(--ink-2)}

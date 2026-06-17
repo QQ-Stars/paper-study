@@ -61,6 +61,8 @@ def main():
     tr = sub.add_parser("translate", help="全文翻译(LLM)：PDF→去参考文献→分块译中文，写入 translations，md→stdout")
     tr.add_argument("--id", required=True, help="论文 id (slug)")
 
+    sub.add_parser("translate-text", help="划词翻译：从 stdin 读一段英文 → 译成中文 → stdout")
+
     rc = sub.add_parser("recommend", help="相似论文推荐(S2 Recommendations)：据库内一篇 → 候选JSON→stdout")
     rc.add_argument("--id", required=True, help="作为种子的库内论文 id")
     rc.add_argument("--limit", type=int, default=14)
@@ -139,6 +141,12 @@ def main():
     elif args.cmd == "translate":
         from . import translate
         translate.translate_paper(args.id)
+    elif args.cmd == "translate-text":
+        raw = sys.stdin.read()
+        if raw[:1] == "﻿":          # 剥离可能的 UTF-8 BOM
+            raw = raw[1:]
+        sys.stdout.write(llm.translate_snippet(raw))
+        sys.stdout.flush()
     elif args.cmd == "recommend":
         from . import recommend
         recommend.recommend_paper(args.id, args.limit)

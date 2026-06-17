@@ -257,6 +257,31 @@ def translate_md(chunk: str) -> str:
     return best or chunk                                # 实在译不动，返回最后结果/原文，至少不丢内容
 
 
+TRANSLATE_SNIPPET_SYSTEM = (
+    "你是专业的学术论文翻译。用户会给你一段从 PDF 里直接选取的英文文字"
+    "（可能带换行、连字符断词，甚至从句子中间开始）。把它翻译成**通顺、地道的简体中文**。\n"
+    "- **只输出译文本身**：不要重复原文、不要任何前后缀说明、不要加引号或代码块。\n"
+    "- 合并 PDF 造成的硬换行与连字符断词（如 represen-\\ntation → representation），译成连贯句子，意译而非逐字硬译。\n"
+    "- 专有名词、模型/数据集/方法名、缩写(如 LLaVA、POPE、Transformer、CVPR)保留英文。\n"
+    "- 数学公式/变量/符号(如 $x$、\\alpha)保持原样不译。\n"
+    "- 即使片段很短或从句中间开始，也要尽力译成中文，绝不原样返回英文。"
+)
+
+
+def translate_snippet(text: str) -> str:
+    """划词翻译：把用户从 PDF 选中的一小段英文译成流畅中文（不保留 Markdown 结构）。"""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    resp = client().chat.completions.create(
+        model=config.MODEL,
+        messages=[{"role": "system", "content": TRANSLATE_SNIPPET_SYSTEM},
+                  {"role": "user", "content": text}],
+        temperature=0.2,
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+
 def ping() -> str:
     """连通性自检：返回模型回复的一小段文本。"""
     resp = client().chat.completions.create(
