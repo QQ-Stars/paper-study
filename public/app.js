@@ -23,22 +23,24 @@ const md = (t) => (window.marked ? window.marked.parse(t || '') :
   '<pre>' + (t || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) + '</pre>');
 const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const normTitle = (s) => (s || '').toLowerCase().replace(/[^a-z0-9一-龥]+/g, '');  // 同 db.title_norm
-// 渲染 markdown 到元素，并用 KaTeX 把 $...$ / $$...$$ 公式排版出来（讲解/译文/笔记共用）
+// 渲染 markdown 到元素，并用 KaTeX 把 $...$ / $$...$$ 公式排版出来（讲解/译文/笔记共用）。
+// 关键：必须先把公式抽成占位符再交给 marked，否则 marked 会把 LaTeX 里的 _ 当斜体、[..](..) 当链接，
+// 把 $$...$$ 整块公式破坏掉（KaTeX 再扫已无完整分隔符 → 原样显示一坨 LaTeX）。用 PUA 字符做占位，marked 不会动它。
 function renderMd(el, text) {
-  el.innerHTML = md(text);
-  if (window.renderMathInElement) {
-    try {
-      renderMathInElement(el, {
-        delimiters: [
-          { left: '$$', right: '$$', display: true },
-          { left: '\\[', right: '\\]', display: true },
-          { left: '$', right: '$', display: false },
-          { left: '\\(', right: '\\)', display: false }
-        ],
-        throwOnError: false, ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
-      });
-    } catch (e) {}
-  }
+  const math = [];
+  const stash = (tex, display) => '' + (math.push({ tex, display }) - 1) + '';
+  let src = String(text || '')
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_m, x) => stash(x, true))
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_m, x) => stash(x, true))
+    .replace(/(?<!\\)\$([^\n$]+?)\$/g, (_m, x) => stash(x, false))
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_m, x) => stash(x, false));
+  let html = md(src).replace(/(\d+)/g, (_m, i) => {
+    const it = math[+i];
+    if (!it) return '';
+    try { return window.katex ? katex.renderToString(it.tex.trim(), { displayMode: it.display, throwOnError: false }) : esc(it.tex); }
+    catch (e) { return esc(it.tex); }
+  });
+  el.innerHTML = html;
 }
 const EMPTY_HTML = '<div id="viewerEmpty" class="empty"><div class="empty-ico">📄</div><div class="empty-title">从左侧选择一篇论文</div><div class="empty-sub">建议从 ① HallusionBench 开始</div></div>';
 
