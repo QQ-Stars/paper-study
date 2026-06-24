@@ -12,6 +12,7 @@ let semBusy = false;
 let yearFilter = 'all';
 let favOnly = false;
 let q = '';
+let sideQ = '', sideStatus = 'all', sideFav = false, sideYear = 'all';  // 阅读侧边栏筛选：搜索 / 状态 / 收藏 / 年份
 let currentView = 'home';
 let homeSort = { key: 'year', dir: 1 };
 let manageSrc = 'all';
@@ -84,10 +85,11 @@ let pdfDoc = null, baseW = 600, zoomFactor = 1, renderToken = 0, io = null;
 init();
 async function init() {
   PAPERS = normPapers(await (await fetch('/api/papers')).json());
-  applyTheme(localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  applyTheme(localStorage.getItem('theme') || 'dark');
   if (localStorage.getItem('hide-left') === '1') $('#layout').classList.add('hide-left');
   if (localStorage.getItem('hide-right') === '1') $('#layout').classList.add('hide-right');
   buildYearFilters();
+  buildSideYears();
   renderSidebar();
   buildDashShell();
   renderHome();
@@ -165,6 +167,28 @@ function buildYearFilters() {
     sel.innerHTML = ['all', ...years.slice().reverse()]
       .map(y => `<option value="${y}" ${yearFilter === y ? 'selected' : ''}>${y === 'all' ? '全部年份' : y + ' 年'}</option>`).join('');
     sel.onchange = () => { yearFilter = sel.value; refresh(); };
+    box.appendChild(sel);
+  }
+}
+function buildSideYears() {
+  const box = $('#sideYears'); if (!box) return; box.innerHTML = '';
+  const years = [...new Set(PAPERS.map(p => p.year))].filter(y => /^\d{4}$/.test(y)).sort();
+  if (years.length <= 6) {
+    // 年份不多：chips（一行/两行可放下，最新在右）
+    ['all', ...years].forEach(y => {
+      const b = document.createElement('button');
+      b.className = 'chip-btn' + (sideYear === y ? ' active' : '');
+      b.textContent = y === 'all' ? '全部' : y;
+      b.onclick = () => { sideYear = y; [...box.children].forEach(c => c.classList.toggle('active', c === b)); renderSidebar(); };
+      box.appendChild(b);
+    });
+  } else {
+    // 年份过多：收成下拉，永不撑高筛选头（全部 + 年份新→旧）
+    const sel = document.createElement('select');
+    sel.className = 'year-select side-year-select';
+    sel.innerHTML = ['all', ...years.slice().reverse()]
+      .map(y => `<option value="${y}" ${sideYear === y ? 'selected' : ''}>${y === 'all' ? '全部年份' : y + ' 年'}</option>`).join('');
+    sel.onchange = () => { sideYear = sel.value; renderSidebar(); };
     box.appendChild(sel);
   }
 }
@@ -539,11 +563,19 @@ function rowHTML(p, idx) {
 
 // ====== 阅读视图：左侧列表 ======
 function renderSidebar() {
-  const side = $('#sidebar'); side.innerHTML = '';
-  let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter) && (!favOnly || p.favorite));
+  const side = $('#sideList'); if (!side) return; side.innerHTML = '';
   const sem = semActive && semRank;
-  if (sem) list = list.filter(p => semRank.has(p.id));
-  else if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + (p.topic || '') + ' ' + (p.type || '')).toLowerCase().includes(k)); }
+  // 阅读侧边栏自有筛选：语义结果（若开启）为底，再按状态 / 收藏 / 搜索收窄
+  let list = sem ? PAPERS.filter(p => semRank.has(p.id)) : PAPERS.slice();
+  if (sideYear !== 'all') list = list.filter(p => p.year === sideYear);
+  if (sideStatus !== 'all') list = list.filter(p => (p.status || '未开始') === sideStatus);
+  if (sideFav) list = list.filter(p => p.favorite);
+  if (sideQ) { const k = sideQ.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + (p.topic || '') + ' ' + (p.type || '')).toLowerCase().includes(k)); }
+  if (!list.length) {
+    const e = document.createElement('div'); e.className = 'side-empty';
+    e.textContent = sideFav && sideStatus === 'all' && sideYear === 'all' && !sideQ ? '还没有收藏的论文。' : '没有符合筛选条件的论文。';
+    side.appendChild(e); updateSummary(); return;
+  }
   if (sem) {
     // 语义检索：扁平单组，按相似度降序
     list.sort((a, b) => semRank.get(b.id) - semRank.get(a.id));
@@ -1195,6 +1227,19 @@ function bindUI() {
   $('#themeBtn').onclick = toggleTheme;
   $('#toggleLeft').onclick = () => togglePane('hide-left');
   $('#toggleRight').onclick = () => togglePane('hide-right');
+  $('#stubLeft').onclick = () => togglePane('hide-left');
+  $('#stubRight').onclick = () => togglePane('hide-right');
+  // 阅读侧边栏筛选
+  const sideSearch = $('#sideSearch'), sideClear = $('#sideClear');
+  if (sideSearch) sideSearch.oninput = (e) => { sideQ = e.target.value.trim(); sideClear.classList.toggle('hidden', !sideQ); renderSidebar(); };
+  if (sideClear) sideClear.onclick = () => { sideQ = ''; sideSearch.value = ''; sideClear.classList.add('hidden'); renderSidebar(); sideSearch.focus(); };
+  document.querySelectorAll('#sideStatusSeg button').forEach(b => b.onclick = () => {
+    sideStatus = b.dataset.st;
+    document.querySelectorAll('#sideStatusSeg button').forEach(x => x.classList.toggle('active', x === b));
+    renderSidebar();
+  });
+  const sideFavBtn = $('#sideFav');
+  if (sideFavBtn) sideFavBtn.onclick = () => { sideFav = !sideFav; sideFavBtn.classList.toggle('on', sideFav); sideFavBtn.textContent = sideFav ? '★' : '☆'; renderSidebar(); };
   let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if (pdfDoc && currentView === 'read') layoutPages(++renderToken); [chProgress, chDir, chVenue, chTrend, chTree, chCited, chCite].forEach(c => c && c.resize()); }, 200); });
 }
 function switchTab(name) {
@@ -1697,6 +1742,7 @@ async function importPdfs() {
 async function reloadPapers() {
   PAPERS = normPapers(await (await fetch('/api/papers')).json());
   buildYearFilters();
+  buildSideYears();
   renderSidebar();
   renderHome();
 }
