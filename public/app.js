@@ -107,7 +107,7 @@ function initResizers() {
   // 载入时校验持久化宽度：单边夹值 + 保证两侧之和给中间 PDF 留 ≥MIN_VIEWER，否则整体复位默认（修复历史异常拖拽值把布局挤坏的问题）
   let lw = parseInt(localStorage.getItem('left-w'), 10) || 0;
   let rw = parseInt(localStorage.getItem('right-w'), 10) || 0;
-  if (lw) lw = Math.max(160, lw);
+  if (lw) lw = Math.max(200, lw);
   if (rw) rw = Math.max(220, rw);
   if ((lw || 300) + (rw || 420) > window.innerWidth - MIN_VIEWER) {
     localStorage.removeItem('left-w'); localStorage.removeItem('right-w');
@@ -129,7 +129,7 @@ function initResizers() {
       g.classList.add('dragging'); layout.classList.add('resizing');
       const move = (ev) => {
         const raw = side === 'left' ? (ev.clientX - rect.left) : (rect.right - ev.clientX);
-        const w = Math.max(side === 'left' ? 160 : 220, Math.min(Math.round(raw), maxW));
+        const w = Math.max(side === 'left' ? 200 : 220, Math.min(Math.round(raw), maxW));
         apply(cssVar, w); localStorage.setItem(key, w);
       };
       const up = () => {
