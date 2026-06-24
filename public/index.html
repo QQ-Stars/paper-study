@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -403,7 +403,26 @@
 
   <!-- 阅读 -->
   <main id="layout" class="hidden">
-    <aside id="sidebar"></aside>
+    <aside id="sidebar">
+      <div id="sideFilter">
+        <div class="sf-search">
+          <span class="search-ico">⌕</span>
+          <input id="sideSearch" type="text" placeholder="筛选论文…" autocomplete="off" />
+          <button id="sideClear" class="sf-clear hidden" title="清除筛选">✕</button>
+        </div>
+        <div class="sf-row">
+          <div class="seg seg-status" id="sideStatusSeg">
+            <button data-st="all" class="active">全部</button>
+            <button data-st="未开始">未读</button>
+            <button data-st="学习中">在读</button>
+            <button data-st="已理解">已读</button>
+          </div>
+          <button id="sideFav" class="sf-fav" title="只看收藏">☆</button>
+        </div>
+        <div class="sf-years" id="sideYears"></div>
+      </div>
+      <div id="sideList"></div>
+    </aside>
 
     <section id="viewer">
       <div id="pdfBar">
@@ -496,6 +515,12 @@
     </section>
     <div class="gutter gutter-left" data-side="left" title="拖动调整列表宽度"></div>
     <div class="gutter gutter-right" data-side="right" title="拖动调整讲解栏宽度"></div>
+    <button id="stubLeft" class="panel-stub stub-left" title="展开论文列表">
+      <span class="stub-ico">»</span><span class="stub-tx">论文列表</span>
+    </button>
+    <button id="stubRight" class="panel-stub stub-right" title="展开论文讲解">
+      <span class="stub-ico">«</span><span class="stub-tx">论文讲解</span>
+    </button>
   </main>
     </div><!-- /#viewstack -->
   </div><!-- /#shell -->
