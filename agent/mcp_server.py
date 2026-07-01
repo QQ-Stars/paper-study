@@ -16,6 +16,7 @@ import os
 import sys
 import json
 import contextlib
+from datetime import date, datetime
 from pathlib import Path
 
 # 让 `python -m agent.mcp_server` 与直接运行都能找到包
@@ -31,6 +32,10 @@ mcp = FastMCP("paper-study")
 
 # 研究方向(type)受控词表，给模型当导航参考
 TYPES = "检测 | 缓解·解码 | 缓解·训练 | 机制 | 评测 | 定义 | 其他"
+MAX_RESULT_LIMIT = 50
+DEFAULT_TEXT_CHARS = 12000
+MAX_TEXT_CHARS = 20000
+REVIEW_TOTAL_STEPS = 7
 
 
 # ---------- 小工具 ----------
@@ -68,6 +73,64 @@ def _one(con, sql, args=()):
         return r[0] if r else None
     except Exception:
         return None
+
+
+def _connect_readonly():
+    return db.connect_readonly()
+
+
+def _ok(**data):
+    return {"ok": True, **data}
+
+
+def _err(message, **data):
+    return {"ok": False, "error": message, **data}
+
+
+def _clamp_int(value, default, low, high):
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = default
+    return max(low, min(n, high))
+
+
+def _date_only(value=""):
+    if not value:
+        return date.today().isoformat()
+    text = str(value).strip()
+    try:
+        if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+            return date.fromisoformat(text[:10]).isoformat()
+        return datetime.fromisoformat(text).date().isoformat()
+    except ValueError:
+        return date.today().isoformat()
+
+
+def _chunk_text(id, content, *, offset=0, max_chars=DEFAULT_TEXT_CHARS):
+    text = content or ""
+    start = _clamp_int(offset, 0, 0, len(text))
+    size = _clamp_int(max_chars, DEFAULT_TEXT_CHARS, 1, MAX_TEXT_CHARS)
+    end = min(len(text), start + size)
+    next_offset = end if end < len(text) else None
+    return _ok(
+        id=id,
+        content=text[start:end],
+        offset=start,
+        next_offset=next_offset,
+        total_chars=len(text),
+        truncated=next_offset is not None,
+    )
+
+
+def _review_state(next_due_at, completed_at, today):
+    if completed_at:
+        return "completed"
+    if next_due_at < today:
+        return "overdue"
+    if next_due_at == today:
+        return "dueToday"
+    return "upcoming"
 
 
 def _compact(row) -> dict:
@@ -112,7 +175,7 @@ def search_papers(query: str = "", type: str = "", topic: str = "", venue: str =
     - sort: relevance|year|citations|recent。limit: 最多返回数。
     返回 {count, results:[精简字段]}。要读全文属性用 get_paper，读讲解用 get_explainer。
     """.replace("{TYPES}", TYPES)
-    con = db.connect()
+    con = _connect_readonly()
     where, args = [], []
     if query.strip():
         like = f"%{query.strip()}%"
@@ -139,19 +202,20 @@ def search_papers(query: str = "", type: str = "", topic: str = "", venue: str =
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY " + _SORT.get(sort, _SORT["relevance"])
-    sql += " LIMIT ?"; args.append(max(1, min(int(limit), 100)))
+    sql += " LIMIT ?"; args.append(_clamp_int(limit, 20, 1, MAX_RESULT_LIMIT))
     rows = con.execute(sql, args).fetchall()
     con.close()
-    return {"count": len(rows), "results": [_compact(r) for r in rows]}
+    return _ok(count=len(rows), results=[_compact(r) for r in rows])
 
 
 @mcp.tool()
 def semantic_search(query: str, k: int = 15) -> dict:
     """语义检索：用自然语言描述（中/英），按含义相似度找论文（比关键词更适合“关于X的工作”这类问法）。
     返回 {count, results:[精简字段 + score(余弦相似度)]}，按相似度降序。"""
+    capped_k = _clamp_int(k, 15, 1, MAX_RESULT_LIMIT)
     with contextlib.redirect_stdout(sys.stderr):     # 防本地嵌入模型(下载/进度)污染 stdio 协议
-        ranked = embed.rank(query, k, reindex_stale=False)   # 只读：服务进程不做同步重嵌(交给网页端自愈)
-    con = db.connect()
+        ranked = embed.rank(query, capped_k, reindex_stale=False)   # 只读：服务进程不做同步重嵌(交给网页端自愈)
+    con = _connect_readonly()
     n_vec = _one(con, "SELECT COUNT(*) FROM paper_vectors") or 0
     n_pap = _one(con, "SELECT COUNT(*) FROM papers") or 0
     out = []
@@ -160,7 +224,7 @@ def semantic_search(query: str, k: int = 15) -> dict:
         if row:
             d = _compact(row); d["score"] = it["score"]; out.append(d)
     con.close()
-    res = {"count": len(out), "indexed": n_vec, "total": n_pap, "results": out}
+    res = _ok(count=len(out), indexed=n_vec, total=n_pap, results=out)
     if n_vec < n_pap:
         res["note"] = (f"语义索引覆盖 {n_vec}/{n_pap} 篇；未入索引的论文不会出现在语义结果里"
                        "（可在网页端做一次语义检索或重建索引以补全）。")
@@ -171,23 +235,24 @@ def semantic_search(query: str, k: int = 15) -> dict:
 def related_papers(id: str, k: int = 8) -> dict:
     """找库内与某篇论文语义相近的论文（基于标题+摘要向量），用于聚类、顺藤摸瓜、发现同质工作。
     返回 {seed, count, results:[精简字段 + score]}。"""
-    con = db.connect()
+    capped_k = _clamp_int(k, 8, 1, MAX_RESULT_LIMIT)
+    con = _connect_readonly()
     row = con.execute("SELECT id,title,tldr,abstract FROM papers WHERE id=?", (id,)).fetchone()
     if not row:
         con.close()
-        return {"error": f"未找到论文 id={id}"}
+        return _err(f"未找到论文 id={id}", id=id)
     seed_text = (row["title"] or "") + ". " + (row["tldr"] or row["abstract"] or "")
     con.close()
     with contextlib.redirect_stdout(sys.stderr):
-        ranked = embed.rank(seed_text, k, exclude=id, reindex_stale=False)   # 只读，理由同 semantic_search
-    con = db.connect()
+        ranked = embed.rank(seed_text, capped_k, exclude=id, reindex_stale=False)   # 只读，理由同 semantic_search
+    con = _connect_readonly()
     out = []
     for it in ranked:
         r = con.execute("SELECT * FROM papers WHERE id=?", (it["id"],)).fetchone()
         if r:
             d = _compact(r); d["score"] = it["score"]; out.append(d)
     con.close()
-    return {"seed": id, "count": len(out), "results": out}
+    return _ok(seed=id, count=len(out), results=out)
 
 
 # ---------- 单篇详情 ----------
@@ -195,72 +260,126 @@ def related_papers(id: str, k: int = 8) -> dict:
 def get_paper(id: str) -> dict:
     """取一篇论文的全部属性：题录(作者/会议/年份/DOI/arXiv)、AI 抽取的分类(方向/子主题/任务/模型/数据集/贡献/标签/相关度)、
     引用数、摘要、TLDR，以及笔记、学习进度、是否收藏、有无讲解/翻译/本地PDF。读讲解正文请用 get_explainer。"""
-    con = db.connect()
+    con = _connect_readonly()
     row = con.execute("SELECT * FROM papers WHERE id=?", (id,)).fetchone()
     if not row:
         con.close()
-        return {"error": f"未找到论文 id={id}"}
+        return _err(f"未找到论文 id={id}", id=id)
     note = _one(con, "SELECT content FROM notes WHERE paper_id=?", (id,))
     status = _one(con, "SELECT status FROM progress WHERE paper_id=?", (id,))
     fav = _one(con, "SELECT 1 FROM favorites WHERE paper_id=?", (id,))
     has_tr = _one(con, "SELECT 1 FROM translations WHERE paper_id=? AND TRIM(content)!=''", (id,))
     con.close()
-    return {
-        "id": row["id"],
-        "title": row["title"],
-        "authors": _jload(row["authors"]),
-        "venue": row["venue"],
-        "year": row["year"],
-        "doi": row["doi"],
-        "arxiv_id": row["arxiv_id"],
-        "url": row["url"],
-        "citations": row["citations"],
-        "abstract": row["abstract"],
-        "tldr": row["tldr"],
+    return _ok(
+        id=row["id"],
+        title=row["title"],
+        authors=_jload(row["authors"]),
+        venue=row["venue"],
+        year=row["year"],
+        doi=row["doi"],
+        arxiv_id=row["arxiv_id"],
+        url=row["url"],
+        citations=row["citations"],
+        abstract=row["abstract"],
+        tldr=row["tldr"],
         # AI 抽取的研究属性
-        "type": row["type"],
-        "topic": row["topic"],
-        "task": row["task"],
-        "models": _jload(row["models"]),
-        "datasets": _jload(row["datasets"]),
-        "contribution": row["contribution"],
-        "tags": _jload(row["tags"]),
-        "fields": _jload(row["s2_fields"]),
-        "relevance": row["relevance"],
+        type=row["type"],
+        topic=row["topic"],
+        task=row["task"],
+        models=_jload(row["models"]),
+        datasets=_jload(row["datasets"]),
+        contribution=row["contribution"],
+        tags=_jload(row["tags"]),
+        fields=_jload(row["s2_fields"]),
+        relevance=row["relevance"],
         # 状态
-        "note": note or "",
-        "progress": status or "未开始",
-        "favorite": bool(fav),
-        "has_explainer": bool((row["explainer"] or "").strip()),
-        "has_translation": bool(has_tr),
-        "has_pdf": _has_pdf(row),
-    }
+        note=note or "",
+        progress=status or "未开始",
+        favorite=bool(fav),
+        has_explainer=bool((row["explainer"] or "").strip()),
+        has_translation=bool(has_tr),
+        has_pdf=_has_pdf(row),
+    )
 
 
 @mcp.tool()
-def get_explainer(id: str) -> str:
+def get_explainer(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHARS) -> dict:
     """取某篇论文的「讲解」Markdown 全文（LLM 撰写的科学方法论精读：研究问题/方法/动机/实验等）。
     这是研究分析最有价值的内容。若该篇尚无讲解，返回提示。"""
-    con = db.connect()
+    con = _connect_readonly()
     md = _one(con, "SELECT explainer FROM papers WHERE id=?", (id,))
     exists = con.execute("SELECT 1 FROM papers WHERE id=?", (id,)).fetchone()
     con.close()
     if not exists:
-        return f"未找到论文 id={id}"
+        return _err(f"未找到论文 id={id}", id=id)
     if not (md or "").strip():
-        return f"该论文暂无讲解（可在网页阅读页点「✨ 生成讲解」生成）。id={id}"
-    return md
+        return _err(f"该论文暂无讲解（可在网页阅读页点「✨ 生成讲解」生成）。id={id}", id=id)
+    return _chunk_text(id, md, offset=offset, max_chars=max_chars)
 
 
 @mcp.tool()
-def get_translation(id: str) -> str:
+def get_translation(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHARS) -> dict:
     """取某篇论文的中文全文翻译 Markdown（若已生成）。"""
-    con = db.connect()
+    con = _connect_readonly()
     md = _one(con, "SELECT content FROM translations WHERE paper_id=?", (id,))
     con.close()
     if not (md or "").strip():
-        return f"该论文暂无中文翻译（可在网页阅读页生成）。id={id}"
-    return md
+        return _err(f"该论文暂无中文翻译（可在网页阅读页生成）。id={id}", id=id)
+    return _chunk_text(id, md, offset=offset, max_chars=max_chars)
+
+
+@mcp.tool()
+def list_due_reviews(today: str = "", include_upcoming: bool = False, limit: int = 20) -> dict:
+    """列出艾宾浩斯复习队列。默认只返回今天及以前应复习的论文；include_upcoming=true 时包含未完成的未来计划。"""
+    today_s = _date_only(today)
+    capped_limit = _clamp_int(limit, 20, 1, MAX_RESULT_LIMIT)
+    where = ["r.completed_at IS NULL"]
+    args = []
+    if not include_upcoming:
+        where.append("r.next_due_at <= ?")
+        args.append(today_s)
+    sql = f"""
+        SELECT
+          r.paper_id,
+          r.started_at,
+          r.current_step,
+          r.completed_steps,
+          r.next_due_at,
+          r.completed_at,
+          r.updated_at,
+          p.title,
+          p.venue,
+          p.year,
+          COALESCE(NULLIF(TRIM(progress.status), ''), '未开始') AS progress
+        FROM paper_reviews r
+        JOIN papers p ON p.id = r.paper_id
+        LEFT JOIN progress ON progress.paper_id = r.paper_id
+        WHERE {' AND '.join(where)}
+        ORDER BY r.next_due_at ASC, p.title COLLATE NOCASE ASC, r.paper_id ASC
+        LIMIT ?
+    """
+    args.append(capped_limit)
+    con = _connect_readonly()
+    rows = con.execute(sql, args).fetchall()
+    con.close()
+    results = []
+    for row in rows:
+        state = _review_state(row["next_due_at"], row["completed_at"], today_s)
+        results.append({
+            "id": row["paper_id"],
+            "title": row["title"],
+            "venue": row["venue"],
+            "year": row["year"],
+            "progress": row["progress"],
+            "review_state": state,
+            "started_at": row["started_at"],
+            "current_step": row["current_step"],
+            "completed_steps": row["completed_steps"],
+            "total_steps": REVIEW_TOTAL_STEPS,
+            "next_due_at": row["next_due_at"],
+            "updated_at": row["updated_at"],
+        })
+    return _ok(today=today_s, count=len(results), include_upcoming=bool(include_upcoming), results=results)
 
 
 # ---------- 综览 / 找空白 ----------
@@ -268,7 +387,7 @@ def get_translation(id: str) -> str:
 def list_categories() -> dict:
     """列出库中实际在用的分类词表及计数：研究方向(type)/子主题(topic)/任务(task)。
     用于了解库的版图、导航、以及发现“某方向论文很少”这类潜在空白。"""
-    con = db.connect()
+    con = _connect_readonly()
 
     def counts(col):
         rows = con.execute(
@@ -277,7 +396,7 @@ def list_categories() -> dict:
             f"ORDER BY c DESC, k").fetchall()
         return [{"name": r["k"], "count": r["c"]} for r in rows]
 
-    res = {"types": counts("type"), "topics": counts("topic"), "tasks": counts("task")}
+    res = _ok(types=counts("type"), topics=counts("topic"), tasks=counts("task"))
     con.close()
     return res
 
@@ -286,11 +405,14 @@ def list_categories() -> dict:
 def library_overview() -> dict:
     """库的整体画像：总数、讲解/翻译/收藏/本地PDF 覆盖、按方向/会议/年份分布、相关度分桶、年份范围。
     适合开题前快速了解“这个方向已有哪些、密集在哪、哪里稀疏(潜在空白)”。"""
-    con = db.connect()
+    con = _connect_readonly()
     total = _one(con, "SELECT COUNT(*) FROM papers") or 0
     with_exp = _one(con, "SELECT COUNT(*) FROM papers WHERE explainer IS NOT NULL AND TRIM(explainer)!=''") or 0
     with_tr = _one(con, "SELECT COUNT(*) FROM translations WHERE TRIM(content)!=''") or 0
     favs = _one(con, "SELECT COUNT(*) FROM favorites") or 0
+    indexed = _one(con, "SELECT COUNT(*) FROM paper_vectors") or 0
+    review_due = _one(con, "SELECT COUNT(*) FROM paper_reviews WHERE completed_at IS NULL AND next_due_at <= date('now')") or 0
+    review_open = _one(con, "SELECT COUNT(*) FROM paper_reviews WHERE completed_at IS NULL") or 0
 
     def grp(col, limit=0):
         sql = (f"SELECT {col} AS k, COUNT(*) AS c FROM papers "
@@ -308,18 +430,21 @@ def library_overview() -> dict:
     avg_cit = _one(con, "SELECT ROUND(AVG(citations),1) FROM papers WHERE citations IS NOT NULL")
     by_type, by_topic, by_venue = grp("type"), grp("topic", 15), grp("venue", 15)
     con.close()
-    return {
-        "total": total,
-        "with_explainer": with_exp,
-        "with_translation": with_tr,
-        "favorites": favs,
-        "by_type": by_type,
-        "by_topic_top15": by_topic,
-        "by_venue_top15": by_venue,
-        "by_year": years,
-        "relevance_buckets": {">=0.8": rel_hi, "0.6-0.8": rel_mid, "<0.6": rel_lo},
-        "avg_citations": avg_cit,
-    }
+    return _ok(
+        total=total,
+        with_explainer=with_exp,
+        with_translation=with_tr,
+        favorites=favs,
+        indexed_vectors=indexed,
+        review_due=review_due,
+        review_open=review_open,
+        by_type=by_type,
+        by_topic_top15=by_topic,
+        by_venue_top15=by_venue,
+        by_year=years,
+        relevance_buckets={">=0.8": rel_hi, "0.6-0.8": rel_mid, "<0.6": rel_lo},
+        avg_citations=avg_cit,
+    )
 
 
 def _prewarm():
