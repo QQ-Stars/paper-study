@@ -51,6 +51,19 @@ CREATE TABLE IF NOT EXISTS progress (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Ebbinghaus review plans.
+CREATE TABLE IF NOT EXISTS paper_reviews (
+  paper_id        TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+  started_at      TEXT NOT NULL,
+  current_step    INTEGER NOT NULL DEFAULT 1,
+  completed_steps INTEGER NOT NULL DEFAULT 0,
+  next_due_at     TEXT NOT NULL,
+  completed_at    TEXT,
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_paper_reviews_next_due ON paper_reviews(next_due_at);
+CREATE INDEX IF NOT EXISTS ix_paper_reviews_completed ON paper_reviews(completed_at);
+
 -- ========== 笔记 ==========
 CREATE TABLE IF NOT EXISTS notes (
   paper_id   TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,

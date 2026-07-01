@@ -2,6 +2,7 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const { createReviewStore } = require('./lib/reviews');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'app.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -19,6 +20,10 @@ for (const [col, ddl] of [['only_a', 'INTEGER DEFAULT 0'], ['queries', 'TEXT'], 
   const has = db.prepare(`SELECT 1 FROM pragma_table_info('ingest_jobs') WHERE name = ?`).get(col);
   if (!has) db.exec(`ALTER TABLE ingest_jobs ADD COLUMN ${col} ${ddl}`);
 }
+
+const reviewStore = createReviewStore(db);
+reviewStore.backfillUnderstoodReviews();
+const { completeReviewStep, ensureReviewPlan, getReviewPlan, listReviewItems } = reviewStore;
 
 // 会议名归一化（与 public/app.js 的 normVenue、agent/db.py 的 norm_venue 保持一致）
 const VENUE_CANON = { neurips: 'NeurIPS', nips: 'NeurIPS', cvpr: 'CVPR', iccv: 'ICCV', eccv: 'ECCV', wacv: 'WACV', icml: 'ICML', iclr: 'ICLR', aaai: 'AAAI', ijcai: 'IJCAI', acl: 'ACL', emnlp: 'EMNLP', naacl: 'NAACL', coling: 'COLING', tmlr: 'TMLR', tpami: 'TPAMI', corr: 'arXiv' };
@@ -102,10 +107,16 @@ const setNote = (id, content) => db.prepare(`
   INSERT INTO notes(paper_id, content, updated_at) VALUES(?, ?, datetime('now'))
   ON CONFLICT(paper_id) DO UPDATE SET content = excluded.content, updated_at = datetime('now')
 `).run(id, content == null ? '' : content);
-const setStatus = (id, status) => db.prepare(`
+const progressUpdatedAt = db.prepare('SELECT updated_at FROM progress WHERE paper_id = ?');
+const setStatus = (id, status) => {
+  const result = db.prepare(`
   INSERT INTO progress(paper_id, status, updated_at) VALUES(?, ?, datetime('now'))
   ON CONFLICT(paper_id) DO UPDATE SET status = excluded.status, updated_at = datetime('now')
 `).run(id, status);
+  const row = progressUpdatedAt.get(id);
+  reviewStore.ensureReviewPlanForStatus(id, status, { startedAt: row && row.updated_at });
+  return result;
+};
 
 const setFavorite = (id, fav) => fav
   ? db.prepare(`INSERT INTO favorites(paper_id, created_at) VALUES(?, datetime('now')) ON CONFLICT(paper_id) DO NOTHING`).run(id)
@@ -220,6 +231,7 @@ const markScheduleRan = (id, everyDays) => db.prepare(`UPDATE job_schedules SET 
 
 module.exports = {
   db, listPapers, getExplainer, getTranslation, getNote, getCiteGraph, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper,
+  ensureReviewPlan, completeReviewStep, listReviewItems, getReviewPlan,
   createJob, listJobs, getJob, setJobStatus, appendJobLog, bumpJobAdded, deleteJob, listJobCandidates, markJobCandidates, markJobCandidateIds, closeJobIfEmpty, resetOrphanJobs,
   listSchedules, createSchedule, toggleSchedule, deleteSchedule, dueSchedules, markScheduleRan
 };

@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -38,6 +41,40 @@ function memoryDb() {
   db.prepare("INSERT INTO papers(id,title,venue,year) VALUES('p1','Paper One','ACL','2023')").run();
   db.prepare("INSERT INTO papers(id,title,venue,year) VALUES('p2','Paper Two','CVPR','2024')").run();
   return db;
+}
+
+function loadIsolatedDb(dbPath) {
+  const dbModulePath = require.resolve('../db');
+  const previousDbPath = process.env.DB_PATH;
+  delete require.cache[dbModulePath];
+  process.env.DB_PATH = dbPath;
+
+  try {
+    const dbModule = require('../db');
+    return {
+      dbModule,
+      cleanup() {
+        try {
+          dbModule.db.close();
+        } finally {
+          delete require.cache[dbModulePath];
+          if (previousDbPath === undefined) {
+            delete process.env.DB_PATH;
+          } else {
+            process.env.DB_PATH = previousDbPath;
+          }
+        }
+      }
+    };
+  } catch (err) {
+    delete require.cache[dbModulePath];
+    if (previousDbPath === undefined) {
+      delete process.env.DB_PATH;
+    } else {
+      process.env.DB_PATH = previousDbPath;
+    }
+    throw err;
+  }
 }
 
 test('review schedule uses the fixed Ebbinghaus intervals', () => {
@@ -202,4 +239,71 @@ test('listReviewItems groups review plans and joins paper progress', () => {
   assert.equal(list.upcoming[0].review_state, 'upcoming');
   assert.equal(list.completed[0].review_state, 'completed');
   assert.equal(list.overdue[0].total_steps, 7);
+});
+
+test('backfillUnderstoodReviews creates plans for understood progress using updated_at as started_at', () => {
+  const db = memoryDb();
+  db.prepare("INSERT INTO progress(paper_id,status,updated_at) VALUES('p1','已理解','2026-06-28 18:30:00')").run();
+  db.prepare("INSERT INTO progress(paper_id,status,updated_at) VALUES('p2','已理解','2026-07-01T09:00:00')").run();
+  const store = createReviewStore(db);
+
+  const created = store.backfillUnderstoodReviews({ now: '2026-07-10T12:00:00' });
+
+  assert.equal(created, 2);
+  assert.equal(store.getReviewPlan('p1').started_at, '2026-06-28');
+  assert.equal(store.getReviewPlan('p1').next_due_at, '2026-06-28');
+  assert.equal(store.getReviewPlan('p1').updated_at, '2026-07-10');
+  assert.equal(store.getReviewPlan('p2').started_at, '2026-07-01');
+});
+
+test('backfillUnderstoodReviews ignores non-understood progress statuses', () => {
+  const db = memoryDb();
+  db.prepare("INSERT INTO progress(paper_id,status,updated_at) VALUES('p1','学习中','2026-06-28 18:30:00')").run();
+  db.prepare("INSERT INTO progress(paper_id,status,updated_at) VALUES('p2','未开始','2026-07-01T09:00:00')").run();
+  const store = createReviewStore(db);
+
+  const created = store.backfillUnderstoodReviews({ now: '2026-07-10T12:00:00' });
+
+  assert.equal(created, 0);
+  assert.equal(store.getReviewPlan('p1'), null);
+  assert.equal(store.getReviewPlan('p2'), null);
+  assert.equal(db.prepare('SELECT COUNT(*) AS c FROM paper_reviews').get().c, 0);
+});
+
+test('ensureReviewPlanForStatus creates a plan only for understood status', () => {
+  const db = memoryDb();
+  const store = createReviewStore(db);
+
+  const ignored = store.ensureReviewPlanForStatus('p1', '学习中', { now: '2026-07-01T10:00:00' });
+  const created = store.ensureReviewPlanForStatus('p1', '已理解', { now: '2026-07-02T10:00:00' });
+
+  assert.equal(ignored, null);
+  assert.equal(created.paper_id, 'p1');
+  assert.equal(created.started_at, '2026-07-02');
+  assert.equal(store.getReviewPlan('p1').paper_id, 'p1');
+  assert.equal(db.prepare('SELECT COUNT(*) AS c FROM paper_reviews').get().c, 1);
+});
+
+test('db.js schema and setStatus create review plans in an isolated DB_PATH', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'study-app-reviews-'));
+  const dbPath = path.join(tmpDir, 'isolated.db');
+  const loaded = loadIsolatedDb(dbPath);
+  const { dbModule } = loaded;
+
+  try {
+    assert.equal(typeof dbModule.ensureReviewPlan, 'function');
+    assert.equal(typeof dbModule.getReviewPlan, 'function');
+
+    dbModule.db.prepare("INSERT INTO papers(id,source,title,created_at,updated_at) VALUES('db-p1','manual','DB Paper',datetime('now'),datetime('now'))").run();
+    dbModule.setStatus('db-p1', '已理解');
+
+    const plan = dbModule.getReviewPlan('db-p1');
+    assert.equal(plan.paper_id, 'db-p1');
+    assert.equal(plan.current_step, 1);
+    assert.equal(plan.completed_steps, 0);
+    assert.equal(plan.started_at, plan.next_due_at);
+  } finally {
+    loaded.cleanup();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
