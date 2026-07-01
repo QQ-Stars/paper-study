@@ -12,6 +12,7 @@
 <script defer src="vendor/katex/auto-render.min.js"></script>
 <script src="vendor/pdfjs/pdf.min.js"></script>
 <script src="vendor/echarts/echarts.min.js"></script>
+<script src="selection-popover.js"></script>
 </head>
 <body>
   <aside id="rail">
@@ -19,6 +20,7 @@
     <nav class="viewnav">
       <button data-view="home" class="active" title="总览"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg></span><span class="nav-tx">总览</span></button>
       <button data-view="read" title="阅读"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v13"/><path d="M3 5.5A1.5 1.5 0 0 1 4.5 4H9a3 3 0 0 1 3 3 3 3 0 0 1 3-3h4.5A1.5 1.5 0 0 1 21 5.5v11a1.5 1.5 0 0 1-1.5 1.5H14.5a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0-2.5-2.5H4.5A1.5 1.5 0 0 1 3 16.5z"/></svg></span><span class="nav-tx">阅读</span></button>
+      <button data-view="review" title="复习"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></span><span class="nav-tx">复习</span></button>
       <button data-view="manage" title="管理"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg></span><span class="nav-tx">管理</span></button>
       <button data-view="jobs" title="采集"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg></span><span class="nav-tx">采集</span></button>
       <button data-view="insights" title="洞察"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m18.5 8.5-5 5-3-3-4 4"/></svg></span><span class="nav-tx">洞察</span></button>
@@ -94,6 +96,13 @@
         <tbody id="homeBody"></tbody>
       </table>
     </div>
+  </section>
+
+  <!-- 复习 -->
+  <section id="review" class="hidden">
+    <div class="page-head"><h1>复习<em>Ebbinghaus</em></h1><span class="ph-line"></span></div>
+    <div id="reviewDash" class="review-dash"></div>
+    <div id="reviewList" class="review-list"></div>
   </section>
 
   <!-- 管理 -->
@@ -461,6 +470,7 @@
           </div>
           <button id="favBtn" class="fav-btn" title="收藏这篇论文">☆ 收藏</button>
         </div>
+        <div id="reviewStatus" class="review-status hidden"></div>
         <select id="statusSel" class="hidden-sel"><option>未开始</option><option>学习中</option><option>已理解</option></select>
         <div class="tabs seg seg-tabs">
           <button class="tab active" data-tab="explainer">论文讲解</button>

@@ -213,7 +213,7 @@ html[data-theme=dark] textarea{color-scheme:dark}
   transform:none;
 }
 
-.chart-card,.table-card,.ingest-bar,.lib-card,.set-card,.m-card,.job-card,.modal-card,.ebatch{
+.chart-card,.table-card,.ingest-bar,.lib-card,.set-card,.m-card,.job-card,.modal-card,.ebatch,.review-stat,.review-card{
   border-radius:8px;
   border-color:var(--border);
   background:var(--surface);
@@ -505,7 +505,7 @@ html[data-theme=dark] .pdf-page{
   font-size:14.5px;
   color:var(--ink);
 }
-.ib-opts,.ing-queries,.ing-stages,.ing-detail,.sel-merge,.sel-pop,.jc-log,.ing-log{
+.ib-opts,.ing-queries,.ing-stages,.ing-detail,.sel-merge,.sel-pop,.jc-log,.ing-log,.review-status{
   border-radius:8px;
   background:var(--surface-2);
 }
@@ -523,7 +523,7 @@ html[data-theme=dark] .pdf-page{
 .m-item,.cand,.sch-item,.job-card,.sim-item{
   border-radius:8px;
 }
-.m-item:hover,.cand:hover,.sch-item:hover,.sim-item:hover{
+.m-item:hover,.cand:hover,.sch-item:hover,.sim-item:hover,.review-card:hover{
   background:var(--surface-2);
 }
 .cand-rel-bar,.eb-bar-fill{
