@@ -301,6 +301,7 @@ test('db.js schema and setStatus create review plans in an isolated DB_PATH', ()
     assert.equal(plan.paper_id, 'db-p1');
     assert.equal(plan.current_step, 1);
     assert.equal(plan.completed_steps, 0);
+    assert.equal(plan.started_at, dateOnly(new Date()));
     assert.equal(plan.started_at, plan.next_due_at);
   } finally {
     loaded.cleanup();

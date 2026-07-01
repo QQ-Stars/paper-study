@@ -107,14 +107,12 @@ const setNote = (id, content) => db.prepare(`
   INSERT INTO notes(paper_id, content, updated_at) VALUES(?, ?, datetime('now'))
   ON CONFLICT(paper_id) DO UPDATE SET content = excluded.content, updated_at = datetime('now')
 `).run(id, content == null ? '' : content);
-const progressUpdatedAt = db.prepare('SELECT updated_at FROM progress WHERE paper_id = ?');
 const setStatus = (id, status) => {
   const result = db.prepare(`
   INSERT INTO progress(paper_id, status, updated_at) VALUES(?, ?, datetime('now'))
   ON CONFLICT(paper_id) DO UPDATE SET status = excluded.status, updated_at = datetime('now')
 `).run(id, status);
-  const row = progressUpdatedAt.get(id);
-  reviewStore.ensureReviewPlanForStatus(id, status, { startedAt: row && row.updated_at });
+  reviewStore.ensureReviewPlanForStatus(id, status);
   return result;
 };
 
