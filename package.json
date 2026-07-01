@@ -7,7 +7,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test",
+    "rename-pdfs": "node scripts/rename-pdfs-by-title.js",
     "start": "node server.js"
   },
   "repository": {

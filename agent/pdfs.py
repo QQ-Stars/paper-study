@@ -2,7 +2,7 @@
 import json
 import sys
 from pathlib import Path
-from . import config, db, util
+from . import config, db, util, pdf_files
 
 
 def _p(msg):
@@ -44,9 +44,11 @@ def download_pdfs(ids=None, limit=0):
     ok = failed = skipped = 0
     for r in rows:
         pid = r.get("id")
-        title = (r.get("title") or pid or "paper").replace("\n", " ")[:48]
+        full_title = (r.get("title") or pid or "paper").replace("\n", " ")
+        title = full_title[:48]
         existing = _row_pdf_path(r)
         if existing:
+            existing = pdf_files.archive_pdf(existing, full_title, pid, config.PDF_DIR)
             con.execute("UPDATE papers SET pdf_path=?, updated_at=datetime('now') WHERE id=?",
                         (str(existing), pid))
             con.commit()
@@ -58,7 +60,7 @@ def download_pdfs(ids=None, limit=0):
             skipped += 1
             _p(f"PDFNOURL::{title}")
             continue
-        dest = config.artifact_path("pdf", pid, ".pdf")
+        dest = pdf_files.unique_pdf_path(config.PDF_DIR, full_title, paper_id=pid)
         _p(f"PDFSTART::{title}")
 
         def progress(done, total):

@@ -2,7 +2,7 @@
 import json
 import math
 import sys
-from . import db, llm, util, config, extract, ccf
+from . import db, llm, util, config, extract, ccf, pdf_files
 from .models import PaperStub
 from .sources.semanticscholar import SemanticScholar
 from .sources.arxiv import Arxiv
@@ -61,7 +61,7 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
                 stub.pdf_url = pdf_url
             if download_pdf and pdf_url:
                 try:
-                    dest = config.PDF_DIR / f"{slug}.pdf"
+                    dest = pdf_files.unique_pdf_path(config.PDF_DIR, stub.title, paper_id=slug)
                     util.download_pdf(pdf_url, dest)
                     pdf_path = str(dest)
                 except Exception:
@@ -123,7 +123,7 @@ def _download_pdf_for_stub(stub, slug):
     if not pdf_url:
         _p(f"PDFNOURL::{title}")
         return None, ""
-    dest = config.PDF_DIR / f"{slug}.pdf"
+    dest = pdf_files.unique_pdf_path(config.PDF_DIR, stub.title, paper_id=slug)
     _p(f"PDFSTART::{title}")
 
     def progress(done, total):
