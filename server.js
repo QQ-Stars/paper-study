@@ -5,6 +5,16 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const dbapi = require('./db');
+const { createAgentRunner } = require('./lib/agent-runner');
+const { createArtifactLocator, scanPdfDirectory } = require('./lib/artifacts');
+const { MIME, readBody, safeBase, send, startNdjson } = require('./lib/http');
+const {
+  applySettingsUpdate,
+  buildSettingsView,
+  createSettingsStore,
+  ensureSettingsDirs,
+  resolveDir: resolveSettingDir,
+} = require('./lib/settings');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
@@ -17,68 +27,30 @@ const EXPLAINERS_DIR = path.join(ROOT, 'data', 'explainers');
 const TRANSLATIONS_DIR = path.join(ROOT, 'data', 'translations');
 const PORT = process.env.PORT || cfg.port || 5173;
 
-const resolveDir = (d) => (path.isAbsolute(d) ? d : path.join(ROOT, d));
+const resolveDir = (d) => resolveSettingDir(ROOT, d);
 const settingDir = (s, key, fallback) => resolveDir((s && s[key]) || fallback);
-// 按论文 id 解析本地 PDF：① DB 存的 pdf_path ② 按 slug 找（默认 data/pdfs 优先 → 自定义目录 → 种子 ../paper）
-const resolvePdfById = (id) => {
-  try {
-    const sp = dbapi.getPdfPath(id);
-    if (sp) { const abs = path.isAbsolute(sp) ? sp : path.join(ROOT, sp); if (fs.existsSync(abs)) return abs; }
-  } catch (e) {}
-  const settings = readSettings();
-  const custom = settings.pdfDir;
-  const dirs = [];
-  if (custom) dirs.push(resolveDir(custom));
-  dirs.push(PDFS_DIR);
-  dirs.push(PAPERS_DIR);
-  for (const dir of dirs) { const f = path.join(dir, id + '.pdf'); if (fs.existsSync(f)) return f; }
-  return null;
-};
-const pyExe = () => {
-  for (const p of [path.join(ROOT, '.venv', 'Scripts', 'python.exe'),   // Windows venv
-                   path.join(ROOT, '.venv', 'bin', 'python')]) {         // Linux venv（Docker 容器内）
-    if (fs.existsSync(p)) return p;
-  }
-  return process.platform === 'win32' ? 'python' : 'python3';            // 退回系统解释器
-};
-const spawnAgent = (args, opts = {}) => spawn(pyExe(), ['-m', 'agent', ...args], { cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }, ...opts });
+const agentRunner = createAgentRunner({ root: ROOT });
+const pyExe = () => agentRunner.pythonExecutable();
+const spawnAgent = (args, opts = {}) => agentRunner.spawn(args, opts);
 
 // ---- 设置（模型/数据源），存 data/settings.json（gitignore），Python Agent 也读它 ----
 const SETTINGS_PATH = path.join(ROOT, 'data', 'settings.json');
-const readSettings = () => { try { return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); } catch (e) { return {}; } };
-const writeSettings = (s) => { fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true }); fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2)); };
-const readEnv = () => { const o = {}; try { fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split(/\r?\n/).forEach(l => { const m = /^([A-Z0-9_]+)=(.*)$/.exec(l.trim()); if (m) o[m[1]] = m[2]; }); } catch (e) {} return o; };
-const maskKey = (k) => k ? '****' + String(k).slice(-4) : '';
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
-  '.pdf': 'application/pdf', '.md': 'text/markdown; charset=utf-8',
-  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf'
-};
-const send = (res, code, body, type) => { res.writeHead(code, { 'Content-Type': type || 'text/plain; charset=utf-8' }); res.end(body); };
-const safeBase = (s) => path.basename(String(s || ''));
-const readBody = (req) => new Promise((r) => { let d = ''; req.on('data', c => d += c); req.on('end', () => r(d)); });
+const settingsStore = createSettingsStore({ root: ROOT, settingsPath: SETTINGS_PATH });
+const readSettings = () => settingsStore.read();
+const writeSettings = (s) => settingsStore.write(s);
+const readEnv = () => settingsStore.readEnv();
+const artifactLocator = createArtifactLocator({
+  root: ROOT,
+  defaultPdfDir: PDFS_DIR,
+  seedPdfDir: PAPERS_DIR,
+  settingsStore,
+  getPdfPath: (id) => dbapi.getPdfPath(id),
+});
+const resolvePdfById = (id) => artifactLocator.resolvePdfById(id);
 
 // ---- 大模型直连（OpenAI 兼容协议）。与 agent/config.py 保持一致：settings.json 优先于 .env，再退供应商预设。
 //      用于划词翻译这类“小而快”的请求，免去每次 spawn Python 的解释器冷启动(约 1~2s，重启后首次更久)。----
-const LLM_PRESETS = {
-  deepseek:  ['https://api.deepseek.com', 'deepseek-v4-flash'],
-  qwen:      ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'],
-  openai:    ['https://api.openai.com/v1', 'gpt-4o-mini'],
-  anthropic: ['https://api.anthropic.com', 'claude-3-5-sonnet-latest'],
-};
-const llmConfig = () => {
-  const s = readSettings(), e = readEnv();
-  const provider = String(s.provider || e.LLM_PROVIDER || 'deepseek').toLowerCase();
-  const [pBase, pModel] = LLM_PRESETS[provider] || LLM_PRESETS.deepseek;
-  return {
-    apiKey: s.apiKey || e.LLM_API_KEY || '',
-    baseUrl: s.baseUrl || e.LLM_BASE_URL || pBase,
-    model: s.model || e.LLM_MODEL || pModel,
-  };
-};
+const llmConfig = () => settingsStore.llmConfig();
 async function llmChat(messages, { temperature = 0.2, timeoutMs = 60000 } = {}) {
   const { apiKey, baseUrl, model } = llmConfig();
   if (!apiKey) throw new Error('未配置大模型 API Key');
@@ -126,16 +98,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/papers') {
       const rows = dbapi.listPapers();
       // 标注 PDF 是否在本地：DB 记录的 pdf_path → 默认目录 → 自定义目录 → 种子目录
-      const custom = readSettings().pdfDir;
-      const dirs = [PDFS_DIR];                       // 默认优先
-      if (custom) dirs.push(resolveDir(custom));      // 然后自定义
-      dirs.push(PAPERS_DIR);                           // 最后种子目录
-      for (const r of rows) {
-        let has = false;
-        if (r.pdf_path) { const abs = path.isAbsolute(r.pdf_path) ? r.pdf_path : path.join(ROOT, r.pdf_path); if (fs.existsSync(abs)) has = true; }
-        if (!has) for (const dir of dirs) { if (fs.existsSync(path.join(dir, r.id + '.pdf'))) { has = true; break; } }
-        r.hasPdf = has;
-      }
+      for (const r of rows) r.hasPdf = artifactLocator.hasPdfForRow(r);
       return send(res, 200, JSON.stringify(rows), MIME['.json']);
     }
     if (p === '/api/note' && req.method === 'GET') {
@@ -224,8 +187,7 @@ const server = http.createServer(async (req, res) => {
       const b = JSON.parse(await readBody(req));
       const sources = (Array.isArray(b.sources) ? b.sources : []).filter(s => ['semanticscholar', 'arxiv', 'openalex', 'dblp'].includes(s));
       if (!b.query || !sources.length) return send(res, 400, JSON.stringify({ ok: false, error: '缺少检索方向或数据源' }), MIME['.json']);
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       const args = ['search', '--query', String(b.query), '--sources', sources.join(','), '--years', String(b.years || '2024-2026'),
         '--max', String(Math.min(parseInt(b.max) || 10, 60)), '--min-relevance', String(b.minRelevance == null ? 0 : b.minRelevance)];
       if (b.expand) args.push('--expand');
@@ -242,8 +204,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/ingest-selected' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
       const cands = Array.isArray(b.candidates) ? b.candidates : [];
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       const args = ['ingest-selected']; if (b.deep) args.push('--deep'); if (b.downloadPdf === false) args.push('--no-pdf');
       let added = 0; const ch = spawnAgent(args);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (!l.trim()) return; const m = /^INGESTED::(\d+)/.exec(l); if (m) added = +m[1]; emit({ type: 'progress', line: l }); }));
@@ -256,8 +217,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/verify-venue' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
       const cands = Array.isArray(b.candidates) ? b.candidates : [];
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       const vsources = (Array.isArray(b.sources) ? b.sources : ['dblp', 'semanticscholar']).filter(s => ['dblp', 'semanticscholar', 'openalex'].includes(s));
       let out = ''; const ch = spawnAgent(['verify-venue', '--sources', vsources.join(',') || 'dblp,semanticscholar']);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
@@ -272,8 +232,7 @@ const server = http.createServer(async (req, res) => {
       const b = JSON.parse(await readBody(req));
       const id = safeBase(b.id);
       if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }), MIME['.json']);
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       const args = ['explain', '--id', id]; if (b.deep) args.push('--deep');
       let out = '', err = ''; const ch = spawnAgent(args);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (l.trim()) { err += l + '\n'; emit({ type: 'progress', line: l }); } }));
@@ -294,8 +253,7 @@ const server = http.createServer(async (req, res) => {
     //   result:   { ok, summary:{ total, done, failed[], skipped_no_pdf[] } }
     if (p === '/api/explain-batch' && req.method === 'POST') {
       const b = JSON.parse((await readBody(req)) || '{}');
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       const args = ['explain-batch'];
       const lim = parseInt(b.limit); if (lim && lim > 0) args.push('--limit', String(lim));
       let out = '', err = '', aborted = false;
@@ -321,8 +279,7 @@ const server = http.createServer(async (req, res) => {
       const b = JSON.parse(await readBody(req));
       const id = safeBase(b.id);
       if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }), MIME['.json']);
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       let out = '', err = ''; const ch = spawnAgent(['translate', '--id', id]);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (l.trim()) { err += l + '\n'; emit({ type: 'progress', line: l }); } }));
       ch.stdout.on('data', d => out += d.toString());
@@ -352,8 +309,7 @@ const server = http.createServer(async (req, res) => {
       const b = JSON.parse(await readBody(req));
       const id = safeBase(b.id);
       if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }), MIME['.json']);
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       const limit = String(Math.min(parseInt(b.limit) || 14, 40));
       let out = ''; const ch = spawnAgent(['recommend', '--id', id, '--limit', limit]);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
@@ -366,8 +322,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/embed' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
       const scope = b.scope === 'all' ? 'all' : 'missing';
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       let out = ''; const ch = spawnAgent(['embed', '--scope', scope]);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
       ch.stdout.on('data', d => out += d.toString());
@@ -380,8 +335,7 @@ const server = http.createServer(async (req, res) => {
       const b = JSON.parse(await readBody(req));
       const query = String(b.query || '').slice(0, 500);
       if (!query.trim()) return send(res, 400, JSON.stringify({ ok: false, error: '缺少查询' }), MIME['.json']);
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       let out = ''; const ch = spawnAgent(['semsearch', '--query', query, '--k', String(Math.min(parseInt(b.k) || 60, 200))]);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
       ch.stdout.on('data', d => out += d.toString());
@@ -393,32 +347,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/scan-pdfs' && req.method === 'GET') {
       const dir = (u.searchParams.get('dir') || '').trim();
       if (!dir) return send(res, 400, JSON.stringify({ ok: false, error: '缺少文件夹路径' }), MIME['.json']);
-      try {
-        if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory())
-          return send(res, 200, JSON.stringify({ ok: false, error: '文件夹不存在或不是目录' }), MIME['.json']);
-        const files = [];
-        const walk = (d, depth) => {
-          if (depth > 4 || files.length >= 2000) return;
-          let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
-          for (const ent of ents) {
-            if (files.length >= 2000) break;
-            const fp = path.join(d, ent.name);
-            if (ent.isDirectory()) { if (!ent.name.startsWith('.')) walk(fp, depth + 1); }
-            else if (/\.pdf$/i.test(ent.name)) { try { files.push({ path: fp, name: ent.name, size: fs.statSync(fp).size }); } catch (e) {} }
-          }
-        };
-        walk(dir, 0);
-        files.sort((a, b) => a.path.localeCompare(b.path));
-        return send(res, 200, JSON.stringify({ ok: true, dir, count: files.length, files }), MIME['.json']);
-      } catch (e) { return send(res, 200, JSON.stringify({ ok: false, error: String(e) }), MIME['.json']); }
+      return send(res, 200, JSON.stringify(scanPdfDirectory(dir)), MIME['.json']);
     }
     // 本地 PDF 批量导入（NDJSON 流，progress… + 最终 result）
     if (p === '/api/import-pdfs' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
       const paths = (Array.isArray(b.paths) ? b.paths : []).filter(x => typeof x === 'string' && x.trim());
       if (!paths.length) return send(res, 400, JSON.stringify({ ok: false, error: '未选择 PDF' }), MIME['.json']);
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       const args = ['import-pdfs']; if (b.enrich === false) args.push('--no-enrich');
       let out = ''; const ch = spawnAgent(args);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
@@ -433,8 +369,7 @@ const server = http.createServer(async (req, res) => {
       const b = JSON.parse(await readBody(req));
       const ids = Array.isArray(b.ids) ? b.ids.map(x => safeBase(x)).filter(Boolean) : [];
       const limit = Math.max(0, Math.min(parseInt(b.limit) || 0, 500));
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       const args = ['download-pdfs']; if (limit) args.push('--limit', String(limit));
       let out = ''; const ch = spawnAgent(args);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
@@ -464,8 +399,7 @@ const server = http.createServer(async (req, res) => {
     }
     // 规整会议名（LLM 把全库 venue 统一成标准简称；NDJSON 进度 + 映射）
     if (p === '/api/norm-venues' && req.method === 'POST') {
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       let out = ''; const ch = spawnAgent(['norm-venues']);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
       ch.stdout.on('data', d => out += d.toString());
@@ -475,8 +409,7 @@ const server = http.createServer(async (req, res) => {
     }
     // 构建/刷新引用图（抓 S2 参考文献，较慢；NDJSON 进度）
     if (p === '/api/cite-build' && req.method === 'POST') {
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       let out = ''; const ch = spawnAgent(['citegraph']);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
       ch.stdout.on('data', d => out += d.toString());
@@ -486,47 +419,21 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/settings' && req.method === 'GET') {
       const s = readSettings(), e = readEnv();
-      return send(res, 200, JSON.stringify({
-        provider: s.provider || e.LLM_PROVIDER || 'deepseek',
-        baseUrl: s.baseUrl || e.LLM_BASE_URL || '',
-        model: s.model || e.LLM_MODEL || '',
-        apiKeyTail: maskKey(s.apiKey || e.LLM_API_KEY), hasApiKey: !!(s.apiKey || e.LLM_API_KEY),
-        s2KeyTail: maskKey(s.s2ApiKey), hasS2Key: !!s.s2ApiKey,
-        pdfDir: s.pdfDir || '',
-        explainerDir: s.explainerDir || '',
-        translationDir: s.translationDir || '',
-        defaultPdfDir: path.relative(ROOT, PDFS_DIR),
-        defaultExplainerDir: path.relative(ROOT, EXPLAINERS_DIR),
-        defaultTranslationDir: path.relative(ROOT, TRANSLATIONS_DIR),
-        resolvedPdfDir: settingDir(s, 'pdfDir', path.relative(ROOT, PDFS_DIR)),
-        resolvedExplainerDir: settingDir(s, 'explainerDir', path.relative(ROOT, EXPLAINERS_DIR)),
-        resolvedTranslationDir: settingDir(s, 'translationDir', path.relative(ROOT, TRANSLATIONS_DIR)),
-        researchTheme: s.researchTheme || '',
-        embedProvider: s.embedProvider || 'local',
-        embedApiBase: s.embedApiBase || '',
-        embedApiModel: s.embedApiModel || '',
-        embedKeyTail: maskKey(s.embedApiKey), hasEmbedKey: !!s.embedApiKey
-      }), MIME['.json']);
+      return send(res, 200, JSON.stringify(buildSettingsView({
+        root: ROOT,
+        settings: s,
+        env: e,
+        defaultDirs: {
+          pdfDir: PDFS_DIR,
+          explainerDir: EXPLAINERS_DIR,
+          translationDir: TRANSLATIONS_DIR,
+        },
+      })), MIME['.json']);
     }
     if (p === '/api/settings' && req.method === 'POST') {
       const b = JSON.parse(await readBody(req));
-      const s = readSettings();
-      if (b.provider) s.provider = b.provider;
-      if (b.baseUrl !== undefined) s.baseUrl = b.baseUrl;
-      if (b.model !== undefined) s.model = b.model;
-      if (b.apiKey) s.apiKey = b.apiKey;          // 非空才更新
-      if (b.s2ApiKey) s.s2ApiKey = b.s2ApiKey;
-      if (b.pdfDir !== undefined) s.pdfDir = b.pdfDir.trim();
-      if (b.explainerDir !== undefined) s.explainerDir = b.explainerDir.trim();
-      if (b.translationDir !== undefined) s.translationDir = b.translationDir.trim();
-      if (b.researchTheme !== undefined) s.researchTheme = b.researchTheme.trim();
-      if (b.embedProvider) s.embedProvider = b.embedProvider;
-      if (b.embedApiBase !== undefined) s.embedApiBase = b.embedApiBase.trim();
-      if (b.embedApiModel !== undefined) s.embedApiModel = b.embedApiModel.trim();
-      if (b.embedApiKey) s.embedApiKey = b.embedApiKey;          // 非空才更新
-      for (const key of ['pdfDir', 'explainerDir', 'translationDir']) {
-        if (s[key]) fs.mkdirSync(resolveDir(s[key]), { recursive: true });
-      }
+      const s = applySettingsUpdate(readSettings(), b);
+      ensureSettingsDirs(s, { root: ROOT });
       writeSettings(s);
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
@@ -572,8 +479,7 @@ const server = http.createServer(async (req, res) => {
       const cands = Array.isArray(b.candidates) ? b.candidates : [];
       if (!jobId || !cands.length) return send(res, 400, JSON.stringify({ ok: false, error: '缺少任务或候选' }), MIME['.json']);
       const cids = cands.map(c => c._cid).filter(Boolean);
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
-      const emit = (o) => res.write(JSON.stringify(o) + '\n');
+      const emit = startNdjson(res);
       const args = ['ingest-selected']; if (b.deep) args.push('--deep'); if (b.downloadPdf === false) args.push('--no-pdf');
       let added = 0; const ch = spawnAgent(args);
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => { if (!l.trim()) return; const m = /^INGESTED::(\d+)/.exec(l); if (m) added = +m[1]; emit({ type: 'progress', line: l }); }));

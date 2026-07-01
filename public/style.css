@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    论文精读 · 现代简约 / 暖中性 + 赤陶强调
    字体: Schibsted Grotesk(UI) · IBM Plex Mono(数据) · Fraunces(大号数字)
    ============================================================ */
@@ -1109,4 +1109,122 @@ html[data-theme=light] .viewnav button:hover{
 @media(max-width:860px){
   #search{min-width:170px}
   .progress-wrap{display:none}
+}
+
+@media(max-width:700px){
+  body{min-width:0}
+  #rail{
+    width:58px;
+    padding:12px 6px;
+  }
+  .rail-brand .logo{
+    width:38px;
+    height:38px;
+  }
+  .nav-tx{display:none}
+  .viewnav button{
+    min-height:50px;
+    padding:8px 2px;
+  }
+  #shell{
+    width:calc(100vw - 58px);
+    min-width:0;
+    max-width:calc(100vw - 58px);
+    overflow:hidden;
+  }
+  #viewstack,#home,.dash,.chart-card{
+    width:100%;
+    min-width:0;
+    max-width:100%;
+  }
+  #topbar{
+    height:68px;
+    padding:9px 10px;
+    gap:8px;
+    overflow:hidden;
+  }
+  .brand{display:none}
+  .filters{
+    flex:1 1 auto;
+    min-width:0;
+    overflow-x:auto;
+    overflow-y:hidden;
+    gap:6px;
+    padding:0 0 4px;
+    margin:0;
+    scrollbar-width:none;
+  }
+  .filters::-webkit-scrollbar{display:none}
+  .search-box{
+    flex:0 0 172px;
+  }
+  #search{
+    min-width:0;
+    width:172px;
+    height:38px;
+  }
+  #search:focus{
+    width:172px;
+  }
+  #yearFilters,.chips{
+    display:flex;
+    flex-wrap:nowrap;
+    gap:6px;
+  }
+  .chip-btn,.year-select{
+    flex:0 0 auto;
+    height:38px;
+    padding-inline:10px;
+  }
+  #home,#manage,#jobs,#insights{
+    padding:16px 24px 34px 14px;
+    overflow-x:hidden;
+  }
+  .page-head{
+    margin-bottom:14px;
+  }
+  .dash{
+    grid-template-columns:minmax(0,1fr);
+    grid-template-areas:"kpi" "prog" "venue" "dir";
+    gap:12px;
+  }
+  .chart-card{
+    min-width:0;
+    width:100%;
+    max-width:100%;
+    overflow:hidden;
+  }
+  .chart-card.kpi{
+    min-height:270px;
+  }
+  .kpi-rows>div{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:4px;
+  }
+  .kpi-rows b{
+    align-self:flex-start;
+  }
+  .echart{
+    min-width:0;
+    max-width:100%;
+  }
+  .echart canvas{
+    max-width:100%!important;
+  }
+  .table-card,.ingest-bar,.lib-card,.ebatch{
+    max-width:100%;
+  }
+  .donut-wrap{
+    flex-direction:column;
+    align-items:center;
+    gap:12px;
+  }
+  .legend{
+    width:100%;
+    min-width:94px;
+  }
+  .legend-item{
+    width:100%;
+  }
 }

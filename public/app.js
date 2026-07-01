@@ -85,7 +85,7 @@ let pdfDoc = null, baseW = 600, zoomFactor = 1, renderToken = 0, io = null;
 init();
 async function init() {
   PAPERS = normPapers(await (await fetch('/api/papers')).json());
-  applyTheme(localStorage.getItem('theme') || 'dark');
+  applyTheme(localStorage.getItem('theme') || 'light');
   if (localStorage.getItem('hide-left') === '1') $('#layout').classList.add('hide-left');
   if (localStorage.getItem('hide-right') === '1') $('#layout').classList.add('hide-right');
   buildYearFilters();
@@ -97,7 +97,15 @@ async function init() {
   initResizers();
   showView('home');
 }
-function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = $('#themeBtn'); if (b) b.textContent = t === 'dark' ? '☀️' : '🌙'; localStorage.setItem('theme', t); }
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  const b = $('#themeBtn');
+  if (b) {
+    b.textContent = t === 'dark' ? 'Light' : 'Dark';
+    b.setAttribute('aria-label', t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+  }
+  localStorage.setItem('theme', t);
+}
 function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); renderHome(); if (currentView === 'insights') renderInsights(); }
 function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); localStorage.setItem(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
 const MIN_VIEWER = 320; // 中间 PDF 区最小宽度，任何时候都保留
@@ -296,20 +304,24 @@ function updateCharts(d) {
   if (!window.echarts || !chProgress) return;
   const text = cssVar('--ink'), t2 = cssVar('--ink-2'), t3 = cssVar('--ink-3');
   const surf = cssVar('--surface'), ok = cssVar('--ok'), warn = cssVar('--warn'), idle = cssVar('--idle');
+  const compact = window.innerWidth < 700;
   chProgress.setOption({
     animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
     title: {
-      text: d.pct + '%', subtext: '已理解', left: '33%', top: 'center', textAlign: 'center', itemGap: 4,
+      text: d.pct + '%', subtext: '已理解', left: compact ? '50%' : '33%', top: compact ? '38%' : 'center', textAlign: 'center', itemGap: 4,
       textStyle: { fontSize: 26, fontWeight: 700, color: text }, subtextStyle: { fontSize: 10.5, color: t3 }
     },
     tooltip: { trigger: 'item', formatter: '{b}：{c} 篇 ({d}%)' },
     legend: {
-      orient: 'vertical', right: '4%', top: 'center', itemWidth: 9, itemHeight: 9, itemGap: 13,
+      orient: compact ? 'horizontal' : 'vertical',
+      right: compact ? 'center' : '4%',
+      top: compact ? '78%' : 'center',
+      itemWidth: 9, itemHeight: 9, itemGap: compact ? 10 : 13,
       icon: 'roundRect', textStyle: { color: t2, fontSize: 11.5 },
       formatter: (name) => { const m = { '已理解': d.done, '学习中': d.ing, '未开始': d.idle }; return `${name}  ${m[name] || 0}`; }
     },
     series: [{
-      type: 'pie', radius: ['56%', '80%'], center: ['33%', '50%'], avoidLabelOverlap: false,
+      type: 'pie', radius: compact ? ['45%', '68%'] : ['56%', '80%'], center: compact ? ['50%', '38%'] : ['33%', '50%'], avoidLabelOverlap: false,
       itemStyle: { borderColor: surf, borderWidth: 2, borderRadius: 5 },
       label: { show: false }, labelLine: { show: false }, emphasis: { scale: true, scaleSize: 5 },
       data: [
@@ -333,14 +345,14 @@ function topGroups(list, keyFn, max = 7) {
   const cap = literalOther ? max - 1 : max;
   let merged = [];
   if (entries.length > cap) { merged = entries.slice(cap - 1); entries = entries.slice(0, cap - 1); }
-  const palette = ['#5b54e6', '#0ea371', '#11a8c4', '#e0902a', '#8b5cf6', '#6b7f99', '#e0607f'];
+  const palette = ['#256f8f', '#2e9a92', '#4f84a2', '#c4882f', '#6c8798', '#7d8fa0', '#b36b7c'];
   const out = entries.map(([name, value], i) => ({ name, value, color: palette[i % palette.length] }));
   const otherTotal = literalOther + merged.reduce((s, [, v]) => s + v, 0);
   if (otherTotal) {
     const breakdown = merged.map(([name, value]) => ({ name, value }));
     if (literalOther) breakdown.push({ name: '（未细分）', value: literalOther });
     breakdown.sort((a, b) => b.value - a.value);
-    out.push({ name: '其他', value: otherTotal, color: '#9aa1b5', breakdown });
+    out.push({ name: '其他', value: otherTotal, color: '#8fa3ad', breakdown });
   }
   return out;
 }
@@ -1178,7 +1190,7 @@ function bindUI() {
   $('#favFilter').onclick = toggleFavFilter;
   $('#zoomIn').onclick = () => setZoom(zoomFactor + 0.15);
   $('#zoomOut').onclick = () => setZoom(zoomFactor - 0.15);
-  { const ps = $('#pdfScroll'); if (ps) { ps.addEventListener('mouseup', onPdfMouseUp); ps.addEventListener('scroll', hideSelUI, { passive: true }); } }
+  { const ps = $('#pdfScroll'); if (ps) { ps.addEventListener('mouseup', onPdfMouseUp); ps.addEventListener('scroll', hideSelBubble, { passive: true }); } }
   document.addEventListener('mousedown', (e) => {     // 点选区气泡/弹窗/合并条以外 → 收起划词翻译
     if (selBubbleEl && selBubbleEl.contains(e.target)) return;
     if (selPopEl && selPopEl.contains(e.target)) return;

@@ -1,14 +1,14 @@
 """本地 PDF 批量导入：扫描得到的 PDF → 抽首页 → LLM 解析书目 →（可选 S2 补全）→ 分类 → 入库。
 
 文件路径从 stdin 读（JSON 数组）；进度 → stderr，统计结果 → stdout。
-**PDF 原地引用**（pdf_path 指向原文件，不复制），server 的 resolvePdfById 支持绝对路径。"""
+PDF 会复制/移动进项目 PDF 目录，并按论文标题命名。"""
 import json
 import os
 import sys
 import difflib
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from . import db, llm, util, config, extract
+from . import db, llm, util, config, extract, pdf_files
 from .models import PaperStub
 
 
@@ -95,10 +95,13 @@ def import_pdfs(paths, enrich=True, workers=4):
     # 2) 串行 分类 + 入库（分类沿用库中已有类别，本批新建即时并入 → 自我收敛）
     added, dup, failed = 0, 0, 0
     for pth, stub in prepped:
-        abspath = str(Path(pth).resolve())
+        source_pdf = Path(pth).resolve()
+        abspath = str(source_pdf)
         tn = db.title_norm(stub.title)
+        slug = util.make_slug(stub)
+        dest = pdf_files.unique_pdf_path(config.PDF_DIR, stub.title, paper_id=slug, source_path=source_pdf)
         # 已导入过同一个文件（pdf_path 命中）也算重复 → 重复扫描同一文件夹时幂等
-        if con.execute("SELECT 1 FROM papers WHERE pdf_path=?", (abspath,)).fetchone() \
+        if con.execute("SELECT 1 FROM papers WHERE pdf_path IN (?,?)", (abspath, str(dest))).fetchone() \
                 or db.exists(con, arxiv_id=stub.arxiv_id, title_norm_v=tn):
             dup += 1
             _p(f"DUP::{stub.title[:46]}")
@@ -109,7 +112,7 @@ def import_pdfs(paths, enrich=True, workers=4):
                 kt.append(attrs.type)
             if attrs.topic and attrs.topic not in kp:
                 kp.append(attrs.topic)
-            slug = util.make_slug(stub)
+            archived_pdf = pdf_files.archive_pdf(source_pdf, stub.title, slug, config.PDF_DIR)
             row = {
                 "id": slug, "source": "localpdf", "source_id": stub.source_id,
                 "arxiv_id": stub.arxiv_id, "doi": stub.doi, "s2_id": stub.s2_id,
@@ -119,7 +122,7 @@ def import_pdfs(paths, enrich=True, workers=4):
                 "tldr": stub.tldr or attrs.tldr, "citations": stub.citations,
                 "s2_fields": json.dumps(stub.fields, ensure_ascii=False),
                 "url": stub.url, "pdf_url": stub.pdf_url,
-                "pdf_path": abspath,                         # 原地引用，不复制
+                "pdf_path": str(archived_pdf),
                 "type": attrs.type, "topic": attrs.topic, "task": attrs.task,
                 "models": json.dumps(attrs.models, ensure_ascii=False),
                 "datasets": json.dumps(attrs.datasets, ensure_ascii=False),
