@@ -111,3 +111,95 @@ test('creating a review plan uses startedAt when provided', () => {
   assert.equal(plan.next_due_at, '2026-07-01');
   assert.equal(plan.updated_at, '2026-07-10');
 });
+
+test('completing the first review step advances the due date by one day', () => {
+  const db = memoryDb();
+  const store = createReviewStore(db);
+  store.ensureReviewPlan('p1', {
+    now: '2026-07-01T09:00:00',
+    startedAt: '2026-07-01T09:00:00'
+  });
+
+  const row = store.completeReviewStep('p1', { now: '2026-07-01T20:00:00' });
+
+  assert.equal(row.paper_id, 'p1');
+  assert.equal(row.started_at, '2026-07-01');
+  assert.equal(row.completed_steps, 1);
+  assert.equal(row.current_step, 2);
+  assert.equal(row.next_due_at, '2026-07-02');
+  assert.equal(row.completed_at, null);
+  assert.equal(row.updated_at, '2026-07-01');
+});
+
+test('completing all seven review steps marks the plan complete at step seven', () => {
+  const db = memoryDb();
+  const store = createReviewStore(db);
+  store.ensureReviewPlan('p1', {
+    now: '2026-07-01T09:00:00',
+    startedAt: '2026-07-01T09:00:00'
+  });
+
+  let row = null;
+  for (let i = 0; i < 7; i += 1) {
+    row = store.completeReviewStep('p1', { now: `2026-08-0${i + 1}T10:00:00` });
+  }
+  const afterCompleted = store.completeReviewStep('p1', { now: '2026-09-01T10:00:00' });
+
+  assert.equal(row.completed_steps, 7);
+  assert.equal(row.current_step, 7);
+  assert.equal(row.next_due_at, '2026-07-31');
+  assert.equal(row.completed_at, '2026-08-07');
+  assert.deepEqual(afterCompleted, row);
+});
+
+test('completing a review step returns null when no plan exists', () => {
+  const db = memoryDb();
+  const store = createReviewStore(db);
+
+  const row = store.completeReviewStep('p1', { now: '2026-07-01T10:00:00' });
+
+  assert.equal(row, null);
+});
+
+test('listReviewItems groups review plans and joins paper progress', () => {
+  const db = memoryDb();
+  db.prepare("INSERT INTO papers(id,title,venue,year) VALUES('p3','Paper Three','ICML','2025')").run();
+  db.prepare("INSERT INTO papers(id,title,venue,year) VALUES('p4','Paper Four','NeurIPS','2026')").run();
+  db.prepare("INSERT INTO progress(paper_id,status,updated_at) VALUES('p1','学习中','2026-06-30')").run();
+  db.prepare("INSERT INTO progress(paper_id,status,updated_at) VALUES('p3','已理解','2026-07-01')").run();
+  db.prepare(`
+    INSERT INTO paper_reviews(
+      paper_id, started_at, current_step, completed_steps, next_due_at, completed_at, updated_at
+    ) VALUES
+      ('p1', '2026-06-25', 4, 3, '2026-06-29', NULL, '2026-06-29'),
+      ('p2', '2026-07-01', 1, 0, '2026-07-01', NULL, '2026-07-01'),
+      ('p3', '2026-07-01', 2, 1, '2026-07-02', NULL, '2026-07-01'),
+      ('p4', '2026-06-01', 7, 7, '2026-07-01', '2026-07-01', '2026-07-01')
+  `).run();
+  const store = createReviewStore(db);
+
+  const list = store.listReviewItems({ now: '2026-07-01T18:00:00' });
+
+  assert.equal(list.today, '2026-07-01');
+  assert.deepEqual(list.counts, {
+    overdue: 1,
+    dueToday: 1,
+    upcoming: 1,
+    completed: 1
+  });
+  assert.deepEqual(list.overdue.map((item) => item.paper_id), ['p1']);
+  assert.deepEqual(list.dueToday.map((item) => item.paper_id), ['p2']);
+  assert.deepEqual(list.upcoming.map((item) => item.paper_id), ['p3']);
+  assert.deepEqual(list.completed.map((item) => item.paper_id), ['p4']);
+  assert.equal(list.overdue[0].title, 'Paper One');
+  assert.equal(list.overdue[0].venue, 'ACL');
+  assert.equal(list.overdue[0].year, '2023');
+  assert.equal(list.overdue[0].status, '学习中');
+  assert.equal(list.dueToday[0].status, '未开始');
+  assert.equal(list.upcoming[0].status, '已理解');
+  assert.equal(list.overdue[0].review_state, 'overdue');
+  assert.equal(list.dueToday[0].review_state, 'dueToday');
+  assert.equal(list.upcoming[0].review_state, 'upcoming');
+  assert.equal(list.completed[0].review_state, 'completed');
+  assert.equal(list.overdue[0].total_steps, 7);
+});
