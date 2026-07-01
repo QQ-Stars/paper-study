@@ -101,6 +101,25 @@ const server = http.createServer(async (req, res) => {
       for (const r of rows) r.hasPdf = artifactLocator.hasPdfForRow(r);
       return send(res, 200, JSON.stringify(rows), MIME['.json']);
     }
+    if (p === '/api/reviews' && req.method === 'GET') {
+      return send(res, 200, JSON.stringify({ ok: true, ...dbapi.listReviewItems() }), MIME['.json']);
+    }
+    if (p === '/api/reviews/start' && req.method === 'POST') {
+      const b = JSON.parse((await readBody(req)) || '{}');
+      const id = safeBase(b.id);
+      if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }), MIME['.json']);
+      const plan = dbapi.ensureReviewPlan(id);
+      if (!plan) return send(res, 404, JSON.stringify({ ok: false, error: '论文不存在' }), MIME['.json']);
+      return send(res, 200, JSON.stringify({ ok: true, plan }), MIME['.json']);
+    }
+    if (p === '/api/reviews/complete' && req.method === 'POST') {
+      const b = JSON.parse((await readBody(req)) || '{}');
+      const id = safeBase(b.id);
+      if (!id) return send(res, 400, JSON.stringify({ ok: false, error: '缺少 id' }), MIME['.json']);
+      const plan = dbapi.completeReviewStep(id);
+      if (!plan) return send(res, 404, JSON.stringify({ ok: false, error: '尚未加入复习计划' }), MIME['.json']);
+      return send(res, 200, JSON.stringify({ ok: true, plan, reviews: dbapi.listReviewItems() }), MIME['.json']);
+    }
     if (p === '/api/note' && req.method === 'GET') {
       return send(res, 200, dbapi.getNote(safeBase(u.searchParams.get('id'))), MIME['.md']);
     }
