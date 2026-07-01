@@ -186,7 +186,7 @@ docker compose down               # 停止
 
 ## 七、MCP 服务（可选）
 
-将论文库以 [MCP](https://modelcontextprotocol.io) 工具形式暴露给 **Claude Code / Claude Desktop**，即可在对话中直接检索文献、阅读讲解与属性、进行综述与研究空白分析。该服务只读数据库，采用 stdio 传输。
+将论文库以 [MCP](https://modelcontextprotocol.io) 工具形式暴露给 **Codex / Claude Code / Claude Desktop**，即可在对话中直接检索文献、阅读讲解与属性、查看复习队列、进行综述与研究空白分析。该服务只读数据库，采用 stdio 传输。
 
 > 下列命令中的 **`<项目路径>`** 需替换为**本机 `paper-study` 文件夹的完整路径**。
 > 查询路径：在该文件夹的终端中执行 `pwd`（macOS/Linux）或 `(Get-Location).Path`（Windows PowerShell）。
@@ -211,9 +211,23 @@ claude mcp add paper-study -- <项目路径>/.venv/Scripts/python.exe <项目路
 }
 ```
 
-> macOS/Linux 将 `.venv/Scripts/python.exe` 替换为 `.venv/bin/python`。修改后需**新开一个 Claude 会话**方可生效。
+**或写入 Codex 的 `config.toml`：**
 
-**提供的工具（8 个）：**
+```toml
+[mcp_servers.paper_study]
+command = '<项目路径>\.venv\Scripts\python.exe'
+args = ['<项目路径>\agent\mcp_server.py']
+startup_timeout_sec = 180
+
+[mcp_servers.paper_study.env]
+PYTHONUTF8 = "1"
+PYTHONIOENCODING = "utf-8"
+DB_PATH = '<项目路径>\data\app.db'
+```
+
+> Windows 路径建议在 TOML 中使用单引号，避免反斜杠被当成转义字符。macOS/Linux 将 `.venv/Scripts/python.exe` 替换为 `.venv/bin/python`。修改后需**新开一个 Claude / Codex 会话**方可生效。
+
+**提供的工具（9 个）：**
 
 | 工具 | 作用 |
 |---|---|
@@ -221,11 +235,12 @@ claude mcp add paper-study -- <项目路径>/.venv/Scripts/python.exe <项目路
 | `semantic_search` | 自然语言语义检索（中文描述可直接匹配英文论文） |
 | `related_papers` | 库内与某篇语义相近的论文 |
 | `get_paper` | 单篇的**全部属性**（题录 + AI 分类 + 笔记 / 进度 / 收藏 + 有无讲解 / 翻译 / PDF） |
-| `get_explainer` / `get_translation` | 获取**讲解** / 中文翻译全文 |
+| `get_explainer` / `get_translation` | 分页获取**讲解** / 中文翻译正文，返回 `content`、`next_offset`、`total_chars` |
 | `list_categories` | 库中在用的方向 / 子主题 / 任务词表及计数 |
+| `list_due_reviews` | 按艾宾浩斯复习计划列出今天应复习和逾期论文 |
 | `library_overview` | 全库画像（方向 / 会议 / 年份分布），用于开题与空白分析 |
 
-示例：可指示 Claude「用 `library_overview` 查看库中论文最少的方向」，或「用 `search_papers` 找出 CVPR 2026 的物体幻觉缓解工作，逐篇 `get_explainer` 后归纳共性思路与尚未覆盖的方向」。
+示例：可指示 Codex / Claude「用 `library_overview` 查看库中论文最少的方向」，或「用 `search_papers` 找出 CVPR 2026 的物体幻觉缓解工作，逐篇 `get_explainer` 后归纳共性思路与尚未覆盖的方向」。需要继续读取长文时，使用上一次返回的 `next_offset` 再次调用 `get_explainer` 或 `get_translation`。
 
 ---
 

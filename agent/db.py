@@ -1,16 +1,30 @@
 """SQLite 读写（与 Node 共享同一个 app.db）。"""
 import sqlite3
 import re
+from pathlib import Path
 from . import config
+
+
+def _configure_connection(con, *, writable: bool):
+    con.row_factory = sqlite3.Row
+    if writable:
+        con.execute("PRAGMA journal_mode=WAL")
+    else:
+        con.execute("PRAGMA query_only=ON")
+    con.execute("PRAGMA foreign_keys=ON")
+    con.execute("PRAGMA busy_timeout=5000")
+    return con
 
 
 def connect():
     con = sqlite3.connect(config.DB_PATH)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    con.execute("PRAGMA busy_timeout=5000")
-    return con
+    return _configure_connection(con, writable=True)
+
+
+def connect_readonly():
+    db_path = Path(config.DB_PATH).expanduser().resolve()
+    con = sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)
+    return _configure_connection(con, writable=False)
 
 
 def title_norm(s: str) -> str:
