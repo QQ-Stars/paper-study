@@ -16,6 +16,7 @@ let sideQ = '', sideStatus = 'all', sideFav = false, sideYear = 'all';  // 阅�
 let currentView = 'home';
 let homeSort = { key: 'year', dir: 1 };
 let manageSrc = 'all';
+let reviewData = null;
 let chProgress = null, chDir = null, chVenue = null;
 let chTrend = null, chTree = null, chCited = null, chCite = null;  // 洞察：趋势面积 / 馆藏树图 / 被引 / 引用图
 
@@ -214,12 +215,14 @@ function showView(v) {
   currentView = v;
   document.querySelectorAll('.viewnav button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
   $('#home').classList.toggle('hidden', v !== 'home');
+  $('#review').classList.toggle('hidden', v !== 'review');
   $('#manage').classList.toggle('hidden', v !== 'manage');
   $('#insights').classList.toggle('hidden', v !== 'insights');
   $('#jobs').classList.toggle('hidden', v !== 'jobs');
   $('#layout').classList.toggle('hidden', v !== 'read');
   const tf = document.getElementById('topFilters'); if (tf) tf.classList.toggle('hidden', v !== 'home');
   if (v === 'home') { renderHome(); refreshExplainBatch(); }
+  if (v === 'review') loadReviews();
   if (v === 'manage') renderManage();
   if (v === 'insights') renderInsights();
   if (v === 'jobs') renderJobs(); else stopJobsPoll();
@@ -385,6 +388,128 @@ function barOption(items, t2, t3) {
     }]
   };
 }
+
+// ====== 复习：艾宾浩斯队列 ======
+function blankReviewData(error = '') {
+  return {
+    ok: !error,
+    error,
+    today: '',
+    counts: { overdue: 0, dueToday: 0, upcoming: 0, completed: 0 },
+    overdue: [],
+    dueToday: [],
+    upcoming: [],
+    completed: []
+  };
+}
+async function loadReviews(renderList = true) {
+  try {
+    const data = await (await fetch('/api/reviews')).json();
+    reviewData = data && data.counts ? data : blankReviewData('复习数据格式异常');
+  } catch (e) {
+    reviewData = blankReviewData(String(e));
+  }
+  if (renderList) renderReviews();
+  renderCurrentReviewStatus();
+  return reviewData;
+}
+function reviewItems(data = reviewData) {
+  const d = data || blankReviewData();
+  return [...(d.overdue || []), ...(d.dueToday || []), ...(d.upcoming || []), ...(d.completed || [])];
+}
+function currentReviewItem(id) {
+  if (!id || !reviewData) return null;
+  return reviewItems().find(item => item.paper_id === id) || null;
+}
+function dayIndex(day) {
+  const [y, m, d] = String(day || '').slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+}
+function dueText(item, today) {
+  if (!item) return '';
+  if (item.completed_at) return '已完成';
+  if (!today || !item.next_due_at) return item.next_due_at || '';
+  const due = dayIndex(item.next_due_at), now = dayIndex(today);
+  if (due == null || now == null) return item.next_due_at;
+  const diff = due - now;
+  if (diff < 0) return `已逾期 ${Math.abs(diff)} 天`;
+  if (diff === 0) return '今天';
+  return `${diff} 天后`;
+}
+function reviewIsActive(item) {
+  return item && !item.completed_at && (item.review_state === 'overdue' || item.review_state === 'dueToday');
+}
+function reviewCard(item, kind) {
+  const p = PAPERS.find(x => x.id === item.paper_id) || {};
+  const title = item.title || p.title || item.paper_id;
+  const venueYear = [item.venue || p.venue || '未标注', item.year || p.year || ''].filter(Boolean).join(' ');
+  const step = `${item.current_step || 1}/${item.total_steps || 7}`;
+  const active = reviewIsActive(item);
+  return `<div class="review-card ${kind}" data-id="${esc(item.paper_id)}">
+    <div class="review-main">
+      <div class="review-title">${esc(title)}</div>
+      <div class="review-meta"><span>${esc(venueYear)}</span><span>${esc(item.status || '未开始')}</span><span>第 ${step} 轮</span><span>${esc(dueText(item, reviewData && reviewData.today))}</span></div>
+    </div>
+    <div class="review-actions">
+      <button class="mini ghost review-open" data-id="${esc(item.paper_id)}">开始阅读</button>
+      ${active ? `<button class="mini primary review-done" data-id="${esc(item.paper_id)}">完成本轮</button>` : ''}
+    </div>
+  </div>`;
+}
+function renderReviews() {
+  const dash = $('#reviewDash'), list = $('#reviewList');
+  if (!dash || !list) return;
+  const d = reviewData || blankReviewData();
+  dash.innerHTML = [
+    ['今日到期', d.counts.dueToday || 0],
+    ['已逾期', d.counts.overdue || 0],
+    ['未来计划', d.counts.upcoming || 0],
+    ['已完成', d.counts.completed || 0]
+  ].map(([label, value]) => `<div class="review-stat"><b>${value}</b><span>${label}</span></div>`).join('');
+  const groups = [
+    ['overdue', '已逾期', d.overdue || []],
+    ['dueToday', '今日到期', d.dueToday || []],
+    ['upcoming', '未来计划', d.upcoming || []],
+    ['completed', '已完成', d.completed || []]
+  ];
+  list.innerHTML = (d.error ? `<div class="review-error">${esc(d.error)}</div>` : '') + groups.map(([kind, title, items]) => `
+    <div class="review-group ${kind}">
+      <div class="review-group-head"><span>${title}</span><b>${items.length}</b></div>
+      ${items.length ? items.map(item => reviewCard(item, kind)).join('') : '<div class="review-empty">这一组暂无论文。</div>'}
+    </div>
+  `).join('');
+  list.querySelectorAll('.review-open').forEach(btn => btn.onclick = () => openPaper(PAPERS.find(p => p.id === btn.dataset.id)));
+  list.querySelectorAll('.review-done').forEach(btn => btn.onclick = () => completeReview(btn.dataset.id));
+}
+function renderCurrentReviewStatus() {
+  const box = $('#reviewStatus');
+  if (!box) return;
+  const item = currentReviewItem(current && current.id);
+  box.classList.toggle('hidden', !item);
+  if (!item) { box.innerHTML = ''; return; }
+  const step = `${item.current_step || 1}/${item.total_steps || 7}`;
+  const active = reviewIsActive(item);
+  box.innerHTML = `<div class="review-status-main">
+    <span class="review-status-k">复习</span>
+    <span class="review-status-v">第 ${step} 轮 · ${esc(dueText(item, reviewData && reviewData.today))}</span>
+  </div>
+  ${active ? `<button class="mini primary" data-review-done="${esc(item.paper_id)}">完成本轮</button>` : ''}`;
+  const btn = box.querySelector('[data-review-done]');
+  if (btn) btn.onclick = () => completeReview(btn.dataset.reviewDone);
+}
+async function completeReview(id) {
+  const r = await (await fetch('/api/reviews/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id })
+  })).json();
+  if (!r.ok) { alert(r.error || '复习更新失败'); return; }
+  reviewData = r.reviews || await (await fetch('/api/reviews')).json();
+  renderReviews();
+  renderCurrentReviewStatus();
+}
+
 // ====== 洞察：研究趋势(堆叠面积) + 馆藏构成(树图) + 被引Top10 + 引用关系图 ======
 function buildInsightsShell() {
   if (chCite || !window.echarts) return;
@@ -635,6 +760,7 @@ async function openPaper(p) {
   $('#pdfOpen').href = p.pdf_url || ('/papers/' + encodeURIComponent(p.file));
   setStatusUI(p.status || '未开始');
   setFavoriteUI(p);
+  if (reviewData) renderCurrentReviewStatus(); else loadReviews(false);
   // 讲解
   const ex = await (await fetch('/api/explainer?id=' + encodeURIComponent(p.id))).text();
   setExplainer(ex);
@@ -995,16 +1121,21 @@ function renderMergeBar() {
   mergeBarEl.querySelector('.sel-merge-clr').onclick = clearMerge;
 }
 function positionPopupAt(rect) {
-  const pw = 340; selPopEl.style.width = pw + 'px';
-  selPopEl.style.left = Math.max(8, Math.min(rect.left, innerWidth - pw - 8)) + 'px';
-  if (rect.bottom > innerHeight * 0.55) { selPopEl.style.top = 'auto'; selPopEl.style.bottom = (innerHeight - rect.top + 8) + 'px'; }
-  else { selPopEl.style.bottom = 'auto'; selPopEl.style.top = (rect.bottom + 8) + 'px'; }
+  const calc = window.SelectionPopover && window.SelectionPopover.calculatePopupLayout;
+  const layout = calc
+    ? calc(rect, { width: innerWidth, height: innerHeight }, { width: 420, margin: 8, gap: 8, maxHeightRatio: 0.72 })
+    : { left: Math.max(8, Math.min(rect.left, innerWidth - 348)), top: rect.bottom + 8, bottom: 'auto', width: 340, maxHeight: Math.floor(innerHeight * 0.56) };
+  selPopEl.style.width = layout.width + 'px';
+  selPopEl.style.maxHeight = layout.maxHeight + 'px';
+  selPopEl.style.left = layout.left + 'px';
+  selPopEl.style.top = layout.top === 'auto' ? 'auto' : layout.top + 'px';
+  selPopEl.style.bottom = layout.bottom === 'auto' ? 'auto' : layout.bottom + 'px';
 }
 async function doTranslate(text, rect) {
   ensureSelEls();
   text = (text || '').trim(); if (!text) return;
   positionPopupAt(rect || { left: innerWidth / 2 - 170, top: 80, bottom: 120 });
-  selPopEl.style.display = 'block';
+  selPopEl.style.display = 'flex';
   const srcHtml = `<div class="sel-pop-src">${esc(text.length > 180 ? text.slice(0, 180) + '…' : text)}</div>`;
   selPopEl.innerHTML = srcHtml + '<div class="sel-pop-body"><span class="sel-spin"></span>翻译中…</div>';
   try {
@@ -1285,6 +1416,8 @@ async function saveStatus(status) {
   current.status = status;
   const p = PAPERS.find(x => x.id === current.id); if (p) p.status = status;
   renderSidebar();
+  if (status === '已理解' || reviewData) await loadReviews(currentView === 'review');
+  else renderCurrentReviewStatus();
 }
 
 // ====== 管理页 ======

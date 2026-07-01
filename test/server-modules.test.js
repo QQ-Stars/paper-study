@@ -22,6 +22,7 @@ const {
 } = require('../lib/artifacts');
 const { createAgentRunner, createAgentEnv, resolvePythonExecutable } = require('../lib/agent-runner');
 const { readBody, safeBase, send, startNdjson } = require('../lib/http');
+const { calculatePopupLayout } = require('../public/selection-popover');
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'study-app-'));
@@ -270,6 +271,35 @@ test('PDF archive plan copies external files and moves project-local PDFs into t
   });
   assert.equal(localPlan.action, 'move');
   assert.equal(localPlan.targetPath, path.join(pdfDir, 'Local Paper.pdf'));
+});
+
+test('selection translation popup fits above lower-half selections without viewport clipping', () => {
+  const layout = calculatePopupLayout(
+    { left: 520, top: 520, bottom: 560 },
+    { width: 1280, height: 720 },
+    { width: 420, margin: 8, gap: 8, maxHeightRatio: 0.72 }
+  );
+
+  assert.equal(layout.placement, 'above');
+  assert.equal(layout.width, 420);
+  assert.equal(layout.bottom, 208);
+  assert.ok(layout.left >= 8);
+  assert.ok(layout.maxHeight <= 504);
+  assert.ok(720 - layout.bottom - layout.maxHeight >= 8);
+});
+
+test('selection translation popup clamps width and uses below placement when there is room', () => {
+  const layout = calculatePopupLayout(
+    { left: 12, top: 80, bottom: 120 },
+    { width: 360, height: 720 },
+    { width: 420, margin: 8, gap: 8, maxHeightRatio: 0.72 }
+  );
+
+  assert.equal(layout.placement, 'below');
+  assert.equal(layout.width, 344);
+  assert.equal(layout.left, 8);
+  assert.equal(layout.top, 128);
+  assert.ok(layout.maxHeight <= 584);
 });
 
 test('agent runner resolves python executable and spawns agent module with UTF-8 env', () => {
