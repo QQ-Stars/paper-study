@@ -13,6 +13,9 @@ data
 .gitignore
 .github
 .claude
+.agents
+.codex
+.codegraph
 .vscode
 **/__pycache__
 *.pyc
