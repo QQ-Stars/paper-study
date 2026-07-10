@@ -13,12 +13,22 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      - ./data:/app/data           # 论文库 app.db / pdfs / settings.json（含 LLM / S2 / 嵌入 key）
+      - ./data:/app/data           # 论文库 app.db / pdfs / explainers / translations / settings.json
       - ./.models:/app/.models     # 本地嵌入模型缓存（用外部 bge-m3 API 时可为空）
     environment:
       - PORT=5173
+      - DB_PATH=/app/data/app.db
+      - PYTHONUTF8=1
+      - PYTHONIOENCODING=utf-8
+      - HF_HOME=/app/.models/hf
       # 也可改用环境变量配置密钥（data/settings.json 优先级更高）：
       # - LLM_API_KEY=
       # - S2_API_KEY=
       # - EMBED_API_KEY=
+    healthcheck:
+      test: ["CMD", "node", "-e", "const port=process.env.PORT||5173; fetch('http://127.0.0.1:'+port).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     restart: unless-stopped

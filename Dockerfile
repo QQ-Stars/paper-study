@@ -25,8 +25,15 @@ RUN python3 -m venv .venv \
 COPY . .
 
 # 运行期产物目录兜底（未挂卷时也能启动；挂了卷则被卷覆盖）
-RUN mkdir -p data .models
+RUN mkdir -p data/pdfs data/explainers data/translations .models/hf
 
-ENV PORT=5173 PYTHONUNBUFFERED=1 PYTHONUTF8=1
+ENV PORT=5173 \
+    DB_PATH=/app/data/app.db \
+    PYTHONUNBUFFERED=1 \
+    PYTHONUTF8=1 \
+    PYTHONIOENCODING=utf-8 \
+    HF_HOME=/app/.models/hf
 EXPOSE 5173
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "const port=process.env.PORT||5173; fetch('http://127.0.0.1:'+port).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "server.js"]
