@@ -408,6 +408,41 @@ html[data-theme=dark] .v-NeurIPS{
   font-size:12.8px;
   font-weight:640;
 }
+.paper-title-stack{
+  display:flex;
+  min-width:0;
+  flex-direction:column;
+  gap:2px;
+}
+.paper-title-primary{
+  min-width:0;
+  color:inherit;
+  font:inherit;
+  line-height:inherit;
+}
+.paper-title-secondary{
+  min-width:0;
+  color:var(--ink-3);
+  font-size:.86em;
+  font-weight:500;
+  line-height:1.35;
+}
+.ht-title .paper-title-stack,.m-item-title .paper-title-stack{
+  display:inline-flex;
+  vertical-align:middle;
+  max-width:100%;
+}
+.ht-title .paper-title-primary,.pi-title .paper-title-primary,.m-item-title .paper-title-primary{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.review-title .paper-title-secondary,.paper-title .paper-title-secondary{
+  margin-top:2px;
+}
+#homeTable tbody td.ht-title,.m-item-title{
+  white-space:normal;
+}
 
 #viewer{
   background:var(--pdf-stage);
