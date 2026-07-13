@@ -8,6 +8,7 @@ const dbapi = require('./db');
 const { createAgentRunner } = require('./lib/agent-runner');
 const { createArtifactLocator, scanPdfDirectory } = require('./lib/artifacts');
 const { MIME, readBody, safeBase, send, startNdjson } = require('./lib/http');
+const { createTitleTranslationService } = require('./lib/title-translations');
 const {
   applySettingsUpdate,
   buildSettingsView,
@@ -69,6 +70,10 @@ async function llmChat(messages, { temperature = 0.2, timeoutMs = 60000 } = {}) 
     return ((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim();
   } finally { clearTimeout(timer); }
 }
+const titleTranslationService = createTitleTranslationService({
+  repository: dbapi,
+  chat: llmChat
+});
 // 划词翻译系统提示——与 agent/llm.py 的 TRANSLATE_SNIPPET_SYSTEM 保持一致（改一处记得两边同步）。
 const TRANSLATE_SNIPPET_SYSTEM =
   '你是专业的学术论文翻译。用户会给你一段从 PDF 里直接选取的英文文字' +
@@ -100,6 +105,28 @@ const server = http.createServer(async (req, res) => {
       // 标注 PDF 是否在本地：DB 记录的 pdf_path → 默认目录 → 自定义目录 → 种子目录
       for (const r of rows) r.hasPdf = artifactLocator.hasPdfForRow(r);
       return send(res, 200, JSON.stringify(rows), MIME['.json']);
+    }
+    if (p === '/api/title-translations' && req.method === 'GET') {
+      return send(res, 200, JSON.stringify({
+        ok: true,
+        pending: titleTranslationService.pendingCount()
+      }), MIME['.json']);
+    }
+    if (p === '/api/title-translations' && req.method === 'POST') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const emit = startNdjson(res);
+      let cancelled = false;
+      res.on('close', () => { if (!res.writableEnded) cancelled = true; });
+      const summary = await titleTranslationService.runBatch({
+        limit: body.limit,
+        isCancelled: () => cancelled,
+        onEvent: event => { if (!cancelled) emit(event); }
+      });
+      if (!cancelled) {
+        emit({ type: 'result', ok: true, summary });
+        res.end();
+      }
+      return;
     }
     if (p === '/api/reviews' && req.method === 'GET') {
       return send(res, 200, JSON.stringify({ ok: true, ...dbapi.listReviewItems() }), MIME['.json']);
