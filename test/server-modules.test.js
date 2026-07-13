@@ -23,6 +23,30 @@ const {
 const { createAgentRunner, createAgentEnv, resolvePythonExecutable } = require('../lib/agent-runner');
 const { readBody, safeBase, send, startNdjson } = require('../lib/http');
 const { calculatePopupLayout } = require('../public/selection-popover');
+const { searchableTitle, titleLines, titleMarkup } = require('../public/paper-titles');
+
+test('paper title helper keeps English primary, Chinese secondary, and searchable', () => {
+  const paper = {
+    title: 'Chain-of-Verification Reduces Hallucination',
+    title_zh: '验证链减少幻觉'
+  };
+
+  assert.deepEqual(titleLines(paper), {
+    primary: 'Chain-of-Verification Reduces Hallucination',
+    secondary: '验证链减少幻觉'
+  });
+  assert.match(searchableTitle(paper), /验证链减少幻觉/);
+  assert.match(titleMarkup(paper), /paper-title-secondary/);
+  assert.match(titleMarkup(paper), /验证链减少幻觉/);
+  assert.doesNotMatch(titleMarkup({ title: 'English Only' }), /paper-title-secondary/);
+});
+
+test('paper title helper escapes model and source text', () => {
+  const html = titleMarkup({ title: '<img src=x>', title_zh: '<script>中文</script>' });
+
+  assert.doesNotMatch(html, /<img|<script>/);
+  assert.match(html, /&lt;img/);
+});
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'study-app-'));

@@ -24,6 +24,8 @@ const $ = (s) => document.querySelector(s);
 const md = (t) => (window.marked ? window.marked.parse(t || '') :
   '<pre>' + (t || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) + '</pre>');
 const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const titleMarkup = (paper, classes) => window.PaperTitles.titleMarkup(paper, classes);
+const titleSearch = paper => window.PaperTitles.searchableTitle(paper);
 const normTitle = (s) => (s || '').toLowerCase().replace(/[^a-z0-9一-龥]+/g, '');  // 同 db.title_norm
 // 渲染 markdown 到元素，并用 KaTeX 把 $...$ / $$...$$ 公式排版出来（讲解/译文/笔记共用）。
 // 关键：必须先把公式抽成占位符再交给 marked，否则 marked 会把 LaTeX 里的 _ 当斜体、[..](..) 当链接，
@@ -263,7 +265,7 @@ function renderHome() {
   let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter) && (!favOnly || p.favorite));
   const sem = semActive && semRank;
   if (sem) list = list.filter(p => semRank.has(p.id));
-  else if (q) { const k = q.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(k)); }
+  else if (q) { const k = q.toLowerCase(); list = list.filter(p => (titleSearch(p) + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(k)); }
 
   // 表格（语义检索时按相似度排序，否则按列排序）
   if (sem) list.sort((a, b) => semRank.get(b.id) - semRank.get(a.id));
@@ -442,13 +444,13 @@ function reviewIsActive(item) {
 }
 function reviewCard(item, kind) {
   const p = PAPERS.find(x => x.id === item.paper_id) || {};
-  const title = item.title || p.title || item.paper_id;
-  const venueYear = [item.venue || p.venue || '未标注', item.year || p.year || ''].filter(Boolean).join(' ');
+  const paper = { ...p, ...item, title: item.title || p.title || item.paper_id };
+  const venueYear = [paper.venue || '未标注', paper.year || ''].filter(Boolean).join(' ');
   const step = `${item.current_step || 1}/${item.total_steps || 7}`;
   const active = reviewIsActive(item);
   return `<div class="review-card ${kind}" data-id="${esc(item.paper_id)}">
     <div class="review-main">
-      <div class="review-title">${esc(title)}</div>
+      <div class="review-title">${titleMarkup(paper)}</div>
       <div class="review-meta"><span>${esc(venueYear)}</span><span>${esc(item.status || '未开始')}</span><span>第 ${step} 轮</span><span>${esc(dueText(item, reviewData && reviewData.today))}</span></div>
     </div>
     <div class="review-actions">
@@ -685,7 +687,7 @@ function pdfBadge(has) { return has ? `<span class="pdf-flag" title="PDF 已在�
 function rowHTML(p, idx) {
   return `<tr data-id="${p.id}">
     <td><span class="ht-idx">${idx}</span></td>
-    <td class="ht-title" title="${esc(p.title)}">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${p.title}</td>
+    <td class="ht-title" title="${esc(titleSearch(p))}">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${titleMarkup(p)}</td>
     <td><span class="venue v-${p.venue}">${p.venue}</span></td>
     <td class="ht-ccf">${ccfBadge(p.ccf)}</td>
     <td class="ht-pdf">${pdfBadge(p.hasPdf)}</td>
@@ -707,7 +709,7 @@ function renderSidebar() {
   if (sideYear !== 'all') list = list.filter(p => p.year === sideYear);
   if (sideStatus !== 'all') list = list.filter(p => (p.status || '未开始') === sideStatus);
   if (sideFav) list = list.filter(p => p.favorite);
-  if (sideQ) { const k = sideQ.toLowerCase(); list = list.filter(p => (p.title + ' ' + p.venue + ' ' + (p.topic || '') + ' ' + (p.type || '')).toLowerCase().includes(k)); }
+  if (sideQ) { const k = sideQ.toLowerCase(); list = list.filter(p => (titleSearch(p) + ' ' + p.venue + ' ' + (p.topic || '') + ' ' + (p.type || '')).toLowerCase().includes(k)); }
   if (!list.length) {
     const e = document.createElement('div'); e.className = 'side-empty';
     e.textContent = sideFav && sideStatus === 'all' && sideYear === 'all' && !sideQ ? '还没有收藏的论文。' : '没有符合筛选条件的论文。';
@@ -743,7 +745,7 @@ function paperItem(p) {
   d.onclick = () => openPaper(p);
   const order = p.order ? `<span class="order-badge">${p.order}</span>` : '';
   d.innerHTML =
-    `<div class="pi-top">${order}<div class="pi-title">${p.title}</div><span class="fav-star ${p.favorite ? 'on' : ''}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span><span class="status-dot ${p.status}" title="${p.status}"></span></div>
+    `<div class="pi-top">${order}<div class="pi-title">${titleMarkup(p)}</div><span class="fav-star ${p.favorite ? 'on' : ''}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span><span class="status-dot ${p.status}" title="${p.status}"></span></div>
      <div class="pi-meta"><span class="venue v-${p.venue}">${p.venue} ${p.year}</span>${ccfBadge(p.ccf)}${pdfBadge(p.hasPdf)}<span class="dir">${p.type}${p.topic ? ' · ' + p.topic : ''}</span>${semScoreBadge(p.id)}</div>`;
   d.querySelector('.fav-star').onclick = (e) => { e.stopPropagation(); toggleFavorite(p.id); };
   return d;
@@ -755,7 +757,7 @@ async function openPaper(p) {
   current = p;
   showView('read');
   renderSidebar();
-  $('#paperTitle').textContent = `${p.title} — ${p.venue} ${p.year}`;
+  $('#paperTitle').innerHTML = titleMarkup({ ...p, title: `${p.title} — ${p.venue} ${p.year}` });
   $('#pdfDocTitle').textContent = `${p.title} · ${p.venue} ${p.year}`;
   $('#pdfOpen').href = p.pdf_url || ('/papers/' + encodeURIComponent(p.file));
   setStatusUI(p.status || '未开始');
@@ -1424,7 +1426,7 @@ async function saveStatus(status) {
 function renderManage() {
   let list = PAPERS.slice();
   const kw = (($('#mSearch') && $('#mSearch').value) || '').trim().toLowerCase();
-  if (kw) list = list.filter(p => (p.title + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(kw));
+  if (kw) list = list.filter(p => (titleSearch(p) + ' ' + p.venue + ' ' + p.type + ' ' + (p.topic || '')).toLowerCase().includes(kw));
   if (manageSrc === 'collected') list = list.filter(p => p.source !== 'seed');
   else if (manageSrc === 'seed') list = list.filter(p => p.source === 'seed');
   const sort = ($('#mSort') && $('#mSort').value) || 'added';
@@ -1446,7 +1448,7 @@ function renderManage() {
     return `<div class="m-item">
       <span class="mi-status status-dot ${p.status}" data-id="${p.id}" title="点击切换学习状态（当前：${p.status}）"></span>
       <div class="m-item-main" data-id="${p.id}">
-        <div class="m-item-title">${p.title}</div>
+        <div class="m-item-title">${titleMarkup(p)}</div>
         <div class="m-item-meta">${meta.join(' · ')}${p.source === 'manual' ? ' <span class="m-tag manual">手动</span>' : (p.source === 'localpdf' ? ' <span class="m-tag local">本地PDF</span>' : (p.source !== 'seed' ? ' <span class="m-tag">采集</span>' : ''))}</div>
       </div>
       <button class="m-fav ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</button>
