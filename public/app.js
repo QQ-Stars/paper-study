@@ -1431,11 +1431,13 @@ async function refreshTitleTranslationBatch() {
   const hint = $('#titleZhBatchHint');
   try {
     const result = await (await fetch('/api/title-translations')).json();
+    if (titleZhAbort) return;
     const pending = Number(result.pending) || 0;
     button.disabled = pending === 0;
     button.textContent = pending ? `生成中文题名 · ${pending}` : '中文题名已补全';
     hint.textContent = pending ? `待翻译 ${pending} 篇` : '';
   } catch (error) {
+    if (titleZhAbort) return;
     button.disabled = false;
     hint.textContent = '暂时无法读取待翻译数量';
   }
