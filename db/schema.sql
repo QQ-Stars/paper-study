@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS papers (
   s2_id        TEXT,
   openalex_id  TEXT,
   title        TEXT NOT NULL,
+  title_zh     TEXT,
   title_norm   TEXT,                      -- 归一化标题，用于模糊去重
   authors      TEXT,                      -- JSON 数组
   venue        TEXT,
