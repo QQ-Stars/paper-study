@@ -220,6 +220,8 @@
           <option value="title">标题</option>
         </select>
         <button id="manualAddBtn" class="mini primary lib-add" title="手动添加一篇论文（搜索为空时用）">✍️ 手动添加</button>
+        <button id="titleZhBatchBtn" class="mini" title="只为尚无中文题名的论文调用大模型">生成中文题名</button>
+        <span id="titleZhBatchHint" class="hint title-zh-batch-hint"></span>
       </div>
       <div id="mList" class="m-list"></div>
     </div>
@@ -231,6 +233,7 @@
         <div class="modal-body">
           <input type="hidden" id="pmId" />
           <label class="pm-field"><span>标题 <b class="req">*</b></span><input id="pmTitleI" placeholder="论文标题" /></label>
+          <label class="pm-field"><span>中文题名</span><input id="pmTitleZh" placeholder="可手动填写；留空可参加批量生成" /></label>
           <div class="pm-row">
             <label class="pm-field"><span>会议 / 来源</span><input id="pmVenue" placeholder="如 CVPR / ICLR / arXiv" /></label>
             <label class="pm-field sm"><span>年份</span><input id="pmYear" placeholder="2025" /></label>
