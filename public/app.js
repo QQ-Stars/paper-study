@@ -16,6 +16,7 @@ let sideQ = '', sideStatus = 'all', sideFav = false, sideYear = 'all';  // 阅�
 let currentView = 'home';
 let homeSort = { key: 'year', dir: 1 };
 let manageSrc = 'all';
+let titleZhAbort = null;
 let reviewData = null;
 let chProgress = null, chDir = null, chVenue = null;
 let chTrend = null, chTree = null, chCited = null, chCite = null;  // 洞察：趋势面积 / 馆藏树图 / 被引 / 引用图
@@ -225,7 +226,7 @@ function showView(v) {
   const tf = document.getElementById('topFilters'); if (tf) tf.classList.toggle('hidden', v !== 'home');
   if (v === 'home') { renderHome(); refreshExplainBatch(); }
   if (v === 'review') loadReviews();
-  if (v === 'manage') renderManage();
+  if (v === 'manage') { renderManage(); refreshTitleTranslationBatch(); }
   if (v === 'insights') renderInsights();
   if (v === 'jobs') renderJobs(); else stopJobsPoll();
   if (v === 'read' && !current) { $('#pdfScroll').innerHTML = EMPTY_HTML; }
@@ -1347,6 +1348,7 @@ function bindUI() {
   $('#mSearch').oninput = renderManage;
   $('#mSort').onchange = renderManage;
   $('#manualAddBtn').onclick = () => openPaperModal(null);
+  $('#titleZhBatchBtn').onclick = runTitleTranslationBatch;
   $('#pmClose').onclick = closePaperModal;
   $('#pmCancel').onclick = closePaperModal;
   $('#pmSave').onclick = savePaperModal;
@@ -1423,6 +1425,49 @@ async function saveStatus(status) {
 }
 
 // ====== 管理页 ======
+async function refreshTitleTranslationBatch() {
+  if (titleZhAbort) return;
+  const button = $('#titleZhBatchBtn');
+  const hint = $('#titleZhBatchHint');
+  try {
+    const result = await (await fetch('/api/title-translations')).json();
+    const pending = Number(result.pending) || 0;
+    button.disabled = pending === 0;
+    button.textContent = pending ? `生成中文题名 · ${pending}` : '中文题名已补全';
+    hint.textContent = pending ? `待翻译 ${pending} 篇` : '';
+  } catch (error) {
+    button.disabled = false;
+    hint.textContent = '暂时无法读取待翻译数量';
+  }
+}
+
+async function runTitleTranslationBatch() {
+  if (titleZhAbort) { titleZhAbort.abort(); return; }
+  const button = $('#titleZhBatchBtn');
+  const hint = $('#titleZhBatchHint');
+  const controller = new AbortController();
+  titleZhAbort = controller;
+  button.disabled = false;
+  button.textContent = '停止生成';
+  try {
+    await streamNDJSON('/api/title-translations', {}, event => {
+      if (event.type === 'progress' && event.stage === 'batch') hint.textContent = `共 ${event.total} 篇，逐篇翻译中`;
+      if (event.type === 'progress' && event.stage === 'item' && event.state === 'start') hint.textContent = `${event.index}/${event.total} · ${event.title}`;
+      if (event.type === 'progress' && event.stage === 'item' && event.state === 'failed') hint.textContent = `${event.index}/${event.total} · 本篇失败，继续处理`;
+      if (event.type === 'result') {
+        const summary = event.summary || {};
+        hint.textContent = `完成 ${summary.done || 0} · 失败 ${(summary.failed || []).length}`;
+      }
+    }, { signal: controller.signal });
+  } catch (error) {
+    hint.textContent = error && error.name === 'AbortError' ? '已停止，已生成的题名已保存' : `生成失败：${error}`;
+  } finally {
+    titleZhAbort = null;
+    await reloadPapers();
+    renderManage();
+  }
+}
+
 function renderManage() {
   let list = PAPERS.slice();
   const kw = (($('#mSearch') && $('#mSearch').value) || '').trim().toLowerCase();
@@ -1588,7 +1633,7 @@ async function reindexAll() {
 // ====== 手动添加 / 编辑论文 ======
 const MTYPES = ['检测', '缓解·解码', '缓解·训练', '机制', '评测', '定义', '其他'];
 const MTOPICS = ['知识-视觉冲突', '多图', '多物体', '通用物体', '语言先验', '其他'];
-const PM_FIELDS = { title: 'pmTitleI', venue: 'pmVenue', year: 'pmYear', url: 'pmUrl', pdf_url: 'pmPdfUrl', pdf_path: 'pmPdfPath', tldr: 'pmTldr', abstract: 'pmAbstract', contribution: 'pmContribution' };
+const PM_FIELDS = { title: 'pmTitleI', title_zh: 'pmTitleZh', venue: 'pmVenue', year: 'pmYear', url: 'pmUrl', pdf_url: 'pmPdfUrl', pdf_path: 'pmPdfPath', tldr: 'pmTldr', abstract: 'pmAbstract', contribution: 'pmContribution' };
 function fillSelect(sel, opts, val) { sel.innerHTML = opts.map(o => `<option ${o === val ? 'selected' : ''}>${o}</option>`).join(''); }
 async function openPaperModal(id) {
   $('#pmHint').textContent = '';
@@ -1630,8 +1675,8 @@ async function savePaperModal() {
 let candidates = [];
 const currentQueries = () => { try { return JSON.parse($('#ingQueryChips').dataset.qs || '[]'); } catch (e) { return []; } };
 
-async function streamNDJSON(url, body, onEvent) {
-  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+async function streamNDJSON(url, body, onEvent, options = {}) {
+  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: options.signal });
   if (!resp.body || !resp.body.getReader) { const j = await resp.json().catch(() => ({})); onEvent({ type: 'result', candidates: j.candidates || [] }); return; }
   const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
   for (; ;) {
@@ -1892,6 +1937,7 @@ async function reloadPapers() {
   buildSideYears();
   renderSidebar();
   renderHome();
+  if (currentView === 'manage') refreshTitleTranslationBatch();
 }
 
 // ====== 一键生成讲解（批量，逐篇通读本地 PDF 全文，与单篇「读PDF全文」逻辑一致）======

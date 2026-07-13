@@ -536,6 +536,13 @@ html[data-theme=dark] .pdf-page{
 .ingest-bar,.lib-card{
   padding:18px;
 }
+.title-zh-batch-hint{
+  max-width:260px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+#titleZhBatchBtn{flex:0 0 auto}
 .ib-title,.lib-title{
   font-size:14.5px;
   color:var(--ink);
@@ -600,4 +607,7 @@ html[data-theme=dark] .pdf-page{
 @media(max-width:860px){
   #search{min-width:170px}
   .progress-wrap{display:none}
+}
+@media(max-width:760px){
+  .title-zh-batch-hint{order:10;max-width:100%;width:100%}
 }
