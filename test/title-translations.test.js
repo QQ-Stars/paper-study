@@ -5,6 +5,11 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const test = require('node:test');
 
+const {
+  cleanTitleTranslation,
+  createTitleTranslationService
+} = require('../lib/title-translations');
+
 function loadIsolatedDb(dbPath) {
   const previous = process.env.DB_PATH;
   process.env.DB_PATH = dbPath;
@@ -64,4 +69,61 @@ test('title translation repository lists blanks and never overwrites an existing
     loaded.cleanup();
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('Chinese title cleaner accepts one academic title and rejects explanations', () => {
+  assert.equal(cleanTitleTranslation('“验证链减少大型语言模型幻觉”'), '验证链减少大型语言模型幻觉');
+  assert.equal(cleanTitleTranslation('中文标题：视觉变化缓解多模态大模型幻觉'), '视觉变化缓解多模态大模型幻觉');
+  assert.equal(cleanTitleTranslation('Translation only'), '');
+  assert.equal(cleanTitleTranslation('标题一\n补充说明'), '');
+});
+
+test('batch translation continues after one failure and persists only valid results', async () => {
+  const saved = [];
+  const events = [];
+  const repository = {
+    countMissingTitleTranslations: () => 3,
+    listMissingTitleTranslations: () => [
+      { id: 'p1', title: 'First Paper' },
+      { id: 'p2', title: 'Second Paper' },
+      { id: 'p3', title: 'Third Paper' }
+    ],
+    setTitleTranslationIfMissing(id, titleZh) { saved.push([id, titleZh]); return 1; }
+  };
+  const chat = async (_messages, _options) => {
+    const title = _messages.at(-1).content;
+    if (title === 'Second Paper') throw new Error('timeout');
+    return title === 'First Paper' ? '第一篇论文' : '第三篇论文';
+  };
+  const service = createTitleTranslationService({ repository, chat });
+
+  const summary = await service.runBatch({ onEvent: event => events.push(event) });
+
+  assert.deepEqual(saved, [['p1', '第一篇论文'], ['p3', '第三篇论文']]);
+  assert.equal(summary.total, 3);
+  assert.equal(summary.done, 2);
+  assert.equal(summary.failed.length, 1);
+  assert.equal(summary.failed[0].id, 'p2');
+  assert.ok(events.some(event => event.stage === 'item' && event.state === 'failed'));
+});
+
+test('batch translation stops before starting the next paper when cancelled', async () => {
+  let cancelled = false;
+  const saved = [];
+  const service = createTitleTranslationService({
+    repository: {
+      countMissingTitleTranslations: () => 2,
+      listMissingTitleTranslations: () => [
+        { id: 'p1', title: 'First Paper' },
+        { id: 'p2', title: 'Second Paper' }
+      ],
+      setTitleTranslationIfMissing(id, titleZh) { saved.push([id, titleZh]); cancelled = true; return 1; }
+    },
+    chat: async () => '中文题名'
+  });
+
+  const summary = await service.runBatch({ isCancelled: () => cancelled });
+
+  assert.equal(summary.cancelled, true);
+  assert.deepEqual(saved, [['p1', '中文题名']]);
 });
