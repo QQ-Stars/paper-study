@@ -21,6 +21,9 @@ for (const [col, ddl] of [['only_a', 'INTEGER DEFAULT 0'], ['queries', 'TEXT'], 
   if (!has) db.exec(`ALTER TABLE ingest_jobs ADD COLUMN ${col} ${ddl}`);
 }
 
+const titleZhColumn = db.prepare("SELECT 1 FROM pragma_table_info('papers') WHERE name = 'title_zh'").get();
+if (!titleZhColumn) db.exec('ALTER TABLE papers ADD COLUMN title_zh TEXT');
+
 const reviewStore = createReviewStore(db);
 reviewStore.backfillUnderstoodReviews();
 const { completeReviewStep, ensureReviewPlan, getReviewPlan, listReviewItems } = reviewStore;
@@ -64,7 +67,7 @@ const listPapers = () => {
   const rows = db.prepare(`
   SELECT p.id,
          p.id || '.pdf'              AS file,
-         p.title, p.venue, p.year, p.type, p.topic,
+         p.title, p.title_zh, p.venue, p.year, p.type, p.topic,
          p.pdf_url, p.pdf_path, p.url, p.tldr, p.contribution, p.citations, p.created_at, p.source,
          p.arxiv_id, p.doi, p.s2_id, p.openalex_id, p.relevance,
          p.order_no                  AS "order",
@@ -126,7 +129,7 @@ const getPdfPath = (id) => { const r = db.prepare('SELECT pdf_path FROM papers W
 // ---- 手动添加 / 编辑 ----
 const getPaper = (id) => db.prepare('SELECT * FROM papers WHERE id = ?').get(id);
 
-const EDITABLE = ['title', 'venue', 'year', 'type', 'topic', 'url', 'pdf_url', 'pdf_path', 'tldr', 'abstract', 'contribution', 'authors', 'relevance', 'order_no'];
+const EDITABLE = ['title', 'title_zh', 'venue', 'year', 'type', 'topic', 'url', 'pdf_url', 'pdf_path', 'tldr', 'abstract', 'contribution', 'authors', 'relevance', 'order_no'];
 
 const slugId = (title) => {
   const base = String(title || 'paper').toLowerCase()
@@ -139,10 +142,11 @@ const addPaper = (f) => {
   const id = slugId(f.title);
   const authors = Array.isArray(f.authors) ? JSON.stringify(f.authors) : (f.authors || null);
   db.prepare(`INSERT INTO papers
-    (id, source, title, venue, year, abstract, tldr, url, pdf_url, pdf_path, type, topic, contribution, authors, created_at, updated_at)
-    VALUES (@id,'manual',@title,@venue,@year,@abstract,@tldr,@url,@pdf_url,@pdf_path,@type,@topic,@contribution,@authors, datetime('now'), datetime('now'))`)
+    (id, source, title, title_zh, venue, year, abstract, tldr, url, pdf_url, pdf_path, type, topic, contribution, authors, created_at, updated_at)
+    VALUES (@id,'manual',@title,@title_zh,@venue,@year,@abstract,@tldr,@url,@pdf_url,@pdf_path,@type,@topic,@contribution,@authors, datetime('now'), datetime('now'))`)
     .run({
       id, title: String(f.title).trim(),
+      title_zh: f.title_zh ? String(f.title_zh).trim() : null,
       venue: normVenue(f.venue) || null, year: f.year ? String(f.year) : null,
       abstract: f.abstract || null, tldr: f.tldr || null,
       url: f.url || null, pdf_url: f.pdf_url || null, pdf_path: f.pdf_path || null,
@@ -227,9 +231,32 @@ const deleteSchedule = (id) => db.prepare('DELETE FROM job_schedules WHERE id=?'
 const dueSchedules = () => db.prepare(`SELECT * FROM job_schedules WHERE enabled=1 AND (next_run IS NULL OR next_run <= datetime('now'))`).all();
 const markScheduleRan = (id, everyDays) => db.prepare(`UPDATE job_schedules SET last_run=datetime('now'), next_run=datetime('now', ?) WHERE id=?`).run(`+${Math.max(1, parseInt(everyDays) || 7)} days`, id);
 
+const countMissingTitleTranslations = () => db.prepare(`
+  SELECT COUNT(*) AS count
+  FROM papers
+  WHERE TRIM(COALESCE(title, '')) <> ''
+    AND TRIM(COALESCE(title_zh, '')) = ''
+`).get().count;
+
+const listMissingTitleTranslations = (limit = 0) => {
+  const n = Math.max(0, Math.trunc(Number(limit) || 0));
+  const sql = `SELECT id, title FROM papers
+    WHERE TRIM(COALESCE(title, '')) <> ''
+      AND TRIM(COALESCE(title_zh, '')) = ''
+    ORDER BY created_at ASC, id ASC${n ? ' LIMIT ?' : ''}`;
+  return n ? db.prepare(sql).all(n) : db.prepare(sql).all();
+};
+
+const setTitleTranslationIfMissing = (id, titleZh) => db.prepare(`
+  UPDATE papers
+  SET title_zh = ?, updated_at = datetime('now')
+  WHERE id = ? AND TRIM(COALESCE(title_zh, '')) = ''
+`).run(String(titleZh || '').trim(), id).changes;
+
 module.exports = {
   db, listPapers, getExplainer, getTranslation, getNote, getCiteGraph, setNote, setStatus, setFavorite, deletePaper, getPdfPath, getPaper, addPaper, updatePaper,
   ensureReviewPlan, completeReviewStep, listReviewItems, getReviewPlan,
   createJob, listJobs, getJob, setJobStatus, appendJobLog, bumpJobAdded, deleteJob, listJobCandidates, markJobCandidates, markJobCandidateIds, closeJobIfEmpty, resetOrphanJobs,
-  listSchedules, createSchedule, toggleSchedule, deleteSchedule, dueSchedules, markScheduleRan
+  listSchedules, createSchedule, toggleSchedule, deleteSchedule, dueSchedules, markScheduleRan,
+  countMissingTitleTranslations, listMissingTitleTranslations, setTitleTranslationIfMissing
 };

@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 | id / source / source_id | 系统 | 唯一标识与溯源 |
 | arxiv_id / doi / title_norm | 系统 | **去重三件套** |
 | title/authors/venue/year/abstract/url/pdf_url | 数据源 | 原始元数据 |
+| title_zh | LLM/人工 | 可空的中文标题译文；原始英文 `title` 始终为权威来源 |
 | pdf_path | 系统 | 本地缓存 PDF |
 | type/topic/task/models/datasets/contribution/tags/relevance | **大模型** | 自定义分类与理解 |
 | tldr/citations/s2_fields | **聚合API** | TLDR、引用数、领域免费拿 |
