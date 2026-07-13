@@ -35,7 +35,7 @@ const pyExe = () => agentRunner.pythonExecutable();
 const spawnAgent = (args, opts = {}) => agentRunner.spawn(args, opts);
 
 // ---- 设置（模型/数据源），存 data/settings.json（gitignore），Python Agent 也读它 ----
-const SETTINGS_PATH = path.join(ROOT, 'data', 'settings.json');
+const SETTINGS_PATH = process.env.SETTINGS_PATH || path.join(ROOT, 'data', 'settings.json');
 const settingsStore = createSettingsStore({ root: ROOT, settingsPath: SETTINGS_PATH });
 const readSettings = () => settingsStore.read();
 const writeSettings = (s) => settingsStore.write(s);
