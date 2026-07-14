@@ -295,7 +295,7 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .pi-top{display:flex;align-items:center;gap:9px}
 .order-badge{font-family:var(--font-mono);flex:0 0 auto;width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:10px;font-weight:600;color:var(--surface);background:var(--ink-2)}
 .paper-item.active .order-badge{background:var(--accent)}
-.pi-title{font-size:13px;font-weight:500;line-height:1.4;flex:1;color:var(--ink);letter-spacing:-.01em}
+.pi-title{min-width:0;font-size:13px;font-weight:500;line-height:1.4;flex:1;color:var(--ink);letter-spacing:-.01em}
 .pi-meta{display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:29px}
 .dir{font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .status-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--idle)}
