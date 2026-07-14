@@ -138,6 +138,7 @@ def _compact(row) -> dict:
     return {
         "id": row["id"],
         "title": row["title"],
+        "title_zh": row["title_zh"],
         "venue": row["venue"],
         "year": row["year"],
         "type": row["type"],
@@ -179,9 +180,9 @@ def search_papers(query: str = "", type: str = "", topic: str = "", venue: str =
     where, args = [], []
     if query.strip():
         like = f"%{query.strip()}%"
-        where.append("(title LIKE ? OR abstract LIKE ? OR tldr LIKE ? OR contribution LIKE ? "
+        where.append("(title LIKE ? OR title_zh LIKE ? OR abstract LIKE ? OR tldr LIKE ? OR contribution LIKE ? "
                      "OR topic LIKE ? OR task LIKE ? OR tags LIKE ?)")
-        args += [like] * 7
+        args += [like] * 8
     if type.strip():
         where.append("type = ?"); args.append(type.strip())
     if topic.strip():
@@ -273,6 +274,7 @@ def get_paper(id: str) -> dict:
     return _ok(
         id=row["id"],
         title=row["title"],
+        title_zh=row["title_zh"],
         authors=_jload(row["authors"]),
         venue=row["venue"],
         year=row["year"],
@@ -348,6 +350,7 @@ def list_due_reviews(today: str = "", include_upcoming: bool = False, limit: int
           r.completed_at,
           r.updated_at,
           p.title,
+          p.title_zh,
           p.venue,
           p.year,
           COALESCE(NULLIF(TRIM(progress.status), ''), '未开始') AS progress
@@ -368,6 +371,7 @@ def list_due_reviews(today: str = "", include_upcoming: bool = False, limit: int
         results.append({
             "id": row["paper_id"],
             "title": row["title"],
+            "title_zh": row["title_zh"],
             "venue": row["venue"],
             "year": row["year"],
             "progress": row["progress"],

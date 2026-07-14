@@ -27,6 +27,8 @@ const md = (t) => (window.marked ? window.marked.parse(t || '') :
 const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const titleMarkup = (paper, classes) => window.PaperTitles.titleMarkup(paper, classes);
 const titleSearch = paper => window.PaperTitles.searchableTitle(paper);
+const resolveCurrentPaper = (paper, papers) => window.PaperTitles.resolveCurrentPaper(paper, papers);
+const streamNDJSON = (...args) => window.Ndjson.streamNDJSON(...args);
 const normTitle = (s) => (s || '').toLowerCase().replace(/[^a-z0-9一-龥]+/g, '');  // 同 db.title_norm
 // 渲染 markdown 到元素，并用 KaTeX 把 $...$ / $$...$$ 公式排版出来（讲解/译文/笔记共用）。
 // 关键：必须先把公式抽成占位符再交给 marked，否则 marked 会把 LaTeX 里的 _ 当斜体、[..](..) 当链接，
@@ -1433,6 +1435,12 @@ async function refreshTitleTranslationBatch() {
     const result = await (await fetch('/api/title-translations')).json();
     if (titleZhAbort) return;
     const pending = Number(result.pending) || 0;
+    if (result.running) {
+      button.disabled = true;
+      button.textContent = '中文题名生成中';
+      hint.textContent = '已有批量任务正在运行';
+      return;
+    }
     button.disabled = pending === 0;
     button.textContent = pending ? `生成中文题名 · ${pending}` : '中文题名已补全';
     hint.textContent = pending ? `待翻译 ${pending} 篇` : '';
@@ -1444,7 +1452,12 @@ async function refreshTitleTranslationBatch() {
 }
 
 async function runTitleTranslationBatch() {
-  if (titleZhAbort) { titleZhAbort.abort(); return; }
+  if (titleZhAbort) {
+    $('#titleZhBatchBtn').disabled = true;
+    $('#titleZhBatchBtn').textContent = '停止中…';
+    titleZhAbort.abort();
+    return;
+  }
   const button = $('#titleZhBatchBtn');
   const hint = $('#titleZhBatchHint');
   const controller = new AbortController();
@@ -1462,7 +1475,18 @@ async function runTitleTranslationBatch() {
       }
     }, { signal: controller.signal });
   } catch (error) {
-    hint.textContent = error && error.name === 'AbortError' ? '已停止，已生成的题名已保存' : `生成失败：${error}`;
+    if (error && error.name === 'AbortError') {
+      hint.textContent = '正在停止，已生成的题名会保留';
+      let confirmed = false;
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const state = await fetch('/api/title-translations').then(response => response.json()).catch(() => ({ running: true }));
+        if (!state.running) { confirmed = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      hint.textContent = confirmed ? '已停止，已生成的题名已保存' : '停止请求已发送，服务器仍在处理';
+    } else {
+      hint.textContent = `生成失败：${error}`;
+    }
   } finally {
     titleZhAbort = null;
     await reloadPapers();
@@ -1677,22 +1701,6 @@ async function savePaperModal() {
 let candidates = [];
 const currentQueries = () => { try { return JSON.parse($('#ingQueryChips').dataset.qs || '[]'); } catch (e) { return []; } };
 
-async function streamNDJSON(url, body, onEvent, options = {}) {
-  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: options.signal });
-  if (!resp.body || !resp.body.getReader) { const j = await resp.json().catch(() => ({})); onEvent({ type: 'result', candidates: j.candidates || [] }); return; }
-  const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
-  for (; ;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
-      if (line) { try { onEvent(JSON.parse(line)); } catch (e) {} }
-    }
-  }
-  if (buf.trim()) { try { onEvent(JSON.parse(buf.trim())); } catch (e) {} }
-}
 function setStage(name, cls) { const el = document.querySelector(`#ingStages .stage[data-st="${name}"]`); if (el) el.className = 'stage ' + cls; }
 function renderQueryChips(qs) {
   const box = $('#ingQueryChips'); box.dataset.qs = JSON.stringify(qs);
@@ -1935,6 +1943,13 @@ async function importPdfs() {
 
 async function reloadPapers() {
   PAPERS = normPapers(await (await fetch('/api/papers')).json());
+  current = resolveCurrentPaper(current, PAPERS);
+  if (current) {
+    $('#paperTitle').innerHTML = titleMarkup({ ...current, title: `${current.title} — ${current.venue} ${current.year}` });
+    $('#pdfDocTitle').textContent = `${current.title} · ${current.venue} ${current.year}`;
+    setStatusUI(current.status || '未开始');
+    setFavoriteUI(current);
+  }
   buildYearFilters();
   buildSideYears();
   renderSidebar();

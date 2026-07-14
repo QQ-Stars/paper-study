@@ -36,17 +36,61 @@ test('existing databases gain a nullable title_zh column without losing papers',
   legacy.prepare("INSERT INTO papers(id,source,title) VALUES('p1','manual','Original Title')").run();
   legacy.close();
 
-  const loaded = loadIsolatedDb(dbPath);
+  let loaded = loadIsolatedDb(dbPath);
   try {
     const columns = loaded.dbapi.db.prepare("SELECT name FROM pragma_table_info('papers')").all().map(row => row.name);
     assert.ok(columns.includes('title_zh'));
     assert.deepEqual(loaded.dbapi.db.prepare("SELECT title,title_zh FROM papers WHERE id='p1'").get(), {
       title: 'Original Title', title_zh: null
     });
+    loaded.cleanup();
+    loaded = loadIsolatedDb(dbPath);
+    const repeatedColumns = loaded.dbapi.db.prepare("SELECT name FROM pragma_table_info('papers')").all();
+    assert.equal(repeatedColumns.filter(row => row.name === 'title_zh').length, 1);
+    assert.equal(loaded.dbapi.getPaper('p1').title, 'Original Title');
   } finally {
     loaded.cleanup();
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('batch cancellation aborts the active chat without recording a failure', async () => {
+  const controller = new AbortController();
+  const repository = {
+    countMissingTitleTranslations: () => 1,
+    listMissingTitleTranslations: () => [{ id: 'p1', title: 'Paper One' }],
+    setTitleTranslationIfMissing: () => 1
+  };
+  const chat = async (_messages, options) => {
+    assert.equal(options.signal, controller.signal);
+    controller.abort();
+    throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
+  };
+  const service = createTitleTranslationService({ repository, chat });
+
+  const summary = await service.runBatch({ signal: controller.signal });
+
+  assert.equal(summary.cancelled, true);
+  assert.equal(summary.done, 0);
+  assert.deepEqual(summary.failed, []);
+});
+
+test('batch records an LLM timeout AbortError as a failure when the caller did not cancel', async () => {
+  const repository = {
+    countMissingTitleTranslations: () => 1,
+    listMissingTitleTranslations: () => [{ id: 'p1', title: 'Paper One' }],
+    setTitleTranslationIfMissing: () => 1
+  };
+  const chat = async () => {
+    throw Object.assign(new Error('request timed out'), { name: 'AbortError' });
+  };
+  const service = createTitleTranslationService({ repository, chat });
+
+  const summary = await service.runBatch();
+
+  assert.equal(summary.cancelled, false);
+  assert.equal(summary.failed.length, 1);
+  assert.match(summary.failed[0].error, /timed out/);
 });
 
 test('title translation repository lists blanks and never overwrites an existing value', () => {

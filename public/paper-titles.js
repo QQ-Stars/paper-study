@@ -20,6 +20,11 @@
     return `${lines.primary} ${lines.secondary}`.trim();
   }
 
+  function resolveCurrentPaper(current, papers) {
+    if (!current || !current.id || !Array.isArray(papers)) return null;
+    return papers.find(paper => paper.id === current.id) || null;
+  }
+
   function titleMarkup(paper, classes = {}) {
     const lines = titleLines(paper);
     const rootClass = classes.root || 'paper-title-stack';
@@ -30,5 +35,5 @@
     }</span>`;
   }
 
-  return { escapeHtml, searchableTitle, titleLines, titleMarkup };
+  return { escapeHtml, resolveCurrentPaper, searchableTitle, titleLines, titleMarkup };
 });

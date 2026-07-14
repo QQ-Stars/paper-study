@@ -55,6 +55,15 @@ function stopServer(child) {
   });
 }
 
+async function waitUntil(check, timeoutMs = 4000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error('condition was not met before timeout');
+}
+
 function seedDatabase(dbPath) {
   const db = new Database(dbPath);
   db.exec(fs.readFileSync(path.join(ROOT, 'db', 'schema.sql'), 'utf8'));
@@ -111,7 +120,7 @@ test('title translation routes serialize pending work and persist a completed ND
 
   const pendingResponse = await fetch(`http://127.0.0.1:${appPort}/api/title-translations`);
   assert.equal(pendingResponse.status, 200);
-  assert.deepEqual(await pendingResponse.json(), { ok: true, pending: 2 });
+  assert.deepEqual(await pendingResponse.json(), { ok: true, pending: 2, running: false });
 
   const batchResponse = await fetch(`http://127.0.0.1:${appPort}/api/title-translations`, {
     method: 'POST',
@@ -138,5 +147,83 @@ test('title translation routes serialize pending work and persist a completed ND
   db.close();
 
   const emptyPendingResponse = await fetch(`http://127.0.0.1:${appPort}/api/title-translations`);
-  assert.deepEqual(await emptyPendingResponse.json(), { ok: true, pending: 0 });
+  assert.deepEqual(await emptyPendingResponse.json(), { ok: true, pending: 0, running: false });
+});
+
+test('title translation batch is single-flight and disconnect aborts the active LLM request', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'study-app-title-cancel-'));
+  const dbPath = path.join(root, 'app.db');
+  const settingsPath = path.join(root, 'settings.json');
+  seedDatabase(dbPath);
+
+  let fakeRequests = 0;
+  let upstreamClosed = false;
+  const fakeOpenAi = http.createServer(async (req, res) => {
+    for await (const _chunk of req) { /* consume request */ }
+    fakeRequests += 1;
+    const timer = setTimeout(() => {
+      if (res.destroyed || res.writableEnded) return;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: '不应保存' } }] }));
+    }, 5000);
+    res.on('close', () => {
+      clearTimeout(timer);
+      upstreamClosed = true;
+    });
+  });
+  const fakePort = await listen(fakeOpenAi);
+  fs.writeFileSync(settingsPath, JSON.stringify({
+    apiKey: 'test-key',
+    baseUrl: `http://127.0.0.1:${fakePort}/v1`,
+    model: 'test-model'
+  }));
+
+  const appPort = await freePort();
+  const child = spawn(process.execPath, ['server.js'], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: String(appPort), DB_PATH: dbPath, SETTINGS_PATH: settingsPath },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  t.after(async () => {
+    await stopServer(child);
+    await new Promise(resolve => fakeOpenAi.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  await waitForServer(child);
+
+  const controller = new AbortController();
+  const firstResponse = await fetch(`http://127.0.0.1:${appPort}/api/title-translations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+    signal: controller.signal
+  });
+  assert.equal(firstResponse.status, 200);
+
+  const runningResponse = await fetch(`http://127.0.0.1:${appPort}/api/title-translations`);
+  assert.deepEqual(await runningResponse.json(), { ok: true, pending: 2, running: true });
+
+  const overlappingResponse = await fetch(`http://127.0.0.1:${appPort}/api/title-translations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}'
+  });
+  assert.equal(overlappingResponse.status, 409);
+  assert.match((await overlappingResponse.json()).error, /正在生成/);
+
+  controller.abort();
+  await assert.rejects(firstResponse.text(), error => error && error.name === 'AbortError');
+  await waitUntil(async () => {
+    const response = await fetch(`http://127.0.0.1:${appPort}/api/title-translations`);
+    return (await response.json()).running === false;
+  });
+  await waitUntil(() => upstreamClosed);
+  assert.equal(fakeRequests, 1);
+
+  const db = new Database(dbPath, { readonly: true });
+  assert.deepEqual(db.prepare('SELECT title_zh FROM papers WHERE id IN (?, ?) ORDER BY id').all('p1', 'p2'), [
+    { title_zh: null },
+    { title_zh: null }
+  ]);
+  db.close();
 });
