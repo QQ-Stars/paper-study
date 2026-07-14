@@ -7,7 +7,7 @@ from agent import config, db, mcp_server
 
 
 PAPER_COLUMNS = """
-    id, title, venue, year, type, topic, relevance, citations, tldr,
+    id, title, title_zh, venue, year, type, topic, relevance, citations, tldr,
     abstract, explainer, pdf_path, authors, doi, arxiv_id, url, task,
     models, datasets, contribution, tags, s2_fields
 """
@@ -32,6 +32,7 @@ class McpServerTest(unittest.TestCase):
             CREATE TABLE papers (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
+                title_zh TEXT,
                 venue TEXT,
                 year TEXT,
                 type TEXT,
@@ -74,10 +75,11 @@ class McpServerTest(unittest.TestCase):
         long_explainer = "E" * 40
         long_translation = "T" * 35
         con.execute(
-            f"INSERT INTO papers({PAPER_COLUMNS}) VALUES ({','.join(['?'] * 22)})",
+            f"INSERT INTO papers({PAPER_COLUMNS}) VALUES ({','.join(['?'] * 23)})",
             (
                 "p1",
                 "Reviewable Paper",
+                "可复习论文",
                 "ACL",
                 "2026",
                 "评测",
@@ -115,10 +117,11 @@ class McpServerTest(unittest.TestCase):
         for i in range(60):
             pid = f"bulk-{i:02d}"
             con.execute(
-                f"INSERT INTO papers({PAPER_COLUMNS}) VALUES ({','.join(['?'] * 22)})",
+                f"INSERT INTO papers({PAPER_COLUMNS}) VALUES ({','.join(['?'] * 23)})",
                 (
                     pid,
                     f"Bulk Paper {i:02d}",
+                    None,
                     "ACL",
                     "2025",
                     "评测",
@@ -159,6 +162,20 @@ class McpServerTest(unittest.TestCase):
         self.assertLessEqual(result["count"], 50)
         self.assertLessEqual(len(result["results"]), 50)
 
+    def test_search_papers_matches_and_returns_chinese_title(self):
+        result = mcp_server.search_papers(query="可复习论文")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["results"][0]["id"], "p1")
+        self.assertEqual(result["results"][0]["title_zh"], "可复习论文")
+
+    def test_get_paper_returns_chinese_title(self):
+        result = mcp_server.get_paper("p1")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["title_zh"], "可复习论文")
+
     def test_get_paper_missing_uses_consistent_error_shape(self):
         result = mcp_server.get_paper("missing")
 
@@ -192,6 +209,7 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(result["today"], "2026-07-02")
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["results"][0]["id"], "p1")
+        self.assertEqual(result["results"][0]["title_zh"], "可复习论文")
         self.assertEqual(result["results"][0]["review_state"], "dueToday")
         self.assertEqual(result["results"][0]["current_step"], 2)
         self.assertEqual(result["results"][0]["completed_steps"], 1)

@@ -23,7 +23,8 @@ const {
 const { createAgentRunner, createAgentEnv, resolvePythonExecutable } = require('../lib/agent-runner');
 const { readBody, safeBase, send, startNdjson } = require('../lib/http');
 const { calculatePopupLayout } = require('../public/selection-popover');
-const { searchableTitle, titleLines, titleMarkup } = require('../public/paper-titles');
+const { resolveCurrentPaper, searchableTitle, titleLines, titleMarkup } = require('../public/paper-titles');
+const { streamNDJSON } = require('../public/ndjson');
 
 test('paper title helper keeps English primary, Chinese secondary, and searchable', () => {
   const paper = {
@@ -46,6 +47,53 @@ test('paper title helper escapes model and source text', () => {
 
   assert.doesNotMatch(html, /<img|<script>/);
   assert.match(html, /&lt;img/);
+});
+
+test('paper title helper rebinds the current paper to refreshed data', () => {
+  const current = { id: 'p1', title: 'Old title', title_zh: '' };
+  const refreshed = [{ id: 'p1', title: 'Old title', title_zh: '新中文题名' }];
+
+  assert.equal(resolveCurrentPaper(current, refreshed), refreshed[0]);
+  assert.equal(resolveCurrentPaper({ id: 'missing' }, refreshed), null);
+  assert.equal(resolveCurrentPaper(null, refreshed), null);
+});
+
+test('NDJSON client surfaces HTTP failures with the response body', async () => {
+  const fetchImpl = async () => new Response('upstream unavailable', {
+    status: 500,
+    headers: { 'Content-Type': 'text/plain' }
+  });
+
+  await assert.rejects(
+    streamNDJSON('/batch', {}, () => {}, { fetchImpl }),
+    /500.*upstream unavailable/
+  );
+});
+
+test('NDJSON client parses streamed events', async () => {
+  const seen = [];
+  const fetchImpl = async () => new Response('{"type":"progress"}\n{"type":"result"}\n', {
+    status: 200,
+    headers: { 'Content-Type': 'application/x-ndjson' }
+  });
+
+  await streamNDJSON('/batch', {}, event => seen.push(event), { fetchImpl });
+
+  assert.deepEqual(seen, [{ type: 'progress' }, { type: 'result' }]);
+});
+
+test('NDJSON client preserves the non-streaming result fallback', async () => {
+  const seen = [];
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    body: null,
+    json: async () => ({ candidates: [{ id: 'p1' }] })
+  });
+
+  await streamNDJSON('/batch', {}, event => seen.push(event), { fetchImpl });
+
+  assert.deepEqual(seen, [{ type: 'result', candidates: [{ id: 'p1' }] }]);
 });
 
 function tempRoot() {
