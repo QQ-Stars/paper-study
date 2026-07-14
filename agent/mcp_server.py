@@ -30,8 +30,6 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("paper-study")
 
-# 研究方向(type)受控词表，给模型当导航参考
-TYPES = "检测 | 缓解·解码 | 缓解·训练 | 机制 | 评测 | 定义 | 其他"
 MAX_RESULT_LIMIT = 50
 DEFAULT_TEXT_CHARS = 12000
 MAX_TEXT_CHARS = 20000
@@ -165,17 +163,7 @@ def search_papers(query: str = "", type: str = "", topic: str = "", venue: str =
                   year_from: int = 0, year_to: int = 0, min_relevance: float = 0.0,
                   has_explainer: bool = False, only_favorites: bool = False,
                   sort: str = "relevance", limit: int = 20) -> dict:
-    """按关键词 + 结构化属性检索论文库。用于精确过滤（指定会议/年份/方向/相关度）。
-    - query: 关键词，模糊匹配 标题/摘要/TLDR/贡献/子主题/任务/标签（中英皆可）。留空=纯按属性浏览。
-    - type: 研究方向，取值之一：{TYPES}。
-    - topic: 子主题（用 list_categories 看库里有哪些）。
-    - venue: 会议/期刊简称，如 CVPR / NeurIPS / ACL / arXiv。
-    - year_from/year_to: 年份区间（含端点），0=不限。
-    - min_relevance: 与研究方向的相关度下限 0~1。
-    - has_explainer: 仅返回已生成讲解的论文。only_favorites: 仅收藏。
-    - sort: relevance|year|citations|recent。limit: 最多返回数。
-    返回 {count, results:[精简字段]}。要读全文属性用 get_paper，读讲解用 get_explainer。
-    """.replace("{TYPES}", TYPES)
+    """按关键词和结构化属性只读检索论文库。参数：query 模糊匹配题录与抽取字段；type 和 topic 使用 list_categories 返回的实际值；venue 为会议或期刊；year_from/year_to 为含端点年份；min_relevance 为最低相关度；has_explainer 和 only_favorites 为布尔过滤；sort 默认 relevance 且仅支持 relevance|year|citations|recent；limit 默认 20 并限制为 1-50。返回 ok: true、count 和紧凑 results；无结果仍为 ok: true。紧凑结果仅用于发现，论文级主张前调用 get_paper。"""
     con = _connect_readonly()
     where, args = [], []
     if query.strip():
@@ -211,8 +199,7 @@ def search_papers(query: str = "", type: str = "", topic: str = "", venue: str =
 
 @mcp.tool()
 def semantic_search(query: str, k: int = 15) -> dict:
-    """语义检索：用自然语言描述（中/英），按含义相似度找论文（比关键词更适合“关于X的工作”这类问法）。
-    返回 {count, results:[精简字段 + score(余弦相似度)]}，按相似度降序。"""
+    """按自然语言含义只读检索。参数：必填 query；k 默认 15 并限制为 1-50。返回 ok: true、count、indexed、total 和带余弦相似度 score 的紧凑 results；索引未覆盖全部论文时附 note。"""
     capped_k = _clamp_int(k, 15, 1, MAX_RESULT_LIMIT)
     with contextlib.redirect_stdout(sys.stderr):     # 防本地嵌入模型(下载/进度)污染 stdio 协议
         ranked = embed.rank(query, capped_k, reindex_stale=False)   # 只读：服务进程不做同步重嵌(交给网页端自愈)
@@ -234,8 +221,7 @@ def semantic_search(query: str, k: int = 15) -> dict:
 
 @mcp.tool()
 def related_papers(id: str, k: int = 8) -> dict:
-    """找库内与某篇论文语义相近的论文（基于标题+摘要向量），用于聚类、顺藤摸瓜、发现同质工作。
-    返回 {seed, count, results:[精简字段 + score]}。"""
+    """按标题和摘要向量查找库内相关论文。参数：必填稳定论文 id；k 默认 8 并限制为 1-50。返回 ok: true、seed、count 和带关系 score 的紧凑 results；种子不存在时返回 ok: false、error 和 id。"""
     capped_k = _clamp_int(k, 8, 1, MAX_RESULT_LIMIT)
     con = _connect_readonly()
     row = con.execute("SELECT id,title,tldr,abstract FROM papers WHERE id=?", (id,)).fetchone()
@@ -259,8 +245,7 @@ def related_papers(id: str, k: int = 8) -> dict:
 # ---------- 单篇详情 ----------
 @mcp.tool()
 def get_paper(id: str) -> dict:
-    """取一篇论文的全部属性：题录(作者/会议/年份/DOI/arXiv)、AI 抽取的分类(方向/子主题/任务/模型/数据集/贡献/标签/相关度)、
-    引用数、摘要、TLDR，以及笔记、学习进度、是否收藏、有无讲解/翻译/本地PDF。读讲解正文请用 get_explainer。"""
+    """按稳定 id 读取完整论文元数据与学习状态。返回 ok: true、题录、摘要、TLDR、分类、任务、模型、数据集、贡献、标签、相关度、笔记、进度、收藏状态，以及 has_explainer、has_translation、has_pdf；论文不存在时返回 ok: false、error 和 id。讲解正文使用 get_explainer。"""
     con = _connect_readonly()
     row = con.execute("SELECT * FROM papers WHERE id=?", (id,)).fetchone()
     if not row:
@@ -306,8 +291,7 @@ def get_paper(id: str) -> dict:
 
 @mcp.tool()
 def get_explainer(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHARS) -> dict:
-    """取某篇论文的「讲解」Markdown 全文（LLM 撰写的科学方法论精读：研究问题/方法/动机/实验等）。
-    这是研究分析最有价值的内容。若该篇尚无讲解，返回提示。"""
+    """分页读取论文讲解 Markdown。参数：必填 id；offset 默认 0；max_chars 默认 12000 并限制为 1-20000。成功返回 ok: true、content、offset、next_offset、total_chars、truncated；truncated 为 true 时把返回的 next_offset 原样用于下一次调用。论文或讲解不存在时返回 ok: false、error 和 id。"""
     con = _connect_readonly()
     md = _one(con, "SELECT explainer FROM papers WHERE id=?", (id,))
     exists = con.execute("SELECT 1 FROM papers WHERE id=?", (id,)).fetchone()
@@ -321,7 +305,7 @@ def get_explainer(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHARS)
 
 @mcp.tool()
 def get_translation(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHARS) -> dict:
-    """取某篇论文的中文全文翻译 Markdown（若已生成）。"""
+    """分页读取论文中文全文翻译 Markdown。参数：必填 id；offset 默认 0；max_chars 默认 12000 并限制为 1-20000。成功返回 ok: true、content、offset、next_offset、total_chars、truncated；truncated 为 true 时把返回的 next_offset 原样用于下一次调用。翻译不存在时返回 ok: false、error 和 id。"""
     con = _connect_readonly()
     md = _one(con, "SELECT content FROM translations WHERE paper_id=?", (id,))
     con.close()
@@ -332,7 +316,7 @@ def get_translation(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHAR
 
 @mcp.tool()
 def list_due_reviews(today: str = "", include_upcoming: bool = False, limit: int = 20) -> dict:
-    """列出艾宾浩斯复习队列。默认只返回今天及以前应复习的论文；include_upcoming=true 时包含未完成的未来计划。"""
+    """只读列出艾宾浩斯复习队列。参数：today 默认当前日期；include_upcoming 默认 false；limit 默认 20 并限制为 1-50。默认只返回 today 当日及以前到期且未完成的条目；成功返回 ok: true、today、count、include_upcoming 和 results。"""
     today_s = _date_only(today)
     capped_limit = _clamp_int(limit, 20, 1, MAX_RESULT_LIMIT)
     where = ["r.completed_at IS NULL"]
@@ -389,8 +373,7 @@ def list_due_reviews(today: str = "", include_upcoming: bool = False, limit: int
 # ---------- 综览 / 找空白 ----------
 @mcp.tool()
 def list_categories() -> dict:
-    """列出库中实际在用的分类词表及计数：研究方向(type)/子主题(topic)/任务(task)。
-    用于了解库的版图、导航、以及发现“某方向论文很少”这类潜在空白。"""
+    """只读列出库中实际使用的分类词表与计数，无参数。返回 ok: true、types、topics、tasks；使用返回的 type/topic 值构造 search_papers 过滤，tasks 仅用于理解任务版图。"""
     con = _connect_readonly()
 
     def counts(col):
@@ -407,8 +390,7 @@ def list_categories() -> dict:
 
 @mcp.tool()
 def library_overview() -> dict:
-    """库的整体画像：总数、讲解/翻译/收藏/本地PDF 覆盖、按方向/会议/年份分布、相关度分桶、年份范围。
-    适合开题前快速了解“这个方向已有哪些、密集在哪、哪里稀疏(潜在空白)”。"""
+    """只读返回论文库整体画像，无参数。返回 ok: true、total、with_explainer、with_translation、favorites、indexed_vectors、review_due、review_open，以及方向、主题、会议、年份、相关度和引用统计。用于覆盖分析，不替代论文级证据。"""
     con = _connect_readonly()
     total = _one(con, "SELECT COUNT(*) FROM papers") or 0
     with_exp = _one(con, "SELECT COUNT(*) FROM papers WHERE explainer IS NOT NULL AND TRIM(explainer)!=''") or 0

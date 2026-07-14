@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import tempfile
 import unittest
@@ -213,6 +214,117 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(result["results"][0]["review_state"], "dueToday")
         self.assertEqual(result["results"][0]["current_step"], 2)
         self.assertEqual(result["results"][0]["completed_steps"], 1)
+
+    def test_fastmcp_publishes_complete_tool_descriptions(self):
+        tools = {
+            tool.name: tool.description or ""
+            for tool in asyncio.run(mcp_server.mcp.list_tools())
+        }
+        expected_names = {
+            "library_overview",
+            "list_categories",
+            "search_papers",
+            "semantic_search",
+            "get_paper",
+            "get_explainer",
+            "get_translation",
+            "related_papers",
+            "list_due_reviews",
+        }
+        self.assertEqual(set(tools), expected_names)
+        for name, description in tools.items():
+            with self.subTest(name=name):
+                self.assertTrue(description.strip())
+
+        search = tools["search_papers"]
+        for token in (
+            "query",
+            "type",
+            "topic",
+            "venue",
+            "year_from",
+            "year_to",
+            "min_relevance",
+            "has_explainer",
+            "only_favorites",
+            "sort",
+            "relevance|year|citations|recent",
+            "limit",
+            "1-50",
+            "get_paper",
+        ):
+            with self.subTest(search_token=token):
+                self.assertIn(token, search)
+
+    def test_fastmcp_publishes_response_control_fields(self):
+        tools = {
+            tool.name: tool.description or ""
+            for tool in asyncio.run(mcp_server.mcp.list_tools())
+        }
+        expected_tokens = {
+            "semantic_search": (
+                "query",
+                "k",
+                "15",
+                "1-50",
+                "score",
+                "indexed",
+                "total",
+                "note",
+            ),
+            "related_papers": (
+                "id",
+                "k",
+                "8",
+                "1-50",
+                "seed",
+                "score",
+                "ok: false",
+            ),
+            "get_paper": (
+                "id",
+                "has_explainer",
+                "has_translation",
+                "has_pdf",
+                "ok: false",
+            ),
+            "get_explainer": (
+                "id",
+                "offset",
+                "max_chars",
+                "12000",
+                "1-20000",
+                "next_offset",
+                "total_chars",
+                "truncated",
+                "ok: false",
+            ),
+            "get_translation": (
+                "id",
+                "offset",
+                "max_chars",
+                "12000",
+                "1-20000",
+                "next_offset",
+                "total_chars",
+                "truncated",
+                "ok: false",
+            ),
+            "list_due_reviews": (
+                "today",
+                "include_upcoming",
+                "limit",
+                "20",
+                "1-50",
+                "只读",
+            ),
+            "list_categories": ("types", "topics", "tasks"),
+            "library_overview": ("total", "indexed_vectors", "review_due", "review_open"),
+        }
+        for name, tokens in expected_tokens.items():
+            for token in tokens:
+                with self.subTest(name=name, token=token):
+                    self.assertIn(token, tools[name])
 
 
 if __name__ == "__main__":
