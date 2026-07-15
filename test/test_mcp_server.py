@@ -177,12 +177,13 @@ class McpServerTest(unittest.TestCase):
         finally:
             con.close()
 
-    def test_search_papers_has_consistent_shape_and_caps_limit(self):
-        result = mcp_server.search_papers(query="", sort="citations", limit=999)
-
-        self.assertTrue(result["ok"])
-        self.assertLessEqual(result["count"], 50)
-        self.assertLessEqual(len(result["results"]), 50)
+    def test_search_papers_limit_is_clamped_at_both_boundaries(self):
+        for boundary, requested, expected in (("below", 0, 1), ("above", 999, 50)):
+            with self.subTest(boundary=boundary):
+                result = mcp_server.search_papers(query="", sort="citations", limit=requested)
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["count"], expected)
+                self.assertEqual(len(result["results"]), expected)
 
     def test_search_papers_matches_and_returns_chinese_title(self):
         result = mcp_server.search_papers(query="可复习论文")
@@ -370,7 +371,19 @@ class McpServerTest(unittest.TestCase):
                     "limit": "integer",
                 },
                 set(),
-                {"sort": "relevance", "limit": 20},
+                {
+                    "query": "",
+                    "type": "",
+                    "topic": "",
+                    "venue": "",
+                    "year_from": 0,
+                    "year_to": 0,
+                    "min_relevance": 0.0,
+                    "has_explainer": False,
+                    "only_favorites": False,
+                    "sort": "relevance",
+                    "limit": 20,
+                },
             ),
             "semantic_search": ({"query": "string", "k": "integer"}, {"query"}, {"k": 15}),
             "related_papers": ({"id": "string", "k": "integer"}, {"id"}, {"k": 8}),
@@ -407,9 +420,12 @@ class McpServerTest(unittest.TestCase):
                     {prop: prop_schema.get("type") for prop, prop_schema in normalized.items()},
                     expected_types,
                 )
-                for prop, default in expected_defaults.items():
-                    self.assertIn("default", normalized[prop])
-                    self.assertEqual(normalized[prop]["default"], default)
+                actual_defaults = {
+                    prop: prop_schema["default"]
+                    for prop, prop_schema in normalized.items()
+                    if "default" in prop_schema
+                }
+                self.assertEqual(actual_defaults, expected_defaults)
 
     def test_fastmcp_publishes_response_control_fields(self):
         published_tools = {
