@@ -57,11 +57,6 @@
         meta.append(ccf);
       }
 
-      const type = text(value.type);
-      const topic = text(value.topic);
-      if (type) meta.append(document.createTextNode(` · ${type}`));
-      if (topic) meta.append(document.createTextNode(` · ${topic}`));
-
       const verification = value._verify;
       if (verification) {
         const sourceText = sourceLabel(verification.source_of_truth, sourceLabels);
@@ -82,6 +77,11 @@
         }
         meta.append(document.createTextNode(' '), badge);
       }
+
+      const type = text(value.type);
+      const topic = text(value.topic);
+      if (type) meta.append(document.createTextNode(` · ${type}`));
+      if (topic) meta.append(document.createTextNode(` · ${topic}`));
 
       if (inLibrary) {
         const inLibraryTag = document.createElement('b');

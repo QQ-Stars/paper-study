@@ -251,6 +251,8 @@ test('createCandidateCard renders untrusted candidate fields as literal text', (
   const topicLeaf = meta.children.find((child) => child.textContent === ` · ${topic}`);
   assert.equal(typeLeaf.children.length, 0);
   assert.equal(topicLeaf.children.length, 0);
+  assert.ok(verificationIndex < meta.children.indexOf(typeLeaf));
+  assert.ok(verificationIndex < meta.children.indexOf(topicLeaf));
   const bar = findByClass(card, 'cand-rel-bar');
   assert.equal(bar.style.width, '73%');
   const relevance = findByClass(card, 'cand-rel');
