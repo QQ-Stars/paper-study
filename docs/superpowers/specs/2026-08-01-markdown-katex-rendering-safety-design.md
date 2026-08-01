@@ -30,10 +30,10 @@
 
 新增 `public/markdown-rendering.js`，使用与 `ingest-rendering.js` 一致的浏览器 / CommonJS 兼容封装，并导出：
 
-- `createMarkdownRenderer({ marked, katex })`
+- `createMarkdownRenderer({ getMarked, getKatex })`
 - 返回 `render(text)`，生成受控 HTML 字符串；以及 `renderInto(element, text)`，作为唯一写入目标元素的入口。
 
-`public/index.html` 在 `app.js` 前加载该模块。`app.js` 创建一个实例，并让现有 `renderMd(el, text)` 仅委托给 `renderInto()`。笔记加载与保存预览、讲解、译文和划词译文因此仍使用原来的调用点，但共享相同策略。
+`public/index.html` 在 `app.js` 前加载该模块。`app.js` 创建一个实例，并让现有 `renderMd(el, text)` 仅委托给 `renderInto()`。两个 getter 在每次渲染时读取 `window.marked` 与 `window.katex`，避免 `app.js` 先于 `defer` 的 KaTeX 脚本执行时永久捕获空引用。笔记加载与保存预览、讲解、译文和划词译文因此仍使用原来的调用点，但共享相同策略。
 
 渲染顺序如下：
 
