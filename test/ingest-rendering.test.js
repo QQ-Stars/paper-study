@@ -204,6 +204,9 @@ test('createCandidateCard renders untrusted candidate fields as literal text', (
   assert.equal(verification.textContent, '源自DBLP');
   assert.equal(verification.children.length, 0);
   const meta = findByClass(card, 'cand-meta');
+  const verificationIndex = meta.children.indexOf(verification);
+  assert.equal(meta.children[verificationIndex - 1].textContent, ' ');
+  assert.equal(meta.children[verificationIndex - 1].children.length, 0);
   assert.ok(meta.children.every((child) => child.textContent !== title && child.textContent !== type && child.textContent !== topic && child.textContent !== note));
   assert.match(deepTextContent(meta), new RegExp(type.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(deepTextContent(meta), new RegExp(topic.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -260,7 +263,12 @@ test('createCandidateCard preserves in-library checkbox selection behavior', () 
   assert.ok(card.className.split(/\s+/).includes('in-lib'));
   assert.equal(card.children[0].checked, false);
   assert.equal(card.children[0].disabled, true);
-  assert.equal(findByClass(card, 'inlib-tag').textContent, ' · 已在库');
+  const meta = findByClass(card, 'cand-meta');
+  const inLibraryTag = findByClass(card, 'inlib-tag');
+  const inLibraryIndex = meta.children.indexOf(inLibraryTag);
+  assert.equal(meta.children[inLibraryIndex - 1].textContent, ' · ');
+  assert.equal(meta.children[inLibraryIndex - 1].children.length, 0);
+  assert.equal(inLibraryTag.textContent, '已在库');
 });
 
 test('createCandidateCard renders an unknown hostile verification source literally', () => {

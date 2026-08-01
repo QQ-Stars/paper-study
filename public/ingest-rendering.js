@@ -80,14 +80,14 @@
           badge.title = text(verification.note);
           badge.textContent = '仅预印本';
         }
-        meta.append(badge);
+        meta.append(document.createTextNode(' '), badge);
       }
 
       if (inLibrary) {
         const inLibraryTag = document.createElement('b');
         inLibraryTag.className = 'inlib-tag';
-        inLibraryTag.textContent = ' · 已在库';
-        meta.append(inLibraryTag);
+        inLibraryTag.textContent = '已在库';
+        meta.append(document.createTextNode(' · '), inLibraryTag);
       }
 
       const numericRelevance = Number(value.relevance);
