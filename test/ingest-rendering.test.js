@@ -4,6 +4,43 @@ const test = require('node:test');
 
 const { createIngestRenderer } = require('../public/ingest-rendering');
 
+test('ingest UI delegates untrusted rendering to the safe renderer', () => {
+  const root = require('node:path').resolve(__dirname, '..');
+  const index = fs.readFileSync(require('node:path').join(root, 'public', 'index.html'), 'utf8');
+  const app = fs.readFileSync(require('node:path').join(root, 'public', 'app.js'), 'utf8');
+  const functionBody = (name) => {
+    const match = app.match(new RegExp(`function\\s+${name}\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}`, 'm'));
+    assert.ok(match, `expected ${name} function`);
+    return match[0];
+  };
+
+  assert.match(index, /<script\s+src=["']ingest-rendering\.js["']><\/script>\s*<script\s+src=["']app\.js["']><\/script>/);
+  assert.match(app, /let\s+candidates\s*=\s*\[\]\s*;\s*const\s+ingestRenderer\s*=\s*window\.IngestRendering\.createIngestRenderer\(\{\s*document\s*}\)\s*;/);
+
+  const chips = functionBody('renderQueryChips');
+  assert.match(chips, /ingestRenderer\.renderQueryChips\(\s*\$\(['"]#ingQueryChips['"]\)\s*,\s*qs\s*,/);
+  assert.doesNotMatch(chips, /box\.innerHTML\s*=\s*qs\.map/);
+
+  const detail = functionBody('setDetail');
+  assert.match(detail, /ingestRenderer\.setDetail\(\s*\$\(['"]#ingdMain['"]\)\s*,\s*\$\(['"]#ingdSub['"]\)\s*,\s*main\s*,\s*sub\s*,\s*warning\s*\)/);
+  assert.doesNotMatch(detail, /\$\(['"]#ingdSub['"]\)\.innerHTML\s*=\s*sub/);
+
+  const progress = functionBody('handleProgress');
+  const sourceError = progress.match(/else\s+if\s*\(line\.startsWith\(['"]SRCERR::['"]\)\)\s*\{([\s\S]*?)\n\s*}\s*else\s+if/);
+  assert.ok(sourceError, 'expected SRCERR branch');
+  assert.match(sourceError[1], /setDetail\(\s*null\s*,[\s\S]*?,\s*true\s*\)/);
+  assert.doesNotMatch(sourceError[1], /<b\b/);
+  const doing = progress.match(/else\s+if\s*\(line\.startsWith\(['"]DOING::['"]\)\)\s*\{([\s\S]*?)\n\s*}\s*else\s+if/);
+  assert.ok(doing, 'expected DOING branch');
+  assert.match(doing[1], /setDetail\([\s\S]*?`《\$\{title\}》`/);
+  assert.doesNotMatch(doing[1], /esc\(title\)/);
+
+  const candidateList = functionBody('renderCandidates');
+  assert.match(candidateList, /const\s+box\s*=\s*\$\(['"]#candList['"]\)\s*;\s*box\.replaceChildren\(\)\s*;/);
+  assert.match(candidateList, /ingestRenderer\.createCandidateCard\(\s*\{[\s\S]*?candidate[\s\S]*?index[\s\S]*?venueName[\s\S]*?sourceLabels\s*:\s*SRC_SHORT[\s\S]*?}\s*\)/);
+  assert.doesNotMatch(candidateList, /<div\s+class=["']cand-title["']>\$\{c\.title}/);
+});
+
 test('iq-x button rule resets native button styling', () => {
   const css = fs.readFileSync(require.resolve('../public/style.css'), 'utf8');
   const rule = css.match(/\.iq-x\s*\{([^}]*)\}/);

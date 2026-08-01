@@ -1699,13 +1699,14 @@ async function savePaperModal() {
 
 // ====== 采集向导（R3：流式两阶段 + 动画）======
 let candidates = [];
+const ingestRenderer = window.IngestRendering.createIngestRenderer({ document });
 const currentQueries = () => { try { return JSON.parse($('#ingQueryChips').dataset.qs || '[]'); } catch (e) { return []; } };
 
 function setStage(name, cls) { const el = document.querySelector(`#ingStages .stage[data-st="${name}"]`); if (el) el.className = 'stage ' + cls; }
 function renderQueryChips(qs) {
-  const box = $('#ingQueryChips'); box.dataset.qs = JSON.stringify(qs);
-  box.innerHTML = qs.map((x, i) => `<span class="iq-chip">${x}<b class="iq-x" data-i="${i}">×</b></span>`).join('') || '<span class="placeholder">（无检索词）</span>';
-  document.querySelectorAll('#ingQueryChips .iq-x').forEach(b => b.onclick = () => { const a = currentQueries(); a.splice(+b.dataset.i, 1); renderQueryChips(a); });
+  ingestRenderer.renderQueryChips($('#ingQueryChips'), qs, index => {
+    const next = currentQueries(); next.splice(index, 1); renderQueryChips(next);
+  });
 }
 // ====== 采集检索历史（localStorage） ======
 const HIST_KEY = 'paperstudy.searchHistory', HIST_MAX = 12;
@@ -1756,10 +1757,7 @@ async function editQueries() {
 }
 let srcCounts = {}, keptN = null, errN = 0;
 const SRC_LABEL = { arxiv: 'arXiv', semanticscholar: 'S2', openalex: 'OpenAlex', dblp: 'DBLP' };
-function setDetail(main, sub) {
-  if (main != null && $('#ingdMain')) $('#ingdMain').textContent = main;
-  if (sub != null && $('#ingdSub')) $('#ingdSub').innerHTML = sub;
-}
+function setDetail(main, sub, warning = false) { ingestRenderer.setDetail($('#ingdMain'), $('#ingdSub'), main, sub, warning); }
 function srcSummary() { return Object.entries(srcCounts).map(([k, v]) => `${SRC_LABEL[k] || k} ${v}`).join(' · '); }
 function updCount() { const el = $('#ingdCount'); if (el) el.textContent = keptN != null ? `保留 ${keptN}${errN ? ` · ${errN} 跳过` : ''}` : ''; }
 function handleProgress(line) {
@@ -1772,12 +1770,12 @@ function handleProgress(line) {
   } else if (line.startsWith('SRC::')) {
     const p = line.split('::'); srcCounts[p[1]] = p[2]; setDetail('正在检索数据源…', srcSummary());
   } else if (line.startsWith('SRCERR::')) {
-    const p = line.split('::'); setDetail(null, (srcSummary() ? srcSummary() + ' · ' : '') + `<b class="ingd-warn">${SRC_LABEL[p[1]] || p[1]} 失败</b>`);
+    const p = line.split('::'); const source = SRC_LABEL[p[1]] || p[1]; setDetail(null, (srcSummary() ? srcSummary() + ' · ' : '') + source + ' 失败', true);
   } else if (line.startsWith('FOUND::')) {
     const n = line.slice(7); $('#stFound').textContent = ' ' + n; setDetail(`共 ${n} 篇候选 · 开始分类打分`, srcSummary());
   } else if (line.startsWith('DOING::')) {
     const rest = line.slice(7), m = rest.indexOf('::'); const idx = rest.slice(0, m), title = rest.slice(m + 2);
-    $('#stCls').textContent = ' ' + idx; setDetail(`分类打分 · 第 ${idx} 篇`, `《${esc(title)}》`);
+    $('#stCls').textContent = ' ' + idx; setDetail(`分类打分 · 第 ${idx} 篇`, `《${title}》`);
   } else if (line.startsWith('KEPT::')) {
     keptN = line.slice(6); updCount();
   } else if (line.startsWith('CLSERR::')) {
@@ -1817,23 +1815,15 @@ function renderCandidates() {
   const fresh = candidates.filter(c => !c.in_library).length;
   $('#candCount').textContent = `找到 ${candidates.length} 篇 · ${fresh} 篇新`;
   const SRC_SHORT = { dblp: 'DBLP', semanticscholar: 'S2', openalex: 'OpenAlex' };
-  $('#candList').innerHTML = candidates.map((c, i) => {
-    const rel = c.relevance != null ? Math.round(c.relevance * 100) : 0;
-    const vn = normVenue(c.venue) || '';
-    const vv = c._verify;
-    const vb = vv ? (
-      vv.skipped ? `<b class="vbadge src" title="${vv.note || ''}">源自${SRC_SHORT[vv.source_of_truth] || vv.source_of_truth}</b>`
-        : vv.matched ? `<b class="vbadge ok" title="权威来源：${SRC_SHORT[vv.source_of_truth] || vv.source_of_truth}">✓已核实${vv.changed ? '·已更正' : ''}</b>`
-          : `<b class="vbadge miss" title="${vv.note || ''}">仅预印本</b>`) : '';
-    return `<label class="cand ${c.in_library ? 'in-lib' : ''}">
-      <input type="checkbox" class="cand-ck" data-i="${i}" ${c.in_library ? 'disabled' : 'checked'} />
-      <div class="cand-main">
-        <div class="cand-title">${c.title}</div>
-        <div class="cand-meta"><span class="venue v-${vn}">${vn || '—'} ${c.year || ''}</span>${ccfBadge(c.ccf)}${vb ? ' ' + vb : ''} · ${c.type || ''}${c.topic ? ' · ' + c.topic : ''}${c.in_library ? ' · <b class="inlib-tag">已在库</b>' : ''}</div>
-      </div>
-      <div class="cand-rel" title="相关度 ${rel}%"><div class="cand-rel-track"><div class="cand-rel-bar" style="width:${rel}%"></div></div><span>${rel}</span></div>
-    </label>`;
-  }).join('') || '<div class="placeholder">没有匹配的候选。</div>';
+  const box = $('#candList'); box.replaceChildren();
+  if (!candidates.length) {
+    const placeholder = document.createElement('div'); placeholder.className = 'placeholder'; placeholder.textContent = '没有匹配的候选。'; box.append(placeholder);
+  } else {
+    candidates.forEach((candidate, index) => {
+      const venueName = normVenue(candidate.venue) || '';
+      box.append(ingestRenderer.createCandidateCard({ candidate, index, venueName, sourceLabels: SRC_SHORT }));
+    });
+  }
   $('#candSelAll').checked = true;
   $('#candSelAll').onchange = () => document.querySelectorAll('#candList .cand-ck:not([disabled])').forEach(ck => ck.checked = $('#candSelAll').checked);
 }
