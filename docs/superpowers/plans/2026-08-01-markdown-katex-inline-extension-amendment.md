@@ -70,4 +70,3 @@ Run `node --test test/markdown-rendering.test.js` and `npm.cmd test`; both must 
 - [ ] Run `.venv\\Scripts\\python.exe -m unittest discover -s test -p "test_*.py"`.
 - [ ] Run a local browser smoke test with safe Markdown, raw HTML, a tracking image, a dangerous link, and a formula; verify only the safe link/formula become active DOM.
 - [ ] Run `git diff --check` and inspect `git status --short`; preserve unrelated user changes and never stage `package-lock.json` unless it has a real intentional diff.
-

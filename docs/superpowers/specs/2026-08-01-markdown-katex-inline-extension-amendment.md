@@ -23,4 +23,3 @@ The renderer must call KaTeX only for `ordinary` in each of these inputs:
 ```
 
 It must call KaTeX for `x` only in `$5 and $x$` and `$5 USD and $x$`, and call it zero times for `$5-$10`. Image alt formulas remain literal while a following ordinary formula still renders.
-
