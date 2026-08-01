@@ -53,12 +53,36 @@ class FakeElement {
   }
 }
 
+class FakeTextNode {
+  constructor(text) {
+    this.children = [];
+    this.className = '';
+    this.textContent = text;
+  }
+}
+
 function fakeDocument() {
   return {
     createElement(tagName) {
       return new FakeElement(tagName);
     },
+    createTextNode(text) {
+      return new FakeTextNode(text);
+    },
   };
+}
+
+function findByClass(node, className) {
+  if (node.className.split(/\s+/).includes(className)) return node;
+  for (const child of node.children) {
+    const found = findByClass(child, className);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function deepTextContent(node) {
+  return node.textContent + node.children.map(deepTextContent).join('');
 }
 
 test('renderQueryChips renders hostile query text as a text-only span', () => {
@@ -129,4 +153,98 @@ test('setDetail writes hostile progress text literally and applies warning styli
   assert.equal(main.textContent, '<svg onload=alert(1)>');
   assert.equal(sub.textContent, '<b>source failed</b>');
   assert.equal(sub.className, 'ingd-sub ingd-warn');
+});
+
+test('createCandidateCard renders untrusted candidate fields as literal text', () => {
+  const renderer = createIngestRenderer({ document: fakeDocument() });
+  const title = '<img src=x onerror=alert(1)>';
+  const venueName = 'CVPR\"><svg onload=alert(2)>';
+  const year = '<img src=x onerror=alert(4)>';
+  const type = '<b>type</b>';
+  const topic = '<i>topic</i>';
+  const note = '<svg onload=alert(3)>';
+
+  const card = renderer.createCandidateCard({
+    candidate: {
+      title,
+      year,
+      type,
+      topic,
+      _verify: { skipped: true, note, source_of_truth: 'dblp' },
+      in_library: false,
+      ccf: 'A',
+      relevance: 0.73,
+    },
+    index: 4,
+    venueName,
+    sourceLabels: { dblp: 'DBLP' },
+  });
+
+  assert.equal(card.tagName, 'LABEL');
+  assert.ok(card.className.split(/\s+/).includes('cand'));
+  const checkbox = card.children[0];
+  assert.equal(checkbox.className, 'cand-ck');
+  assert.equal(checkbox.type, 'checkbox');
+  assert.equal(checkbox.dataset.i, '4');
+  assert.equal(checkbox.checked, true);
+  assert.equal(checkbox.disabled, false);
+
+  const titleNode = findByClass(card, 'cand-title');
+  assert.equal(titleNode.textContent, title);
+  assert.equal(titleNode.children.length, 0);
+  const venue = findByClass(card, 'venue');
+  assert.equal(venue.textContent, `${venueName} ${year}`);
+  const venueClasses = venue.className.split(/\s+/);
+  assert.equal(venueClasses.length, 2);
+  assert.match(venueClasses[1], /^v-[A-Za-z0-9_-]+$/);
+  const verification = findByClass(card, 'vbadge');
+  assert.ok(verification.className.split(/\s+/).includes('src'));
+  assert.equal(verification.title, note);
+  assert.equal(verification.textContent, '源自DBLP');
+  const meta = findByClass(card, 'cand-meta');
+  assert.ok(meta.children.every((child) => child.textContent !== title && child.textContent !== type && child.textContent !== topic && child.textContent !== note));
+  assert.match(deepTextContent(meta), new RegExp(type.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(deepTextContent(meta), new RegExp(topic.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const bar = findByClass(card, 'cand-rel-bar');
+  assert.equal(bar.style.width, '73%');
+  assert.equal(findByClass(card, 'cand-rel').title, '相关度 73%');
+});
+
+test('createCandidateCard preserves in-library checkbox selection behavior', () => {
+  const renderer = createIngestRenderer({ document: fakeDocument() });
+
+  const card = renderer.createCandidateCard({
+    candidate: {
+      title: 'Safe title',
+      year: 2025,
+      in_library: true,
+    },
+    index: 0,
+    venueName: 'NeurIPS',
+    sourceLabels: {},
+  });
+
+  assert.ok(card.className.split(/\s+/).includes('in-lib'));
+  assert.equal(card.children[0].checked, false);
+  assert.equal(card.children[0].disabled, true);
+  assert.equal(findByClass(card, 'inlib-tag').textContent, ' · 已在库');
+});
+
+test('createCandidateCard renders an unknown hostile verification source literally', () => {
+  const renderer = createIngestRenderer({ document: fakeDocument() });
+  const source = '<img src=x onerror=alert(1)>';
+
+  const card = renderer.createCandidateCard({
+    candidate: {
+      title: 'Safe title',
+      _verify: { skipped: true, source_of_truth: source },
+    },
+    index: 0,
+    venueName: 'Safe venue',
+    sourceLabels: Object.create({ [source]: 'not an own label' }),
+  });
+
+  const verification = findByClass(card, 'vbadge');
+  assert.equal(verification.textContent, `源自${source}`);
+  assert.equal(verification.children.length, 0);
 });
