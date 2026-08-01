@@ -155,8 +155,11 @@ button{font-family:inherit}
 .paper-title-stack{display:flex;min-width:0;flex-direction:column;gap:2px}
 .paper-title-primary{min-width:0;color:inherit;font:inherit;line-height:inherit}
 .paper-title-secondary{min-width:0;color:var(--ink-3);font-size:.86em;font-weight:500;line-height:1.35}
-.ht-title .paper-title-stack,.m-item-title .paper-title-stack{display:inline-flex;vertical-align:middle;max-width:100%}
-.ht-title .paper-title-primary,.pi-title .paper-title-primary,.m-item-title .paper-title-primary{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ht-title .paper-title-stack{flex:1;min-width:0}
+.m-item-title .paper-title-stack{display:inline-flex;vertical-align:middle;max-width:100%}
+.ht-title .paper-title-primary,.ht-title .paper-title-secondary,.pi-title .paper-title-primary,.m-item-title .paper-title-primary{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ht-title-content{display:flex;align-items:center;width:100%;min-width:0}
+.ht-title-content>.sem-score,.ht-title-content>.fav-star{flex:0 0 auto}
 .review-title .paper-title-secondary,.paper-title .paper-title-secondary{margin-top:2px}
 .review-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:7px;color:var(--ink-3);font-size:12px}
 .review-actions{display:flex;gap:8px;flex:0 0 auto}

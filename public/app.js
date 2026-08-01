@@ -690,7 +690,7 @@ function pdfBadge(has) { return has ? `<span class="pdf-flag" title="PDF 已在�
 function rowHTML(p, idx) {
   return `<tr data-id="${p.id}">
     <td><span class="ht-idx">${idx}</span></td>
-    <td class="ht-title" title="${esc(titleSearch(p))}">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${titleMarkup(p)}</td>
+    <td class="ht-title" title="${esc(titleSearch(p))}"><span class="ht-title-content">${semScoreBadge(p.id)}<span class="fav-star ${p.favorite ? 'on' : ''}" data-id="${p.id}" title="${p.favorite ? '取消收藏' : '收藏'}">${p.favorite ? '★' : '☆'}</span>${titleMarkup(p)}</span></td>
     <td><span class="venue v-${p.venue}">${p.venue}</span></td>
     <td class="ht-ccf">${ccfBadge(p.ccf)}</td>
     <td class="ht-pdf">${pdfBadge(p.hasPdf)}</td>
