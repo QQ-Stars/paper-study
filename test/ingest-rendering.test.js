@@ -1,7 +1,24 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const test = require('node:test');
 
 const { createIngestRenderer } = require('../public/ingest-rendering');
+
+test('iq-x button rule resets native button styling', () => {
+  const css = fs.readFileSync(require.resolve('../public/style.css'), 'utf8');
+  const rule = css.match(/\.iq-x\s*\{([^}]*)\}/);
+
+  assert.ok(rule, 'expected an .iq-x CSS rule');
+  for (const property of [
+    /border\s*:\s*0\b/,
+    /background\s*:\s*transparent\b/,
+    /padding\s*:\s*0\b/,
+    /appearance\s*:\s*none\b/,
+    /font\s*:\s*inherit\b/,
+  ]) {
+    assert.match(rule[1], property);
+  }
+});
 
 class FakeElement {
   constructor(tagName) {

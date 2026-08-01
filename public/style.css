@@ -597,7 +597,7 @@ html[data-theme=dark] .v-ICLR,html[data-theme=dark] .v-ICML,html[data-theme=dark
 .iq-head{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
 .iq-chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px}
 .iq-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border-2);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--ink)}
-.iq-x{cursor:pointer;color:var(--ink-3);font-weight:600;font-size:13px;line-height:1}
+.iq-x{border:0;background:transparent;padding:0;appearance:none;font:inherit;cursor:pointer;color:var(--ink-3);font-weight:600;font-size:13px;line-height:1}
 .iq-x:hover{color:var(--accent)}
 .iq-bottom{display:flex;gap:10px}
 .iq-add{flex:1;padding:8px 12px;border:1px solid var(--border-2);border-radius:9px;font-size:12.5px;background:var(--bg);color:var(--ink);outline:none;font-family:var(--font-sans)}
