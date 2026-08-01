@@ -194,6 +194,7 @@ test('createCandidateCard renders untrusted candidate fields as literal text', (
   assert.equal(titleNode.children.length, 0);
   const venue = findByClass(card, 'venue');
   assert.equal(venue.textContent, `${venueName} ${year}`);
+  assert.equal(venue.children.length, 0);
   const venueClasses = venue.className.split(/\s+/);
   assert.equal(venueClasses.length, 2);
   assert.match(venueClasses[1], /^v-[A-Za-z0-9_-]+$/);
@@ -201,13 +202,45 @@ test('createCandidateCard renders untrusted candidate fields as literal text', (
   assert.ok(verification.className.split(/\s+/).includes('src'));
   assert.equal(verification.title, note);
   assert.equal(verification.textContent, '源自DBLP');
+  assert.equal(verification.children.length, 0);
   const meta = findByClass(card, 'cand-meta');
   assert.ok(meta.children.every((child) => child.textContent !== title && child.textContent !== type && child.textContent !== topic && child.textContent !== note));
   assert.match(deepTextContent(meta), new RegExp(type.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(deepTextContent(meta), new RegExp(topic.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const typeLeaf = meta.children.find((child) => child.textContent === ` · ${type}`);
+  const topicLeaf = meta.children.find((child) => child.textContent === ` · ${topic}`);
+  assert.equal(typeLeaf.children.length, 0);
+  assert.equal(topicLeaf.children.length, 0);
   const bar = findByClass(card, 'cand-rel-bar');
   assert.equal(bar.style.width, '73%');
-  assert.equal(findByClass(card, 'cand-rel').title, '相关度 73%');
+  const relevance = findByClass(card, 'cand-rel');
+  assert.equal(relevance.title, '相关度 73%');
+  assert.equal(relevance.children[1].textContent, '73');
+});
+
+test('createCandidateCard clamps and rounds relevance without a visible percent suffix', () => {
+  const renderer = createIngestRenderer({ document: fakeDocument() });
+  const cases = [
+    [NaN, 0],
+    [Infinity, 0],
+    ['not a number', 0],
+    [-0.2, 0],
+    [1.2, 100],
+    [0.736, 74],
+  ];
+
+  for (const [input, expected] of cases) {
+    const card = renderer.createCandidateCard({
+      candidate: { title: 'Safe title', relevance: input },
+      index: 0,
+      venueName: 'Safe venue',
+      sourceLabels: {},
+    });
+    const relevance = findByClass(card, 'cand-rel');
+    assert.equal(relevance.children[1].textContent, String(expected));
+    assert.equal(relevance.title, `相关度 ${expected}%`);
+    assert.equal(findByClass(card, 'cand-rel-bar').style.width, `${expected}%`);
+  }
 });
 
 test('createCandidateCard preserves in-library checkbox selection behavior', () => {

@@ -101,7 +101,7 @@
       bar.className = 'cand-rel-bar';
       bar.style.width = `${percent}%`;
       const percentText = document.createElement('span');
-      percentText.textContent = `${percent}%`;
+      percentText.textContent = String(percent);
       track.append(bar);
       relevance.append(track, percentText);
 
