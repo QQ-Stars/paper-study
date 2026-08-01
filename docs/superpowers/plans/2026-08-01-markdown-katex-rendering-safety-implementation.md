@@ -387,4 +387,3 @@ Run:
     git status --short
 
 Expected: no whitespace errors. Preserve the user's pre-existing AGENTS.md modification without staging, editing, or reverting it.
-
