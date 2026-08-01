@@ -285,6 +285,26 @@ test('createCandidateCard clamps and rounds relevance without a visible percent 
   }
 });
 
+test('createCandidateCard retains the empty type separator before a topic', () => {
+  const renderer = createIngestRenderer({ document: fakeDocument() });
+  const topic = '<i>topic</i>';
+  const card = renderer.createCandidateCard({
+    candidate: { title: 'Safe title', type: '', topic },
+    index: 0,
+    venueName: 'Safe venue',
+    sourceLabels: {},
+  });
+
+  const meta = findByClass(card, 'cand-meta');
+  const typeSeparatorIndex = meta.children.findIndex((child) => child.textContent === ' · ');
+  const topicLeaf = meta.children.find((child) => child.textContent === ` · ${topic}`);
+  assert.notEqual(typeSeparatorIndex, -1);
+  assert.equal(meta.children[typeSeparatorIndex].children.length, 0);
+  assert.equal(topicLeaf.children.length, 0);
+  assert.ok(typeSeparatorIndex < meta.children.indexOf(topicLeaf));
+  assert.ok(deepTextContent(meta).includes(` ·  · ${topic}`));
+});
+
 test('createCandidateCard preserves in-library checkbox selection behavior', () => {
   const renderer = createIngestRenderer({ document: fakeDocument() });
 

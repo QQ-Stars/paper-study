@@ -80,7 +80,7 @@
 
       const type = text(value.type);
       const topic = text(value.topic);
-      if (type) meta.append(document.createTextNode(` · ${type}`));
+      meta.append(document.createTextNode(` · ${type}`));
       if (topic) meta.append(document.createTextNode(` · ${topic}`));
 
       if (inLibrary) {
