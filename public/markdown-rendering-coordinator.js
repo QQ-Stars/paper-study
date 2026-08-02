@@ -39,18 +39,26 @@
     return typeof value === 'number' && Number.isFinite(value) && value >= 0;
   }
 
-  function usableWorker(worker) {
-    return Boolean(worker)
-      && (typeof worker === 'object' || typeof worker === 'function')
-      && typeof worker.postMessage === 'function'
-      && typeof worker.terminate === 'function';
+  function workerCapabilities(worker) {
+    try {
+      if (!worker || (typeof worker !== 'object' && typeof worker !== 'function')) return null;
+      const postMessage = worker.postMessage;
+      const terminateWorker = worker.terminate;
+      if (typeof postMessage !== 'function' || typeof terminateWorker !== 'function') return null;
+      return { postMessage, terminate: terminateWorker };
+    } catch (error) {
+      return null;
+    }
   }
 
-  function terminate(worker) {
+  function terminate(worker, knownTerminate) {
     try {
-      if (worker && typeof worker.terminate === 'function') worker.terminate();
+      const terminateWorker = typeof knownTerminate === 'function'
+        ? knownTerminate
+        : worker && worker.terminate;
+      if (typeof terminateWorker === 'function') terminateWorker.call(worker);
     } catch (error) {
-      // A failed cleanup must not prevent raw-text fallback.
+      // A failed cleanup must not prevent a still-current raw-text fallback.
     }
   }
 
@@ -74,62 +82,92 @@
       }
     }
 
+    function ownsVersion(job) {
+      return versions.get(job.element) === job.version;
+    }
+
     function isCurrent(job) {
-      return !job.cleaned
-        && activeJobs.get(job.element) === job
-        && versions.get(job.element) === job.version;
+      return !job.cleaned && ownsVersion(job) && activeJobs.get(job.element) === job;
+    }
+
+    function clear(timer) {
+      try { cancelTimer(timer); } catch (error) { /* ignore cleanup errors */ }
     }
 
     function cleanup(job) {
-      if (job.cleaned) return;
+      if (!job || job.cleaned) return;
       job.cleaned = true;
 
       if (activeJobs.get(job.element) === job) activeJobs.delete(job.element);
-      try { job.worker.onmessage = null; } catch (error) { /* ignore cleanup errors */ }
-      try { job.worker.onerror = null; } catch (error) { /* ignore cleanup errors */ }
-      if (job.timerStarted) {
-        try { cancelTimer(job.timer); } catch (error) { /* ignore cleanup errors */ }
+      if (job.worker) {
+        try { job.worker.onmessage = null; } catch (error) { /* ignore cleanup errors */ }
+        try { job.worker.onerror = null; } catch (error) { /* ignore cleanup errors */ }
+        try { job.worker.onmessageerror = null; } catch (error) { /* ignore cleanup errors */ }
       }
-      terminate(job.worker);
+      if (job.timerStarted) {
+        clear(job.timer);
+      }
+      terminate(job.worker, job.terminate);
     }
 
     function fallback(job) {
       if (!isCurrent(job)) return;
       cleanup(job);
-      writeRaw(job.element, job.source);
+      if (ownsVersion(job)) writeRaw(job.element, job.source);
     }
 
     function complete(job, html) {
       if (!isCurrent(job)) return;
       cleanup(job);
+      if (!ownsVersion(job)) return;
       try {
         job.element.innerHTML = html;
       } catch (error) {
-        writeRaw(job.element, job.source);
+        if (ownsVersion(job)) writeRaw(job.element, job.source);
       }
     }
 
     function renderInto(element, value) {
       if (!isElementKey(element)) return element;
 
-      const source = text(value);
       const previous = activeJobs.get(element);
-      if (previous) cleanup(previous);
-
       const version = (versions.get(element) || 0) + 1;
+      const reservation = {
+        element,
+        version,
+        source: '',
+        cleaned: false,
+      };
       versions.set(element, version);
+      activeJobs.set(element, reservation);
+
+      if (previous) cleanup(previous);
+      if (!isCurrent(reservation)) return element;
+
+      reservation.source = text(value);
+      if (!isCurrent(reservation)) return element;
 
       let worker;
       try {
         worker = createWorker(renderWorkerUrl);
       } catch (error) {
-        writeRaw(element, source);
+        fallback(reservation);
         return element;
       }
 
-      if (!usableWorker(worker)) {
+      if (!isCurrent(reservation)) {
         terminate(worker);
-        writeRaw(element, source);
+        return element;
+      }
+
+      const capabilities = workerCapabilities(worker);
+      if (!isCurrent(reservation)) {
+        terminate(worker, capabilities && capabilities.terminate);
+        return element;
+      }
+      if (!capabilities) {
+        terminate(worker);
+        fallback(reservation);
         return element;
       }
 
@@ -138,12 +176,15 @@
         worker,
         id: nextId++,
         version,
-        source,
+        source: reservation.source,
         timer: undefined,
         timerStarted: false,
         cleaned: false,
+        postMessage: capabilities.postMessage,
+        terminate: capabilities.terminate,
       };
       activeJobs.set(element, job);
+      reservation.cleaned = true;
 
       try {
         worker.onmessage = event => {
@@ -159,16 +200,34 @@
             fallback(job);
           }
         };
+        if (!isCurrent(job)) {
+          cleanup(job);
+          return element;
+        }
         worker.onerror = () => fallback(job);
+        if (!isCurrent(job)) {
+          cleanup(job);
+          return element;
+        }
+        worker.onmessageerror = () => fallback(job);
+        if (!isCurrent(job)) {
+          cleanup(job);
+          return element;
+        }
 
         const timer = schedule(() => fallback(job), timeoutMs);
         if (!isCurrent(job)) {
-          try { cancelTimer(timer); } catch (error) { /* ignore cleanup errors */ }
+          clear(timer);
+          cleanup(job);
           return element;
         }
         job.timer = timer;
         job.timerStarted = true;
-        worker.postMessage({ id: job.id, text: source });
+        job.postMessage.call(worker, { id: job.id, text: job.source });
+        if (!isCurrent(job)) {
+          cleanup(job);
+          return element;
+        }
       } catch (error) {
         fallback(job);
       }

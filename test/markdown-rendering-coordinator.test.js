@@ -40,8 +40,10 @@ class FakeWorker {
     this.messages = [];
     this.onmessage = null;
     this.onerror = null;
+    this.onmessageerror = null;
     this.terminateCalls = 0;
     this.postMessageError = postMessageError;
+    this.onTerminate = null;
   }
 
   postMessage(message) {
@@ -51,6 +53,7 @@ class FakeWorker {
 
   terminate() {
     this.terminateCalls++;
+    if (typeof this.onTerminate === 'function') this.onTerminate(this);
   }
 
   deliver(data) {
@@ -60,6 +63,10 @@ class FakeWorker {
   fail(event = { message: 'worker failure' }) {
     if (typeof this.onerror === 'function') this.onerror(event);
   }
+
+  messageError(event = { message: 'message deserialization failure' }) {
+    if (typeof this.onmessageerror === 'function') this.onmessageerror(event);
+  }
 }
 
 class ManualTimers {
@@ -68,18 +75,22 @@ class ManualTimers {
     this.tasks = new Map();
     this.delays = [];
     this.cleared = [];
+    this.onClear = null;
+    this.onSet = null;
   }
 
   setTimeout(callback, delay) {
     const id = this.nextId++;
     this.tasks.set(id, callback);
     this.delays.push({ id, delay });
+    if (typeof this.onSet === 'function') this.onSet(id, callback, delay);
     return id;
   }
 
   clearTimeout(id) {
     this.cleared.push(id);
     this.tasks.delete(id);
+    if (typeof this.onClear === 'function') this.onClear(id);
   }
 
   fire(id) {
@@ -127,7 +138,8 @@ function assertCleaned(worker, timers, timerId) {
   assert.equal(worker.terminateCalls, 1);
   assert.equal(worker.onmessage, null);
   assert.equal(worker.onerror, null);
-  assert.ok(timers.cleared.includes(timerId));
+  assert.equal(worker.onmessageerror, null);
+  assert.equal(timers.cleared.filter(id => id === timerId).length, 1);
 }
 
 test('attaches the coordinator API in a browser-style UMD realm', () => {
@@ -146,6 +158,298 @@ test('attaches the coordinator API in a browser-style UMD realm', () => {
   const mutatedScope = {};
   vm.runInNewContext(withoutBrowserExport, { self: mutatedScope }, { filename: coordinatorFilename });
   assert.equal(mutatedScope.MarkdownRenderingCoordinator, undefined);
+});
+
+test('browser UMD defaults to its Worker and 200ms timeout, then handles messageerror', () => {
+  const source = fs.readFileSync(coordinatorFilename, 'utf8');
+  const workers = [];
+  const timers = new ManualTimers();
+
+  class RealmWorker extends FakeWorker {
+    constructor(url) {
+      super();
+      this.url = url;
+      workers.push(this);
+    }
+  }
+
+  const browserScope = {
+    Worker: RealmWorker,
+    setTimeout: timers.setTimeout.bind(timers),
+    clearTimeout: timers.clearTimeout.bind(timers),
+  };
+  vm.runInNewContext(source, { self: browserScope }, { filename: coordinatorFilename });
+  const coordinator = browserScope.MarkdownRenderingCoordinator.createMarkdownRenderCoordinator();
+  const element = new FakeElement();
+
+  assert.equal(coordinator.renderInto(element, 'realm source'), element);
+  assert.equal(workers.length, 1);
+  assert.equal(workers[0].url, 'markdown-rendering-worker.js');
+  assert.deepEqual(timers.delays, [{ id: 1, delay: 200 }]);
+
+  workers[0].messageError();
+
+  assertFallback(element, 'realm source');
+  assertCleaned(workers[0], timers, 1);
+});
+
+test('completion cleanup yields to a reentrant newer request from clearTimeout', () => {
+  const workers = [];
+  const timers = new ManualTimers();
+  const { coordinator } = createCoordinator({ createWorker: createWorkerFactory(workers), timers });
+  const element = new FakeElement();
+
+  coordinator.renderInto(element, 'old source');
+  const oldWorker = workers[0];
+  const oldRequest = oldWorker.messages[0];
+  const completeOld = oldWorker.onmessage;
+  let clearReentries = 0;
+  timers.onClear = timerId => {
+    if (timerId === 1 && clearReentries === 0) {
+      clearReentries++;
+      coordinator.renderInto(element, 'nested source');
+    }
+  };
+
+  completeOld({ data: { id: oldRequest.id, html: '<p>stale old result</p>' } });
+
+  assert.equal(clearReentries, 1);
+  assert.equal(workers.length, 2);
+  assert.equal(element.innerHTML, '<p>existing markup</p>');
+  assert.equal(element.textContent, 'existing text');
+  assertCleaned(oldWorker, timers, 1);
+
+  const nestedWorker = workers[1];
+  assert.equal(typeof nestedWorker.onmessage, 'function');
+  coordinator.renderInto(element, 'new source');
+  assertCleaned(nestedWorker, timers, 2);
+
+  const newWorker = workers[2];
+  const completeNew = newWorker.onmessage;
+  completeNew({ data: { id: newWorker.messages[0].id, html: '<p>new result</p>' } });
+
+  assert.equal(element.innerHTML, '<p>new result</p>');
+  assert.equal(element.textContent, 'existing text');
+  assertCleaned(newWorker, timers, 3);
+});
+
+test('fallback cleanup yields to a reentrant newer request from clearTimeout', () => {
+  function settleWith(factory) {
+    const workers = [];
+    const timers = new ManualTimers();
+    const coordinator = factory({
+      createWorker: createWorkerFactory(workers),
+      setTimeout: timers.setTimeout.bind(timers),
+      clearTimeout: timers.clearTimeout.bind(timers),
+    });
+    const element = new FakeElement();
+
+    coordinator.renderInto(element, 'old source');
+    const oldWorker = workers[0];
+    const failOld = oldWorker.onerror;
+    let clearReentries = 0;
+    timers.onClear = timerId => {
+      if (timerId === 1 && clearReentries === 0) {
+        clearReentries++;
+        coordinator.renderInto(element, 'nested source');
+      }
+    };
+    failOld({ message: 'old Worker failed' });
+
+    return { workers, timers, coordinator, element, oldWorker, clearReentries };
+  }
+
+  const current = settleWith(createMarkdownRenderCoordinator);
+  assert.equal(current.clearReentries, 1);
+  assert.equal(current.workers.length, 2);
+  assert.equal(current.element.innerHTML, '<p>existing markup</p>');
+  assert.equal(current.element.textContent, 'existing text');
+  assertCleaned(current.oldWorker, current.timers, 1);
+
+  const nestedWorker = current.workers[1];
+  current.coordinator.renderInto(current.element, 'new source');
+  assertCleaned(nestedWorker, current.timers, 2);
+  const newWorker = current.workers[2];
+  newWorker.onmessage({ data: { id: newWorker.messages[0].id, html: '<p>new result</p>' } });
+  assert.equal(current.element.innerHTML, '<p>new result</p>');
+  assert.equal(current.element.textContent, 'existing text');
+  assertCleaned(newWorker, current.timers, 3);
+
+  const source = fs.readFileSync(coordinatorFilename, 'utf8');
+  const withoutFallbackOwnershipCheck = source.replace(
+    'if (ownsVersion(job)) writeRaw(job.element, job.source);',
+    'writeRaw(job.element, job.source);',
+  );
+  assert.notEqual(withoutFallbackOwnershipCheck, source);
+  const sandbox = { module: { exports: {} } };
+  vm.runInNewContext(withoutFallbackOwnershipCheck, sandbox, { filename: coordinatorFilename });
+  const mutated = settleWith(sandbox.module.exports.createMarkdownRenderCoordinator);
+  assert.equal(mutated.element.textContent, 'old source');
+});
+
+test('cancellation reserves its version before a terminate callback can reenter', () => {
+  const workers = [];
+  const timers = new ManualTimers();
+  const { coordinator } = createCoordinator({ createWorker: createWorkerFactory(workers), timers });
+  const element = new FakeElement();
+
+  coordinator.renderInto(element, 'old source');
+  const oldWorker = workers[0];
+  let terminateReentries = 0;
+  oldWorker.onTerminate = () => {
+    if (terminateReentries === 0) {
+      terminateReentries++;
+      coordinator.renderInto(element, 'nested source');
+    }
+  };
+
+  coordinator.renderInto(element, 'outer source');
+
+  assert.equal(terminateReentries, 1);
+  assert.equal(workers.length, 2);
+  assert.equal(element.innerHTML, '<p>existing markup</p>');
+  assert.equal(element.textContent, 'existing text');
+  assertCleaned(oldWorker, timers, 1);
+
+  const nestedWorker = workers[1];
+  coordinator.renderInto(element, 'new source');
+  assertCleaned(nestedWorker, timers, 2);
+
+  const newWorker = workers[2];
+  const completeNew = newWorker.onmessage;
+  completeNew({ data: { id: newWorker.messages[0].id, html: '<p>new result</p>' } });
+
+  assert.equal(element.innerHTML, '<p>new result</p>');
+  assert.equal(element.textContent, 'existing text');
+  assertCleaned(newWorker, timers, 3);
+});
+
+test('reentrant Worker creation, handler setup, and scheduling abandon superseded setup jobs', () => {
+  const cases = [
+    {
+      name: 'factory',
+      createFactory(getCoordinator, element, workers) {
+        let first = true;
+        return () => {
+          const worker = new FakeWorker();
+          workers.push(worker);
+          if (first) {
+            first = false;
+            getCoordinator().renderInto(element, 'nested source');
+          }
+          return worker;
+        };
+      },
+    },
+    {
+      name: 'onmessage setter',
+      createFactory(getCoordinator, element, workers) {
+        let first = true;
+        return () => {
+          const worker = new FakeWorker();
+          if (first) {
+            first = false;
+            let handler = null;
+            Object.defineProperty(worker, 'onmessage', {
+              configurable: true,
+              get() { return handler; },
+              set(value) {
+                handler = value;
+                if (typeof value === 'function') getCoordinator().renderInto(element, 'nested source');
+              },
+            });
+          }
+          workers.push(worker);
+          return worker;
+        };
+      },
+    },
+    {
+      name: 'timer scheduling',
+      createFactory(_coordinator, _element, workers) {
+        return () => {
+          const worker = new FakeWorker();
+          workers.push(worker);
+          return worker;
+        };
+      },
+      configureTimers(coordinator, element, timers) {
+        let first = true;
+        timers.onSet = () => {
+          if (first) {
+            first = false;
+            coordinator.renderInto(element, 'nested source');
+          }
+        };
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    const workers = [];
+    const timers = new ManualTimers();
+    const element = new FakeElement();
+    let coordinator;
+    const factory = scenario.createFactory(() => coordinator, element, workers);
+    const instance = createCoordinator({ createWorker: (...args) => factory(...args), timers });
+    coordinator = instance.coordinator;
+    if (scenario.configureTimers) scenario.configureTimers(coordinator, element, timers);
+
+    coordinator.renderInto(element, 'outer source');
+
+    assert.equal(workers.length, 2, scenario.name);
+    const [outerWorker, nestedWorker] = workers;
+    assert.equal(outerWorker.terminateCalls, 1, scenario.name);
+    assert.equal(outerWorker.onmessage, null, scenario.name);
+    assert.equal(outerWorker.onerror, null, scenario.name);
+    assert.equal(outerWorker.onmessageerror, null, scenario.name);
+    assert.equal(element.innerHTML, '<p>existing markup</p>', scenario.name);
+    assert.equal(element.textContent, 'existing text', scenario.name);
+
+    const completeNested = nestedWorker.onmessage;
+    completeNested({ data: { id: nestedWorker.messages[0].id, html: '<p>nested result</p>' } });
+    assert.equal(element.innerHTML, '<p>nested result</p>', scenario.name);
+    assert.equal(element.textContent, 'existing text', scenario.name);
+  }
+});
+
+test('hostile Worker capability getters never escape and only fall back while current', () => {
+  const source = '<img src=x onerror=alert(1)> raw source';
+
+  let postGetterTerminations = 0;
+  const postGetterWorker = {
+    get postMessage() { throw new Error('postMessage getter failed'); },
+    terminate() { postGetterTerminations++; },
+  };
+  const postTimers = new ManualTimers();
+  const post = createCoordinator({
+    createWorker: createWorkerFactory([], { returnValue: postGetterWorker }),
+    timers: postTimers,
+  });
+  const postElement = new FakeElement();
+  assert.doesNotThrow(() => post.coordinator.renderInto(postElement, source));
+  assertFallback(postElement, source);
+  assert.equal(postGetterTerminations, 1);
+  assert.deepEqual(postTimers.delays, []);
+
+  let terminateGetterReads = 0;
+  const terminateGetterWorker = {
+    postMessage() {},
+    get terminate() {
+      terminateGetterReads++;
+      throw new Error('terminate getter failed');
+    },
+  };
+  const terminateTimers = new ManualTimers();
+  const terminated = createCoordinator({
+    createWorker: createWorkerFactory([], { returnValue: terminateGetterWorker }),
+    timers: terminateTimers,
+  });
+  const terminateElement = new FakeElement();
+  assert.doesNotThrow(() => terminated.coordinator.renderInto(terminateElement, source));
+  assertFallback(terminateElement, source);
+  assert.ok(terminateGetterReads >= 1);
+  assert.deepEqual(terminateTimers.delays, []);
 });
 
 test('exports only the coordinator factory and renders a matching Worker result', () => {
