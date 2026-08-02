@@ -14,7 +14,10 @@ test('ingest UI delegates untrusted rendering to the safe renderer', () => {
     return match[0];
   };
 
-  assert.match(index, /<script\s+src=["']ingest-rendering\.js["']><\/script>\s*<script\s+src=["']app\.js["']><\/script>/);
+  assert.match(
+    index,
+    /<script\s+src=["']ingest-rendering\.js["']><\/script>\s*<script\s+src=["']markdown-rendering-coordinator\.js["']><\/script>\s*<script\s+src=["']app\.js["']><\/script>/,
+  );
   assert.match(app, /let\s+candidates\s*=\s*\[\]\s*;\s*const\s+ingestRenderer\s*=\s*window\.IngestRendering\.createIngestRenderer\(\{\s*document\s*}\)\s*;/);
 
   const chips = functionBody('renderQueryChips');
