@@ -30,6 +30,11 @@ const streamNDJSON = (...args) => window.Ndjson.streamNDJSON(...args);
 const normTitle = (s) => (s || '').toLowerCase().replace(/[^a-z0-9一-龥]+/g, '');  // 同 db.title_norm
 const markdownRenderer = window.MarkdownRenderingCoordinator.createMarkdownRenderCoordinator();
 
+function setMarkdownStaticHtml(el, html) {
+  markdownRenderer.cancel(el);
+  el.innerHTML = html;
+}
+
 function renderMd(el, text) {
   return markdownRenderer.renderInto(el, text);
 }
@@ -760,7 +765,7 @@ async function openPaper(p) {
   curNoteText = await (await fetch('/api/note?id=' + encodeURIComponent(p.id))).text();
   $('#noteEdit').value = curNoteText;
   if (curNoteText.trim()) renderMd($('#notePreview'), curNoteText);
-  else $('#notePreview').innerHTML = '<div class="placeholder">还没有笔记。点「编辑」开始记，或在对话里让我「记录」。</div>';
+  else setMarkdownStaticHtml($('#notePreview'), '<div class="placeholder">还没有笔记。点「编辑」开始记，或在对话里让我「记录」。</div>');
   showNoteMode('preview');
   // 相似论文（按需查找，切论文时清空）
   resetSimilar();
@@ -774,7 +779,7 @@ function setExplainer(text) {
   const real = text && text.trim() && text.trim() !== EX_EMPTY;
   curHasExplainer = !!real;
   if (real) renderMd($('#explainerView'), text);
-  else $('#explainerView').innerHTML = '<div class="placeholder">这篇还没有讲解。点上方「✨ 生成讲解」，让大模型精读后写一份结构化讲解。</div>';
+  else setMarkdownStaticHtml($('#explainerView'), '<div class="placeholder">这篇还没有讲解。点上方「✨ 生成讲解」，让大模型精读后写一份结构化讲解。</div>');
   $('#explainerView').scrollTop = 0;
   const btn = $('#genExplainerBtn');
   if (btn) { btn.disabled = false; btn.textContent = real ? '✨ 重新生成' : '✨ 生成讲解'; }
@@ -787,10 +792,10 @@ async function generateExplainer() {
   const deep = $('#genDeep').checked, pid = current.id;
   btn.disabled = true; const old = btn.textContent; btn.textContent = '生成中…';
   hint.textContent = deep ? '通读 PDF 全文，约 30~90 秒…' : '约 10~40 秒…';
-  view.innerHTML = '<div class="ex-progress"><span class="ex-spinner"></span><span class="ex-log" id="exLog">正在准备…</span></div>';
+  setMarkdownStaticHtml(view, '<div class="ex-progress"><span class="ex-spinner"></span><span class="ex-log" id="exLog">正在准备…</span></div>');
   const STAGE = { load: '读取论文信息', pdf: '读取 PDF 全文', generate: '大模型撰写讲解中' };
   const setLog = (t) => { const el = document.getElementById('exLog'); if (el) el.textContent = t; };
-  const fail = (msg) => { view.innerHTML = '<div class="placeholder">生成失败：' + msg + '<br>可在顶栏 ⚙ 检查模型与密钥后重试。</div>'; btn.disabled = false; btn.textContent = old; hint.textContent = ''; };
+  const fail = (msg) => { setMarkdownStaticHtml(view, '<div class="placeholder">生成失败：' + msg + '<br>可在顶栏 ⚙ 检查模型与密钥后重试。</div>'); btn.disabled = false; btn.textContent = old; hint.textContent = ''; };
   try {
     await streamNDJSON('/api/explain', { id: pid, deep }, (ev) => {
       if (ev.type === 'progress') {
@@ -815,7 +820,7 @@ function setTranslation(text) {
   const real = text && text.trim();
   curHasTranslation = !!real;
   if (real) renderMd($('#transView'), text);
-  else $('#transView').innerHTML = '<div class="placeholder">选择论文后，点「🌐 翻译全文」生成中文翻译——读取 PDF 全文、自动跳过参考文献，分段翻译（较慢，约 1~3 分钟）。</div>';
+  else setMarkdownStaticHtml($('#transView'), '<div class="placeholder">选择论文后，点「🌐 翻译全文」生成中文翻译——读取 PDF 全文、自动跳过参考文献，分段翻译（较慢，约 1~3 分钟）。</div>');
   $('#transView').scrollTop = 0;
   const btn = $('#genTransBtn');
   if (btn) { btn.disabled = false; btn.textContent = real ? '🌐 重新翻译' : '🌐 翻译全文'; }
@@ -827,9 +832,9 @@ async function generateTranslation() {
   const btn = $('#genTransBtn'), view = $('#transView'), hint = $('#transHint'), pid = current.id;
   btn.disabled = true; const old = btn.textContent; btn.textContent = '翻译中…';
   hint.textContent = '全文翻译较慢，请耐心等待…';
-  view.innerHTML = '<div class="ex-progress"><span class="ex-spinner"></span><span class="ex-log" id="transLog">正在准备…</span></div>';
+  setMarkdownStaticHtml(view, '<div class="ex-progress"><span class="ex-spinner"></span><span class="ex-log" id="transLog">正在准备…</span></div>');
   const setLog = (t) => { const el = document.getElementById('transLog'); if (el) el.textContent = t; };
-  const fail = (msg) => { view.innerHTML = '<div class="placeholder">翻译失败：' + msg + '<br>需要本篇有本地 PDF；可在顶栏 ⚙ 检查模型与密钥后重试。</div>'; btn.disabled = false; btn.textContent = old; hint.textContent = ''; };
+  const fail = (msg) => { setMarkdownStaticHtml(view, '<div class="placeholder">翻译失败：' + msg + '<br>需要本篇有本地 PDF；可在顶栏 ⚙ 检查模型与密钥后重试。</div>'); btn.disabled = false; btn.textContent = old; hint.textContent = ''; };
   try {
     await streamNDJSON('/api/translate', { id: pid }, (ev) => {
       if (ev.type === 'progress') {
@@ -1396,7 +1401,7 @@ async function saveNote() {
   curNoteText = content;
   current.hasNote = !!content.trim();
   const pp = PAPERS.find(x => x.id === current.id); if (pp) pp.hasNote = current.hasNote;
-  if (content.trim()) renderMd($('#notePreview'), content); else $('#notePreview').innerHTML = '<div class="placeholder">（空）</div>';
+  if (content.trim()) renderMd($('#notePreview'), content); else setMarkdownStaticHtml($('#notePreview'), '<div class="placeholder">（空）</div>');
   const h = $('#saveHint'); h.textContent = '已保存 ✓ ' + new Date().toLocaleTimeString(); setTimeout(() => h.textContent = '', 2500);
 }
 async function saveStatus(status) {

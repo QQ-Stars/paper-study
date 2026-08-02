@@ -115,6 +115,49 @@ function assertAppRendererContract(source) {
   assert.doesNotMatch(source, /\b(?:const|let|var)\s+md\s*=|\bfunction\s+md\s*\(/);
 }
 
+function functionBody(source, name, nextName) {
+  const startExpression = new RegExp('(?:async\\s+)?function\\s+' + name + '\\b');
+  const nextExpression = new RegExp('(?:async\\s+)?function\\s+' + nextName + '\\b');
+  const start = source.search(startExpression);
+  assert.ok(start >= 0, 'expected ' + name + ' function');
+
+  const afterStart = source.slice(start + 1);
+  const nextOffset = afterStart.search(nextExpression);
+  assert.ok(nextOffset >= 0, 'expected ' + nextName + ' after ' + name);
+  return source.slice(start, start + 1 + nextOffset);
+}
+
+function assertMarkdownStateInvalidationContract(source) {
+  const helper = source.match(
+    /function\s+setMarkdownStaticHtml\s*\(\s*el\s*,\s*html\s*\)\s*\{([\s\S]*?)\n\}/,
+  );
+  assert.ok(helper, 'trusted Markdown-target HTML needs a single invalidating writer');
+  assert.match(
+    helper[1],
+    /^\s*markdownRenderer\s*\.\s*cancel\s*\(\s*el\s*\)\s*;?\s*el\s*\.\s*innerHTML\s*=\s*html\s*;?\s*$/,
+  );
+
+  const directTargetWrites = /\$\(\s*['"]#(?:notePreview|explainerView|transView)['"]\s*\)\s*\.\s*innerHTML\s*=/g;
+  assert.equal([...source.matchAll(directTargetWrites)].length, 0, 'Markdown targets must not bypass cancellation');
+
+  const explainer = functionBody(source, 'generateExplainer', 'setTranslation');
+  const translation = functionBody(source, 'generateTranslation', 'findSimilar');
+  for (const [name, body] of [['explainer', explainer], ['translation', translation]]) {
+    assert.doesNotMatch(body, /\bview\s*\.\s*innerHTML\s*=/, name + ' status writes must invalidate pending renders');
+    assert.equal(
+      [...body.matchAll(/\bsetMarkdownStaticHtml\s*\(\s*view\s*,/g)].length,
+      2,
+      name + ' must invalidate for both progress and error states',
+    );
+  }
+
+  assert.equal(
+    [...source.matchAll(/\bsetMarkdownStaticHtml\s*\(/g)].length,
+    9,
+    'the shared writer plus eight known placeholder/progress/error call sites form the complete state-write contract',
+  );
+}
+
 test('the page loads adjacent classic markdown scripts in the required order', () => {
   assertPageScriptContract(indexHtml);
 });
@@ -166,4 +209,8 @@ test('the semantic page script check rejects unsafe sources and non-classic scri
 
 test('the application-level markdown renderer delegates every renderMd call to the coordinator', () => {
   assertAppRendererContract(appSource);
+});
+
+test('direct Markdown target state writes invalidate pending Worker renders first', () => {
+  assertMarkdownStateInvalidationContract(appSource);
 });

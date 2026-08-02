@@ -627,6 +627,49 @@ test('a newer request cancels the prior same-element job and ignores its capture
   assertCleaned(secondWorker, timers, 2);
 });
 
+test('cancel invalidates a pending job before a direct placeholder write', () => {
+  const workers = [];
+  const timers = new ManualTimers();
+  const { coordinator } = createCoordinator({ createWorker: createWorkerFactory(workers), timers });
+  const element = new FakeElement();
+
+  coordinator.renderInto(element, 'slow old-paper Markdown');
+  const worker = workers[0];
+  const request = worker.messages[0];
+  const staleMessageHandler = worker.onmessage;
+  const staleTimeout = timers.tasks.get(1);
+
+  assert.equal(coordinator.cancel(element), element);
+  element.innerHTML = '<div class="placeholder">new-paper state</div>';
+
+  staleMessageHandler({ data: { id: request.id, html: '<p>old-paper result</p>' } });
+  staleTimeout();
+
+  assert.equal(element.innerHTML, '<div class="placeholder">new-paper state</div>');
+  assert.equal(element.textContent, 'existing text');
+  assertCleaned(worker, timers, 1);
+});
+
+test('cancel reserves its invalidated version before termination can reenter', () => {
+  const workers = [];
+  const timers = new ManualTimers();
+  const { coordinator } = createCoordinator({ createWorker: createWorkerFactory(workers), timers });
+  const element = new FakeElement();
+
+  coordinator.renderInto(element, 'old source');
+  const oldWorker = workers[0];
+  oldWorker.onTerminate = () => coordinator.renderInto(element, 'new source');
+
+  coordinator.cancel(element);
+
+  assertCleaned(oldWorker, timers, 1);
+  assert.equal(workers.length, 2);
+  const newWorker = workers[1];
+  newWorker.deliver({ id: newWorker.messages[0].id, html: '<p>new result</p>' });
+  assert.equal(element.innerHTML, '<p>new result</p>');
+  assertCleaned(newWorker, timers, 2);
+});
+
 test('different elements maintain independent active Worker jobs', () => {
   const workers = [];
   const timers = new ManualTimers();

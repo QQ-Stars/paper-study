@@ -110,6 +110,26 @@
       terminate(job.worker, job.terminate);
     }
 
+    function cancel(element) {
+      if (!isElementKey(element)) return element;
+
+      const previous = activeJobs.get(element);
+      const version = (versions.get(element) || 0) + 1;
+      const reservation = {
+        element,
+        version,
+        source: '',
+        cleaned: false,
+      };
+      versions.set(element, version);
+      activeJobs.set(element, reservation);
+
+      if (previous) cleanup(previous);
+      if (activeJobs.get(element) === reservation) activeJobs.delete(element);
+      reservation.cleaned = true;
+      return element;
+    }
+
     function fallback(job) {
       if (!isCurrent(job)) return;
       cleanup(job);
@@ -235,7 +255,7 @@
       return element;
     }
 
-    return { renderInto };
+    return { renderInto, cancel };
   }
 
   return { createMarkdownRenderCoordinator };
