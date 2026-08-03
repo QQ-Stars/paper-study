@@ -278,3 +278,29 @@ test('completeReview without review data uses a forced versioned load', async ()
   assert.equal(harness.getReviewData(), newData);
   assert.deepEqual(harness.renders, { list: 1, current: 1, details: 1 });
 });
+
+test('reduced-motion preference controls ECharts animation as well as CSS', () => {
+  assert.match(app, /matchMedia\(\s*['"]\(prefers-reduced-motion:\s*reduce\)['"]\s*\)/);
+  assert.match(app, /function\s+chartAnimationDuration\s*\(/);
+  assert.doesNotMatch(app, /animationDuration(?:Update)?:\s*(?:600|700|750)\b/);
+});
+
+test('Settings close is idempotent and restores the active view scroll and focus', () => {
+  const settings = app.slice(app.indexOf('function activeViewScrollContainer'), app.indexOf('function closeSettingsModal') + 900);
+  assert.match(settings, /document\.activeElement/);
+  assert.match(settings, /openSettingsModal[\s\S]*spatialWorkspace\?\.closePanels/);
+  assert.match(settings, /scrollTop/);
+  assert.match(settings, /classList\.contains\(['"]hidden['"]\)/);
+  assert.match(settings, /\.focus\(\)/);
+});
+
+test('leaving Home closes transient spatial panels without changing navigation state', () => {
+  const showView = app.slice(app.indexOf('function showView'), app.indexOf('function fmtTime'));
+  assert.match(showView, /v\s*!=\s*['"]home['"][^\n]*spatialWorkspace\?\.closePanels/);
+});
+
+test('leaving spatial appearance clears transient panels without changing view', () => {
+  const handler = app.slice(app.indexOf('function handleAppearanceChange'), app.indexOf("document.addEventListener('paperstudy:appearancechange'"));
+  assert.match(handler, /event\.detail\.uiStyle\s*!=\s*['"]spatial['"][^\n]*spatialWorkspace\?\.closePanels/);
+  assert.doesNotMatch(handler, /showView\(/);
+});

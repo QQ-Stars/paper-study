@@ -640,3 +640,383 @@ html[data-ui-style="spatial"] .appearance-options label:has(input:checked) {
   border-color: var(--sp-accent);
   background: var(--sp-accent-soft);
 }
+
+@media (max-width: 1100px) {
+  html[data-ui-style="spatial"] .spatial-overview {
+    grid-template-columns: minmax(190px, 0.72fr) minmax(0, 1.8fr);
+    min-height: 560px;
+  }
+
+  html[data-ui-style="spatial"] .spatial-mobile-tools {
+    display: flex;
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  html[data-ui-style="spatial"] #spatialQueueToggle { display: none; }
+
+  html[data-ui-style="spatial"] .spatial-inspector {
+    position: fixed;
+    top: 74px;
+    right: 16px;
+    bottom: 16px;
+    z-index: 72;
+    width: min(360px, calc(100vw - 32px));
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateX(calc(100% + 24px));
+    transition: transform 180ms ease, visibility 0s linear 180ms;
+  }
+
+  html[data-ui-style="spatial"] .spatial-overview.is-inspector-open .spatial-inspector {
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateX(0);
+    transition-delay: 0s;
+  }
+
+  html[data-ui-style="spatial"] #spatialInspectorClose {
+    display: inline-grid;
+    place-items: center;
+    margin: 0 0 12px auto;
+  }
+
+  html[data-ui-style="spatial"] .spatial-scrim:not([hidden]) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    border: 0;
+    background: color-mix(in srgb, var(--sp-bg) 64%, transparent);
+  }
+
+  html[data-ui-style="spatial"] #topFilters {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  html[data-ui-style="spatial"] .layer-offset--4,
+  html[data-ui-style="spatial"] .layer-offset-4 { opacity: 0.12; }
+
+  html[data-ui-style="spatial"] .layer-offset--2 { transform: translate(-4%, -60%) scale(0.92); }
+  html[data-ui-style="spatial"] .layer-offset-2 { transform: translate(4%, -40%) scale(0.92); }
+}
+
+@media (max-width: 760px) {
+  html[data-ui-style="spatial"] body { padding-bottom: 72px; }
+
+  html[data-ui-style="spatial"] #rail {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 90;
+    display: flex;
+    flex-direction: row;
+    width: auto;
+    height: 72px;
+    padding: 6px 8px;
+    border-top: 1px solid var(--sp-border-strong);
+    border-right: 0;
+    overflow: hidden;
+    -webkit-backdrop-filter: blur(8px) saturate(110%);
+    backdrop-filter: blur(8px) saturate(110%);
+  }
+
+  html[data-ui-style="spatial"] #rail button { min-width: 44px; min-height: 44px; }
+
+  html[data-ui-style="spatial"] .rail-brand,
+  html[data-ui-style="spatial"] .rail-spacer { display: none; }
+
+  html[data-ui-style="spatial"] .viewnav {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: row;
+    gap: 4px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+
+  html[data-ui-style="spatial"] .viewnav button {
+    flex: 0 0 54px;
+    width: 54px;
+    padding: 4px;
+  }
+
+  html[data-ui-style="spatial"] .viewnav button.active::before {
+    top: -6px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    height: 2px;
+    transform: none;
+  }
+
+  html[data-ui-style="spatial"] .rail-foot {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+    padding-top: 0;
+    padding-left: 6px;
+    border-top: 0;
+    border-left: 1px solid var(--sp-border);
+  }
+
+  html[data-ui-style="spatial"] #shell {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    padding-bottom: 0;
+  }
+
+  html[data-ui-style="spatial"] #topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    min-height: 58px;
+    padding: 7px 10px;
+    overflow: visible;
+  }
+
+  html[data-ui-style="spatial"] .brand { display: none; }
+  html[data-ui-style="spatial"] #topFilters { display: contents; }
+
+  html[data-ui-style="spatial"] .search-box {
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  html[data-ui-style="spatial"] #search {
+    width: 100%;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  html[data-ui-style="spatial"] .progress-wrap {
+    display: flex;
+    grid-column: 2;
+    min-width: 76px;
+  }
+
+  html[data-ui-style="spatial"] #topFilters > .home-filter-actions { display: none; }
+
+  html[data-ui-style="spatial"] .spatial-filter-slot .home-filter-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 14px 0 18px;
+  }
+
+  html[data-ui-style="spatial"] .spatial-filter-slot #yearFilters {
+    display: flex;
+    grid-column: 1 / -1;
+    gap: 6px;
+    overflow-x: auto;
+  }
+
+  html[data-ui-style="spatial"] #homeFilterActions button { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] #homeFilterActions select { min-width: 44px; min-height: 44px; }
+
+  html[data-ui-style="spatial"] #home,
+  html[data-ui-style="spatial"] #review,
+  html[data-ui-style="spatial"] #manage,
+  html[data-ui-style="spatial"] #jobs,
+  html[data-ui-style="spatial"] #insights { padding: 16px 12px 88px; }
+
+  html[data-ui-style="spatial"] .chart-card,
+  html[data-ui-style="spatial"] .table-card,
+  html[data-ui-style="spatial"] .ebatch,
+  html[data-ui-style="spatial"] .review-stat,
+  html[data-ui-style="spatial"] .review-card,
+  html[data-ui-style="spatial"] .ingest-bar,
+  html[data-ui-style="spatial"] .lib-card,
+  html[data-ui-style="spatial"] .job-card,
+  html[data-ui-style="spatial"] .set-card {
+    box-shadow: inset 0 1px var(--sp-highlight);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  html[data-ui-style="spatial"] .spatial-queue,
+  html[data-ui-style="spatial"] .spatial-stage,
+  html[data-ui-style="spatial"] .spatial-inspector,
+  html[data-ui-style="spatial"] #topbar {
+    -webkit-backdrop-filter: blur(8px) saturate(110%);
+    backdrop-filter: blur(8px) saturate(110%);
+  }
+
+  html[data-ui-style="spatial"] .spatial-overview {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    gap: 10px;
+  }
+
+  html[data-ui-style="spatial"] .spatial-mobile-tools {
+    position: sticky;
+    top: 0;
+    z-index: 12;
+    display: flex;
+    grid-column: 1;
+    justify-content: space-between;
+    padding: 6px;
+    border: 1px solid var(--sp-border);
+    border-radius: 12px;
+    background: var(--sp-surface-solid);
+  }
+
+  html[data-ui-style="spatial"] .spatial-mobile-tools button { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] #spatialQueueToggle { display: inline-grid; }
+
+  html[data-ui-style="spatial"] .spatial-stage {
+    grid-column: 1;
+    min-height: 500px;
+    padding: 14px;
+  }
+
+  html[data-ui-style="spatial"] .spatial-queue {
+    position: fixed;
+    top: 0;
+    bottom: 72px;
+    left: 0;
+    z-index: 82;
+    width: min(86vw, 360px);
+    padding: 18px 18px 22px;
+    border-radius: 0 16px 16px 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateX(-104%);
+    transition: transform 180ms ease, visibility 0s linear 180ms;
+  }
+
+  html[data-ui-style="spatial"] .spatial-inspector {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 72px;
+    left: 0;
+    z-index: 82;
+    width: auto;
+    max-height: 64vh;
+    padding: 16px 18px 22px;
+    border-radius: 16px 16px 0 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(104%);
+    transition: transform 180ms ease, visibility 0s linear 180ms;
+  }
+
+  html[data-ui-style="spatial"] .spatial-overview.is-queue-open .spatial-queue {
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateX(0);
+    transition-delay: 0s;
+  }
+
+  html[data-ui-style="spatial"] .spatial-overview.is-inspector-open .spatial-inspector {
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
+    transition-delay: 0s;
+  }
+
+  html[data-ui-style="spatial"] .spatial-scrim:not([hidden]) {
+    display: block;
+    position: fixed;
+    inset: 0 0 72px;
+    z-index: 80;
+  }
+
+  html[data-ui-style="spatial"] .spatial-panel-close {
+    display: inline-grid;
+    place-items: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  html[data-ui-style="spatial"] .spatial-layers { min-height: 390px; }
+
+  html[data-ui-style="spatial"] .spatial-layer {
+    inset: 50% 3% auto;
+    min-height: 214px;
+    padding: 22px 18px;
+  }
+
+  html[data-ui-style="spatial"] .spatial-layer-title {
+    margin: 14px 0;
+    font-size: 19px;
+  }
+
+  html[data-ui-style="spatial"] .layer-offset--4,
+  html[data-ui-style="spatial"] .layer-offset-4 {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  html[data-ui-style="spatial"] .layer-offset--2 { transform: translate(-2%, -59%) scale(0.94); }
+  html[data-ui-style="spatial"] .layer-offset-2 { transform: translate(2%, -41%) scale(0.94); }
+
+  html[data-ui-style="spatial"] .spatial-stage-nav button { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] #spatialOpen { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] #spatialClearFilters { min-width: 44px; min-height: 44px; }
+
+  html[data-ui-style="spatial"] .spatial-data-link {
+    display: inline-grid;
+    min-width: 44px;
+    min-height: 44px;
+    place-items: center;
+  }
+
+  html[data-ui-style="spatial"] .appearance-row { grid-template-columns: 1fr; }
+  html[data-ui-style="spatial"] .appearance-options label { min-width: 44px; min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui-style="spatial"] *,
+  html[data-ui-style="spatial"] *::before,
+  html[data-ui-style="spatial"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+
+  html[data-ui-style="spatial"] .spatial-layer {
+    pointer-events: auto;
+  }
+
+  html[data-ui-style="spatial"] .spatial-queue,
+  html[data-ui-style="spatial"] .spatial-inspector {
+    transition: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-ui-style="spatial"] {
+    --sp-surface: var(--sp-surface-solid);
+  }
+
+  html[data-ui-style="spatial"] #rail,
+  html[data-ui-style="spatial"] #topbar,
+  html[data-ui-style="spatial"] .spatial-queue,
+  html[data-ui-style="spatial"] .spatial-stage,
+  html[data-ui-style="spatial"] .spatial-inspector,
+  html[data-ui-style="spatial"] .modal,
+  html[data-ui-style="spatial"] .modal-card {
+    background: var(--sp-surface-solid);
+    border-color: var(--sp-border-strong);
+  }
+
+  html[data-ui-style="spatial"] .spatial-layer {
+    background: var(--sp-surface-solid);
+    pointer-events: auto;
+  }
+}

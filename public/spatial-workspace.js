@@ -66,7 +66,26 @@
     return state && state.selectedIndex >= 0 ? state.papers[state.selectedIndex] : null;
   }
 
-  function createWorkspaceController({ root, document, scrollContainer, onOpen, onClearFilters, getDetails } = {}) {
+  function createWorkspaceController({
+    root,
+    document,
+    scrollContainer,
+    onOpen,
+    onClearFilters,
+    getDetails,
+    desktopMedia,
+    mobileMedia,
+  } = {}) {
+    const media = desktopMedia || (
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(min-width: 1101px)')
+        : null
+    );
+    const mobile = mobileMedia || (
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(max-width: 760px)')
+        : null
+    );
     let state = createWorkspaceState([]);
     let initialized = false;
     let bound = false;
@@ -98,8 +117,62 @@
       previous: byId('spatialPrev'),
       next: byId('spatialNext'),
       open: byId('spatialOpen'),
+      queue: byId('spatialQueue'),
+      queueToggle: byId('spatialQueueToggle'),
+      queueClose: byId('spatialQueueClose'),
+      inspectorClose: byId('spatialInspectorClose'),
+      scrim: byId('spatialScrim'),
+      filterActions: byId('homeFilterActions'),
+      filterHome: byId('topFilters'),
+      filterSlot: byId('spatialFilterSlot'),
       inspectorToggle: byId('spatialInspectorToggle'),
     };
+
+    let panelTrigger = null;
+    let savedScrollTop = 0;
+    let activePanel = null;
+
+    function resetPanelPresentation() {
+      root.classList.remove('is-queue-open', 'is-inspector-open');
+      document.documentElement.classList.remove('spatial-queue-open', 'spatial-inspector-open');
+      elements.queueToggle.setAttribute('aria-expanded', 'false');
+      elements.inspectorToggle.setAttribute('aria-expanded', 'false');
+      elements.scrim.hidden = true;
+      elements.filterHome.append(elements.filterActions);
+    }
+
+    function closePanels({ restoreFocus = true } = {}) {
+      const wasActive = Boolean(activePanel);
+      const trigger = panelTrigger;
+      const scrollTop = savedScrollTop;
+      resetPanelPresentation();
+      activePanel = null;
+      panelTrigger = null;
+      if (!wasActive) return;
+      if (scrollContainer) scrollContainer.scrollTop = scrollTop;
+      if (restoreFocus && trigger && typeof trigger.focus === 'function') trigger.focus();
+    }
+
+    function openPanel(name) {
+      const nextPanel = name === 'inspector' ? 'inspector' : 'queue';
+      const inspector = nextPanel === 'inspector';
+      if (inspector && elements.inspectorToggle.disabled) {
+        resetPanelPresentation();
+        return;
+      }
+      if (!activePanel) savedScrollTop = Number(scrollContainer && scrollContainer.scrollTop) || 0;
+      resetPanelPresentation();
+      activePanel = nextPanel;
+      panelTrigger = inspector ? elements.inspectorToggle : elements.queueToggle;
+      if (!inspector) elements.filterSlot.append(elements.filterActions);
+      root.classList.add(inspector ? 'is-inspector-open' : 'is-queue-open');
+      document.documentElement.classList.add(inspector ? 'spatial-inspector-open' : 'spatial-queue-open');
+      panelTrigger.setAttribute('aria-expanded', 'true');
+      elements.scrim.hidden = false;
+      const panel = inspector ? elements.inspector : elements.queue;
+      const firstFocusable = panel.querySelector('button, a, input, select, textarea, [tabindex="0"]');
+      if (firstFocusable) firstFocusable.focus();
+    }
 
     function createTextElement(tag, className, text) {
       const element = document.createElement(tag);
@@ -155,6 +228,10 @@
       const paper = selectedPaper(state);
       elements.inspector.hidden = !paper;
       elements.inspectorToggle.disabled = !paper;
+      if (!paper && activePanel === 'inspector') {
+        closePanels({ restoreFocus: false });
+        elements.clear.focus();
+      }
       elements.open.disabled = !paper;
       if (!paper) {
         for (const element of [
@@ -309,7 +386,6 @@
       });
       root.addEventListener('keydown', event => {
         const button = paperButton(event);
-        if (event.key === 'Escape') return;
         if (!button) return;
         if (event.key === 'Enter') {
           event.preventDefault();
@@ -331,11 +407,45 @@
       elements.clear.addEventListener('click', () => {
         if (typeof onClearFilters === 'function') onClearFilters();
       });
+      elements.queueToggle.addEventListener('click', () => openPanel('queue'));
+      elements.inspectorToggle.addEventListener('click', () => openPanel('inspector'));
+      elements.queueClose.addEventListener('click', () => closePanels());
+      elements.inspectorClose.addEventListener('click', () => closePanels());
+      elements.scrim.addEventListener('click', () => closePanels());
+      document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || !activePanel) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        closePanels();
+      });
+      if (media) {
+        const onDesktopChange = event => {
+          if (event.matches) closePanels({ restoreFocus: false });
+        };
+        if (typeof media.addEventListener === 'function') media.addEventListener('change', onDesktopChange);
+        else if (typeof media.addListener === 'function') media.addListener(onDesktopChange);
+      }
+      if (mobile) {
+        const onMobileChange = event => {
+          if (!event.matches && activePanel === 'queue') closePanels({ restoreFocus: false });
+        };
+        if (typeof mobile.addEventListener === 'function') mobile.addEventListener('change', onMobileChange);
+        else if (typeof mobile.addListener === 'function') mobile.addListener(onMobileChange);
+      }
     }
 
     function refreshDetails() { renderInspector(); }
 
-    return { bind, getState, move, openSelected, refreshDetails, select, update };
+    return {
+      bind,
+      closePanels,
+      getState,
+      move,
+      openPanel,
+      openSelected,
+      refreshDetails,
+      select,
+      update,
+    };
   }
 
   return {

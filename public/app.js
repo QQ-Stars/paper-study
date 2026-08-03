@@ -114,7 +114,8 @@ function redrawInsightChartsFromCache() {
   }
 }
 
-function handleAppearanceChange() {
+function handleAppearanceChange(event) {
+  if (event.detail.uiStyle != 'spatial') spatialWorkspace?.closePanels({ restoreFocus: false });
   if (!appReady) return;
   try {
     if (currentView === 'home') renderHome();
@@ -238,6 +239,7 @@ function refresh() { renderSidebar(); renderHome(); }
 
 // ====== 视图切换 ======
 function showView(v) {
+  if (v != 'home') spatialWorkspace?.closePanels({ restoreFocus: false });
   currentView = v;
   document.querySelectorAll('.viewnav button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
   $('#home').classList.toggle('hidden', v !== 'home');
@@ -284,6 +286,16 @@ function buildDashShell() {
   }
 }
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function chartAnimationDuration(duration) {
+  return prefersReducedMotion() ? 0 : duration;
+}
 
 function clearHomeFilters() {
   yearFilter = 'all';
@@ -395,7 +407,7 @@ function updateCharts(d) {
   const surf = cssVar('--surface'), ok = cssVar('--ok'), warn = cssVar('--warn'), idle = cssVar('--idle');
   const compact = window.innerWidth < 700;
   chProgress.setOption({
-    animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
+    animationDuration: chartAnimationDuration(750), animationDurationUpdate: chartAnimationDuration(600), animationEasing: 'cubicOut',
     title: {
       text: d.pct + '%', subtext: '已理解', left: compact ? '50%' : '33%', top: compact ? '38%' : 'center', textAlign: 'center', itemGap: 4,
       textStyle: { fontSize: 26, fontWeight: 700, color: text }, subtextStyle: { fontSize: 10.5, color: t3 }
@@ -451,7 +463,7 @@ function barOption(items, t2, t3) {
   const labels = items.map(i => i.name).reverse();
   const data = items.map(i => ({ value: i.value, itemStyle: { color: i.color, borderRadius: [0, 6, 6, 0] } })).reverse();
   return {
-    animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
+    animationDuration: chartAnimationDuration(750), animationDurationUpdate: chartAnimationDuration(600), animationEasing: 'cubicOut',
     grid: { left: 4, right: 30, top: 8, bottom: 4, containLabel: true },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' }, appendToBody: true,
@@ -672,7 +684,7 @@ function renderTree() {
     return { name: d.name, value: d.value, itemStyle: { color: d.color }, children: kids.length ? kids : undefined };
   });
   chTree.setOption({
-    animationDuration: 600,
+    animationDuration: chartAnimationDuration(600),
     tooltip: { formatter: (p) => `${(p.treePathInfo || []).map(x => x.name).filter(Boolean).join(' / ') || p.name}　${p.value} 篇` },
     series: [{
       type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false }, visibleMin: 1,
@@ -705,7 +717,7 @@ function renderTrend() {
     data: years.map(y => PAPERS.filter(p => p.year === y && bucket(p) === d.name).length)
   }));
   chTrend.setOption({
-    animationDuration: 700, animationEasing: 'cubicOut',
+    animationDuration: chartAnimationDuration(700), animationEasing: 'cubicOut',
     color: dirItems.map(d => d.color),
     legend: { top: 2, textStyle: { color: t2, fontSize: 11 }, itemWidth: 11, itemHeight: 11, itemGap: 12 },
     grid: { left: 6, right: 18, top: 40, bottom: 4, containLabel: true },
@@ -728,7 +740,7 @@ function renderCited(g) {
   const labels = nodes.map(n => (n.title.length > 20 ? n.title.slice(0, 20) + '…' : n.title)).reverse();
   const rows = nodes.map(n => ({ value: n.indeg, id: n.id })).reverse();
   chCited.setOption({
-    animationDuration: 600,
+    animationDuration: chartAnimationDuration(600),
     grid: { left: 6, right: 30, top: 6, bottom: 6, containLabel: true },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (p) => `被库内 ${p[0].value} 篇引用` },
     xAxis: { type: 'value', max: 'dataMax', axisLabel: { show: false }, splitLine: { show: false }, axisLine: { show: false }, axisTick: { show: false } },
@@ -760,6 +772,7 @@ function renderCite(g) {
     label: { show: n.indeg >= labelMin }
   }));
   chCite.setOption({
+    animation: !prefersReducedMotion(),
     tooltip: { confine: true, formatter: (p) => p.dataType === 'node' ? `${esc(p.data.name)}<br>被库内 <b>${p.data.value}</b> 篇引用` : '' },
     legend: [{ data: cats, top: 2, textStyle: { color: t2, fontSize: 11 }, itemWidth: 11, itemHeight: 11, itemGap: 12 }],
     series: [{
@@ -2245,5 +2258,30 @@ async function saveSettings() {
     hint.textContent = `保存失败：${error.message || error}`;
   }
 }
-function openSettingsModal() { loadSettings(); $('#settingsModal').classList.remove('hidden'); }
-function closeSettingsModal() { $('#settingsModal').classList.add('hidden'); }
+let settingsReturnFocus = null;
+let settingsScrollContainer = null;
+let settingsScrollTop = 0;
+
+function activeViewScrollContainer() {
+  return currentView === 'read' ? $('#pdfScroll') : $('#' + currentView);
+}
+
+function openSettingsModal() {
+  spatialWorkspace?.closePanels({ restoreFocus: false });
+  settingsReturnFocus = document.activeElement;
+  settingsScrollContainer = activeViewScrollContainer();
+  settingsScrollTop = Number(settingsScrollContainer && settingsScrollContainer.scrollTop) || 0;
+  loadSettings();
+  $('#settingsModal').classList.remove('hidden');
+  setTimeout(() => $('#setClose').focus(), 0);
+}
+
+function closeSettingsModal() {
+  const modal = $('#settingsModal');
+  if (!modal || modal.classList.contains('hidden')) return;
+  modal.classList.add('hidden');
+  if (settingsScrollContainer) settingsScrollContainer.scrollTop = settingsScrollTop;
+  if (settingsReturnFocus && typeof settingsReturnFocus.focus === 'function') settingsReturnFocus.focus();
+  settingsReturnFocus = null;
+  settingsScrollContainer = null;
+}

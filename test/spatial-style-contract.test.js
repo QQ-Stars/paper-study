@@ -319,3 +319,49 @@ test('the data stage has semantic depth without forbidden renderers', () => {
   assert.match(ruleBody(css, 'html[data-ui-style="spatial"] .spatial-layer[aria-selected="true"] .spatial-layer-status'), /color:\s*var\(--sp-accent-fg\)/);
   assert.doesNotMatch(css, /@keyframes|canvas|webgl|three\.js|url\s*\(/i);
 });
+
+test('mobile is a distinct bottom-navigation and drawer state', () => {
+  const medium = atRuleBody(css, '@media (max-width: 1100px)');
+  const mobile = atRuleBody(css, '@media (max-width: 760px)');
+  assert.match(ruleBody(medium, 'html[data-ui-style="spatial"] .spatial-inspector'), /visibility:\s*hidden[\s\S]*pointer-events:\s*none/);
+  assert.match(ruleBody(medium, 'html[data-ui-style="spatial"] .spatial-overview.is-inspector-open .spatial-inspector'), /visibility:\s*visible[\s\S]*pointer-events:\s*auto/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] #rail'), /position:\s*fixed[\s\S]*bottom:/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] #rail'), /-webkit-backdrop-filter:\s*blur\(8px\)[\s\S]*backdrop-filter:\s*blur\(8px\)/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] .rail-foot'), /flex-direction:\s*row[\s\S]*width:\s*auto/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] #shell'), /max-width:\s*none/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] .progress-wrap'), /display:\s*flex/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] .spatial-filter-slot .home-filter-actions'), /display:\s*grid/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] .spatial-queue'), /position:\s*fixed[\s\S]*visibility:\s*hidden/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] .spatial-inspector'), /position:\s*fixed[\s\S]*visibility:\s*hidden/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] .spatial-overview.is-queue-open .spatial-queue'), /visibility:\s*visible[\s\S]*pointer-events:\s*auto/);
+  assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] .spatial-overview.is-inspector-open .spatial-inspector'), /visibility:\s*visible[\s\S]*pointer-events:\s*auto/);
+  for (const selector of [
+    'html[data-ui-style="spatial"] #rail button',
+    'html[data-ui-style="spatial"] .spatial-mobile-tools button',
+    'html[data-ui-style="spatial"] .spatial-stage-nav button',
+    'html[data-ui-style="spatial"] .spatial-panel-close',
+    'html[data-ui-style="spatial"] #spatialOpen',
+    'html[data-ui-style="spatial"] #spatialClearFilters',
+    'html[data-ui-style="spatial"] .spatial-data-link',
+    'html[data-ui-style="spatial"] #homeFilterActions button',
+    'html[data-ui-style="spatial"] #homeFilterActions select',
+    'html[data-ui-style="spatial"] #search',
+    'html[data-ui-style="spatial"] .appearance-options label',
+  ]) {
+    const declarations = ruleBody(mobile, selector);
+    assert.match(declarations, /min-width:\s*44px/);
+    assert.match(declarations, /min-height:\s*44px/);
+  }
+});
+
+test('reduced motion and missing backdrop filter have usable fallbacks', () => {
+  const reduced = atRuleBody(css, '@media (prefers-reduced-motion: reduce)');
+  const noBlur = atRuleBody(css, '@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))');
+  const modal = ruleBody(css, 'html[data-ui-style="spatial"] .modal');
+  assert.match(ruleBody(reduced, 'html[data-ui-style="spatial"] .spatial-layer'), /pointer-events:\s*auto/);
+  assert.match(ruleBody(noBlur, 'html[data-ui-style="spatial"] .spatial-layer'), /pointer-events:\s*auto/);
+  assert.match(noBlur, /--sp-surface:\s*var\(--sp-surface-solid\)/);
+  assert.match(noBlur, /background:\s*var\(--sp-surface-solid\)/);
+  assert.match(modal, /(?:^|\n)\s*-webkit-backdrop-filter:\s*blur\(9px\)/);
+  assert.match(modal, /(?:^|\n)\s*backdrop-filter:\s*blur\(9px\)/);
+});
