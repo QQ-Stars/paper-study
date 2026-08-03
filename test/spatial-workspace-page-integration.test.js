@@ -10,7 +10,7 @@ const app = fs.readFileSync(path.join(publicDir, 'app.js'), 'utf8');
 
 function appFunction(name, nextName) {
   const functionStart = (functionName) => {
-    const plainStart = app.indexOf(`function ${functionName}`);
+    const plainStart = app.indexOf(`function ${functionName}(`);
     if (plainStart < 6 || app.slice(plainStart - 6, plainStart) !== 'async ') return plainStart;
     return plainStart - 6;
   };
@@ -19,6 +19,54 @@ function appFunction(name, nextName) {
   assert.notEqual(start, -1, `${name} must exist`);
   assert.notEqual(end, -1, `${nextName} must follow ${name}`);
   return app.slice(start, end);
+}
+
+function chartAnimationFunctions() {
+  return [
+    appFunction('prefersReducedMotion', 'chartAnimationDuration'),
+    appFunction('chartAnimationDuration', 'clearHomeFilters'),
+  ].join('\n');
+}
+
+function createChartAnimationHelper(windowValue) {
+  return Function(
+    'window',
+    `${chartAnimationFunctions()}; return { prefersReducedMotion, chartAnimationDuration };`,
+  )(windowValue);
+}
+
+function renderInsightChartOptions(reducedMotion) {
+  const captured = {};
+  const chart = name => ({
+    clear() {},
+    off() {},
+    on() {},
+    setOption(option) { captured[name] = option; },
+  });
+  const source = [
+    chartAnimationFunctions(),
+    appFunction('renderTree', 'renderTrend'),
+    appFunction('renderTrend', 'renderCited'),
+    appFunction('renderCited', 'renderCite'),
+  ].join('\n');
+  const run = Function(
+    'window', 'PAPERS', 'topGroups', 'cssVar', 'echarts', 'chTree', 'chTrend', 'chCited',
+    `${source};
+      renderTree();
+      renderTrend();
+      renderCited({ nodes: [{ id: 'p1', title: 'Paper 1', indeg: 1 }] });`,
+  );
+  run(
+    { matchMedia: () => ({ matches: reducedMotion }) },
+    [{ id: 'p1', title: 'Paper 1', type: 'Vision', topic: 'Detection', year: '2026' }],
+    () => [{ name: 'Vision', value: 1, color: '#123456' }],
+    () => '#123456',
+    { graphic: { LinearGradient: function LinearGradient() {} } },
+    chart('tree'),
+    chart('trend'),
+    chart('cited'),
+  );
+  return captured;
 }
 
 function createReviewHarness() {
@@ -341,9 +389,46 @@ test('completeReview without review data uses a forced versioned load', async ()
 });
 
 test('reduced-motion preference controls ECharts animation as well as CSS', () => {
-  assert.match(app, /matchMedia\(\s*['"]\(prefers-reduced-motion:\s*reduce\)['"]\s*\)/);
-  assert.match(app, /function\s+chartAnimationDuration\s*\(/);
+  const mediaQueries = [];
+  const normal = createChartAnimationHelper({
+    matchMedia(query) {
+      mediaQueries.push(query);
+      return { matches: false };
+    },
+  });
+  const reduced = createChartAnimationHelper({ matchMedia: () => ({ matches: true }) });
+  const unavailable = createChartAnimationHelper({});
+  assert.equal(normal.prefersReducedMotion(), false);
+  assert.equal(normal.chartAnimationDuration(700), 700);
+  assert.deepEqual(mediaQueries, [
+    '(prefers-reduced-motion: reduce)',
+    '(prefers-reduced-motion: reduce)',
+  ]);
+  assert.equal(reduced.prefersReducedMotion(), true);
+  assert.equal(reduced.chartAnimationDuration(700), 0);
+  assert.equal(unavailable.prefersReducedMotion(), false);
+  assert.equal(unavailable.chartAnimationDuration(700), 700);
   assert.doesNotMatch(app, /animationDuration(?:Update)?:\s*(?:600|700|750)\b/);
+
+  const normalOptions = renderInsightChartOptions(false);
+  assert.deepEqual(
+    [normalOptions.tree.animationDuration, normalOptions.trend.animationDuration, normalOptions.cited.animationDuration],
+    [600, 700, 600],
+  );
+  assert.deepEqual(
+    [normalOptions.tree.animationDurationUpdate, normalOptions.trend.animationDurationUpdate, normalOptions.cited.animationDurationUpdate],
+    [600, 700, 600],
+  );
+
+  const reducedOptions = renderInsightChartOptions(true);
+  assert.deepEqual(
+    [reducedOptions.tree.animationDuration, reducedOptions.trend.animationDuration, reducedOptions.cited.animationDuration],
+    [0, 0, 0],
+  );
+  assert.deepEqual(
+    [reducedOptions.tree.animationDurationUpdate, reducedOptions.trend.animationDurationUpdate, reducedOptions.cited.animationDurationUpdate],
+    [0, 0, 0],
+  );
 });
 
 test('Settings close restores captured home scroll and focus exactly once', () => {

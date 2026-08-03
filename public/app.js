@@ -685,6 +685,7 @@ function renderTree() {
   });
   chTree.setOption({
     animationDuration: chartAnimationDuration(600),
+    animationDurationUpdate: chartAnimationDuration(600),
     tooltip: { formatter: (p) => `${(p.treePathInfo || []).map(x => x.name).filter(Boolean).join(' / ') || p.name}　${p.value} 篇` },
     series: [{
       type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false }, visibleMin: 1,
@@ -717,7 +718,7 @@ function renderTrend() {
     data: years.map(y => PAPERS.filter(p => p.year === y && bucket(p) === d.name).length)
   }));
   chTrend.setOption({
-    animationDuration: chartAnimationDuration(700), animationEasing: 'cubicOut',
+    animationDuration: chartAnimationDuration(700), animationDurationUpdate: chartAnimationDuration(700), animationEasing: 'cubicOut',
     color: dirItems.map(d => d.color),
     legend: { top: 2, textStyle: { color: t2, fontSize: 11 }, itemWidth: 11, itemHeight: 11, itemGap: 12 },
     grid: { left: 6, right: 18, top: 40, bottom: 4, containLabel: true },
@@ -741,6 +742,7 @@ function renderCited(g) {
   const rows = nodes.map(n => ({ value: n.indeg, id: n.id })).reverse();
   chCited.setOption({
     animationDuration: chartAnimationDuration(600),
+    animationDurationUpdate: chartAnimationDuration(600),
     grid: { left: 6, right: 30, top: 6, bottom: 6, containLabel: true },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (p) => `被库内 ${p[0].value} 篇引用` },
     xAxis: { type: 'value', max: 'dataMax', axisLabel: { show: false }, splitLine: { show: false }, axisLine: { show: false }, axisTick: { show: false } },

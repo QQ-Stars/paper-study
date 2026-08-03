@@ -336,7 +336,16 @@ test('mobile is a distinct bottom-navigation and drawer state', () => {
   assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] .spatial-overview.is-queue-open .spatial-queue'), /visibility:\s*visible[\s\S]*pointer-events:\s*auto/);
   assert.match(ruleBody(mobile, 'html[data-ui-style="spatial"] .spatial-overview.is-inspector-open .spatial-inspector'), /visibility:\s*visible[\s\S]*pointer-events:\s*auto/);
   for (const selector of [
+    'html[data-ui-style="spatial"] .spatial-mobile-tools button',
+    'html[data-ui-style="spatial"] .spatial-panel-close',
+  ]) {
+    const declarations = ruleBody(medium, selector);
+    assert.match(declarations, /min-width:\s*44px/);
+    assert.match(declarations, /min-height:\s*44px/);
+  }
+  for (const selector of [
     'html[data-ui-style="spatial"] #rail button',
+    'html[data-ui-style="spatial"] .mini',
     'html[data-ui-style="spatial"] .spatial-mobile-tools button',
     'html[data-ui-style="spatial"] .spatial-stage-nav button',
     'html[data-ui-style="spatial"] .spatial-panel-close',
@@ -347,6 +356,10 @@ test('mobile is a distinct bottom-navigation and drawer state', () => {
     'html[data-ui-style="spatial"] #homeFilterActions select',
     'html[data-ui-style="spatial"] #search',
     'html[data-ui-style="spatial"] .appearance-options label',
+    'html[data-ui-style="spatial"] #setClose',
+    'html[data-ui-style="spatial"] #settingsModal button',
+    'html[data-ui-style="spatial"] #settingsModal input:not([type="radio"])',
+    'html[data-ui-style="spatial"] #settingsModal select',
   ]) {
     const declarations = ruleBody(mobile, selector);
     assert.match(declarations, /min-width:\s*44px/);
@@ -380,7 +393,11 @@ test('reduced motion and missing backdrop filter have usable fallbacks', () => {
   assert.match(noBlurLayer, /transform:\s*none\s*!important/);
   assert.match(noBlurLayer, /opacity:\s*1\s*!important/);
   assert.match(noBlurLayer, /pointer-events:\s*auto/);
-  assert.match(noBlur, /--sp-surface:\s*var\(--sp-surface-solid\)/);
+  const noBlurThemeRule = noBlur.match(
+    /html\[data-ui-style="spatial"\]\[data-theme="dark"\]\s*,\s*html\[data-ui-style="spatial"\]\[data-theme="light"\]\s*\{([^}]*)\}/,
+  );
+  assert.ok(noBlurThemeRule, 'solid surface fallback must target both spatial theme selectors');
+  assert.match(noBlurThemeRule[1], /--sp-surface:\s*var\(--sp-surface-solid\)/);
   for (const selector of [
     'html[data-ui-style="spatial"] .spatial-queue',
     'html[data-ui-style="spatial"] .spatial-stage',

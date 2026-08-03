@@ -45,6 +45,7 @@ class FakeElement {
     this.checked = false;
     this.tabIndex = -1;
     this.focusCalls = 0;
+    this.ownerDocument = null;
     this.scrollTop = 0;
     this.style = { values: {}, setProperty: (name, value) => { this.style.values[name] = String(value); } };
   }
@@ -83,7 +84,10 @@ class FakeElement {
     return event;
   }
   click() { return this.dispatch('click'); }
-  focus() { this.focusCalls += 1; }
+  focus() {
+    this.focusCalls += 1;
+    if (this.ownerDocument) this.ownerDocument.activeElement = this;
+  }
   contains(node) {
     for (let cursor = node; cursor; cursor = cursor.parentNode) if (cursor === this) return true;
     return false;
@@ -144,8 +148,13 @@ function createWorkspaceHarness(options = {}) {
   const documentElement = new FakeElement('html', 'documentElement');
   const document = {
     documentElement,
+    activeElement: null,
     listeners: new Map(),
-    createElement(tagName) { return new FakeElement(tagName); },
+    createElement(tagName) {
+      const element = new FakeElement(tagName);
+      element.ownerDocument = this;
+      return element;
+    },
     getElementById(id) { return elements.get(id) || null; },
     addEventListener(type, listener) {
       const listeners = this.listeners.get(type) || [];
@@ -158,9 +167,12 @@ function createWorkspaceHarness(options = {}) {
       return event;
     },
   };
+  documentElement.ownerDocument = document;
+  for (const element of elements.values()) element.ownerDocument = document;
   const desktopMedia = new FakeMediaQuery();
   const mobileMedia = new FakeMediaQuery(true);
   const scrollContainer = new FakeElement('section', 'home');
+  scrollContainer.ownerDocument = document;
   scrollContainer.scrollTop = Number(options.scrollTop) || 0;
   const initialScrollTop = scrollContainer.scrollTop;
   let details = options.getDetails || (paper => ({
@@ -466,34 +478,64 @@ test('mobile panels are mutually exclusive and restore trigger focus', () => {
   assert.equal(harness.inspectorToggle.focusCalls, 1);
 });
 
-test('a desktop breakpoint transition closes transient panels', () => {
+test('a desktop breakpoint transition closes a focused panel before moving focus to the selected layer', () => {
   const harness = createWorkspaceHarness({ scrollTop: 210 });
   const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers, { preferredId: 'p3' });
   controller.bind();
-  controller.openPanel('queue');
+  controller.openPanel('inspector');
+  assert.equal(harness.document.activeElement, harness.inspectorClose);
+  const selectedLayer = harness.layers.children.find(node => node.getAttribute('aria-selected') === 'true');
+  assert.ok(selectedLayer);
+  let stateWhenFocused = null;
+  const focusSelectedLayer = selectedLayer.focus.bind(selectedLayer);
+  selectedLayer.focus = () => {
+    stateWhenFocused = {
+      panelOpen: harness.root.classList.contains('is-inspector-open'),
+      scrollTop: harness.scrollContainer.scrollTop,
+    };
+    focusSelectedLayer();
+  };
   harness.scrollContainer.scrollTop = 25;
   harness.desktopMedia.dispatch(true);
-  assert.equal(harness.root.classList.contains('is-queue-open'), false);
-  assert.equal(harness.document.documentElement.classList.contains('spatial-queue-open'), false);
-  assert.equal(harness.queueToggle.attributes['aria-expanded'], 'false');
+  assert.equal(harness.root.classList.contains('is-inspector-open'), false);
+  assert.equal(harness.document.documentElement.classList.contains('spatial-inspector-open'), false);
+  assert.equal(harness.inspectorToggle.attributes['aria-expanded'], 'false');
   assert.equal(harness.scrim.hidden, true);
   assert.equal(harness.scrollContainer.scrollTop, harness.initialScrollTop);
   assert.equal(harness.filterActions.parentNode, harness.filterHome);
-  assert.equal(harness.queueToggle.focusCalls, 0);
+  assert.deepEqual(stateWhenFocused, { panelOpen: false, scrollTop: harness.initialScrollTop });
+  assert.equal(harness.document.activeElement, selectedLayer);
+  assert.equal(harness.inspectorToggle.focusCalls, 0);
 });
 
-test('leaving the mobile breakpoint closes the queue before its toggle disappears', () => {
+test('leaving the mobile breakpoint moves focus from an empty queue to clear filters', () => {
   const harness = createWorkspaceHarness({ scrollTop: 190 });
   const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update([], { emptyMessage: 'No matching papers' });
   controller.bind();
   controller.openPanel('queue');
+  assert.equal(harness.document.activeElement, harness.queueClose);
   harness.scrollContainer.scrollTop = 30;
   harness.mobileMedia.dispatch(false);
   assert.equal(harness.root.classList.contains('is-queue-open'), false);
   assert.equal(harness.scrim.hidden, true);
   assert.equal(harness.filterActions.parentNode, harness.filterHome);
   assert.equal(harness.scrollContainer.scrollTop, 190);
+  assert.equal(harness.document.activeElement, harness.clearButton);
   assert.equal(harness.queueToggle.focusCalls, 0);
+});
+
+test('breakpoint closure does not steal unrelated focus', () => {
+  const harness = createWorkspaceHarness({ scrollTop: 150 });
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers, { preferredId: 'p2' });
+  controller.bind();
+  controller.openPanel('inspector');
+  harness.clearButton.focus();
+  harness.desktopMedia.dispatch(true);
+  assert.equal(harness.root.classList.contains('is-inspector-open'), false);
+  assert.equal(harness.document.activeElement, harness.clearButton);
 });
 
 test('Escape and scrim close a panel without changing selection or home scroll', () => {

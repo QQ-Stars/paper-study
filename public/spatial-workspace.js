@@ -153,6 +153,23 @@
       if (restoreFocus && trigger && typeof trigger.focus === 'function') trigger.focus();
     }
 
+    function closePanelsForBreakpoint() {
+      const activeElement = document.activeElement;
+      const panel = activePanel === 'inspector'
+        ? elements.inspector
+        : activePanel === 'queue' ? elements.queue : null;
+      const shouldMoveFocus = Boolean(activeElement && (
+        activeElement === panelTrigger
+        || (panel && typeof panel.contains === 'function' && panel.contains(activeElement))
+      ));
+      closePanels({ restoreFocus: false });
+      if (!shouldMoveFocus) return;
+      const selectedLayer = Array.from(elements.layers.children || [])
+        .find(layer => layer.getAttribute('aria-selected') === 'true');
+      const target = selectedLayer || (!elements.clear.disabled ? elements.clear : null);
+      if (target && typeof target.focus === 'function') target.focus();
+    }
+
     function openPanel(name) {
       const nextPanel = name === 'inspector' ? 'inspector' : 'queue';
       const inspector = nextPanel === 'inspector';
@@ -419,14 +436,14 @@
       });
       if (media) {
         const onDesktopChange = event => {
-          if (event.matches) closePanels({ restoreFocus: false });
+          if (event.matches) closePanelsForBreakpoint();
         };
         if (typeof media.addEventListener === 'function') media.addEventListener('change', onDesktopChange);
         else if (typeof media.addListener === 'function') media.addListener(onDesktopChange);
       }
       if (mobile) {
         const onMobileChange = event => {
-          if (!event.matches && activePanel === 'queue') closePanels({ restoreFocus: false });
+          if (!event.matches && activePanel === 'queue') closePanelsForBreakpoint();
         };
         if (typeof mobile.addEventListener === 'function') mobile.addEventListener('change', onMobileChange);
         else if (typeof mobile.addListener === 'function') mobile.addListener(onMobileChange);
