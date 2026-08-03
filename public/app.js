@@ -488,14 +488,23 @@ function blankReviewData(error = '') {
     completed: []
   };
 }
+function commitReviewData(data, invalidateLoads = false) {
+  if (invalidateLoads) {
+    reviewLoadVersion++;
+    reviewLoadPromise = null;
+  }
+  reviewData = data && data.counts ? data : blankReviewData('复习数据格式异常');
+  spatialWorkspace?.refreshDetails();
+  renderCurrentReviewStatus();
+  return reviewData;
+}
 function startReviewLoad(force = false) {
   if (reviewLoadPromise && !force) return reviewLoadPromise;
   const version = ++reviewLoadVersion;
   let trackedPromise;
   const request = (async () => {
     try {
-      const data = await (await fetch('/api/reviews')).json();
-      return data && data.counts ? data : blankReviewData('复习数据格式异常');
+      return await (await fetch('/api/reviews')).json();
     } catch (e) {
       return blankReviewData(String(e));
     }
@@ -506,10 +515,7 @@ function startReviewLoad(force = false) {
         ? reviewLoadPromise
         : reviewData;
     }
-    reviewData = data;
-    spatialWorkspace?.refreshDetails();
-    renderCurrentReviewStatus();
-    return reviewData;
+    return commitReviewData(data);
   }).finally(() => {
     if (reviewLoadPromise === trackedPromise) reviewLoadPromise = null;
   });
@@ -613,9 +619,12 @@ async function completeReview(id) {
     body: JSON.stringify({ id })
   })).json();
   if (!r.ok) { alert(r.error || '复习更新失败'); return; }
-  reviewData = r.reviews || await (await fetch('/api/reviews')).json();
-  renderReviews();
-  renderCurrentReviewStatus();
+  if (r.reviews) {
+    commitReviewData(r.reviews, true);
+    renderReviews();
+  } else {
+    await loadReviews(true, true);
+  }
 }
 
 // ====== 洞察：研究趋势(堆叠面积) + 馆藏构成(树图) + 被引Top10 + 引用关系图 ======
@@ -1558,7 +1567,7 @@ async function saveStatus(status) {
   current.status = status;
   const p = PAPERS.find(x => x.id === current.id); if (p) p.status = status;
   renderSidebar();
-  if (status === '已理解' || reviewData) await loadReviews(currentView === 'review');
+  if (status === '已理解' || reviewData) await loadReviews(currentView === 'review', true);
   else renderCurrentReviewStatus();
 }
 

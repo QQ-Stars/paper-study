@@ -9,8 +9,13 @@ const style = fs.readFileSync(path.join(publicDir, 'style.css'), 'utf8');
 const app = fs.readFileSync(path.join(publicDir, 'app.js'), 'utf8');
 
 function appFunction(name, nextName) {
-  const start = app.indexOf(`function ${name}`);
-  const end = app.indexOf(`function ${nextName}`, start);
+  const functionStart = (functionName) => {
+    const plainStart = app.indexOf(`function ${functionName}`);
+    if (plainStart < 6 || app.slice(plainStart - 6, plainStart) !== 'async ') return plainStart;
+    return plainStart - 6;
+  };
+  const start = functionStart(name);
+  const end = functionStart(nextName);
   assert.notEqual(start, -1, `${name} must exist`);
   assert.notEqual(end, -1, `${nextName} must follow ${name}`);
   return app.slice(start, end);
@@ -44,6 +49,65 @@ function createReviewHarness() {
 
 function reviewResponse(data) {
   return { json: async () => data };
+}
+
+function reviewDataFixture(marker, counts = {}) {
+  return { marker, counts, overdue: [], dueToday: [], upcoming: [], completed: [] };
+}
+
+function createReviewMutationHarness() {
+  const source = [
+    appFunction('blankReviewData', 'reviewItems'),
+    appFunction('completeReview', 'buildInsightsShell'),
+    appFunction('saveStatus', 'refreshTitleTranslationBatch'),
+  ].join('\n');
+  const reviewRequests = [];
+  const renders = { list: 0, current: 0, details: 0 };
+  let completeResponse = { ok: true };
+  const fetch = (url) => {
+    if (url === '/api/reviews') {
+      return new Promise((resolve, reject) => reviewRequests.push({ resolve, reject }));
+    }
+    if (url === '/api/progress') return Promise.resolve({ ok: true });
+    if (url === '/api/reviews/complete') return Promise.resolve(reviewResponse(completeResponse));
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  const factory = Function(
+    'fetch',
+    'spatialWorkspace',
+    'renderReviews',
+    'renderCurrentReviewStatus',
+    'alert',
+    'setStatusUI',
+    'renderSidebar',
+    `let reviewData = null;
+    let reviewLoadPromise = null;
+    let reviewLoadVersion = 0;
+    let current = { id: 'p1', status: '未开始' };
+    let PAPERS = [{ id: 'p1', status: '未开始' }];
+    let currentView = 'review';
+    ${source}; return {
+      loadReviews,
+      completeReview,
+      saveStatus,
+      getReviewData: () => reviewData,
+    };`,
+  );
+  const harness = factory(
+    fetch,
+    { refreshDetails() { renders.details++; } },
+    () => { renders.list++; },
+    () => { renders.current++; },
+    (message) => { throw new Error(message); },
+    () => {},
+    () => {},
+  );
+  return {
+    ...harness,
+    reviewRequests,
+    renders,
+    setCompleteResponse(value) { completeResponse = value; },
+  };
 }
 
 test('classic mode hides one semantic spatial overview while preserving homeTable', () => {
@@ -164,4 +228,53 @@ test('spatial review details distinguish load errors from no scheduled review', 
   const unscheduled = details({ id: 'p1', hasNote: false }, { error: '' });
   assert.equal(unscheduled.reviewText, '尚未安排');
   assert.equal(unscheduled.noteText, '暂无笔记');
+});
+
+test('status mutation forces a post-mutation review load and rejects the older response', async () => {
+  const harness = createReviewMutationHarness();
+  const oldLoad = harness.loadReviews(false);
+  const saving = harness.saveStatus('已理解');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(harness.reviewRequests.length, 2);
+
+  const newData = reviewDataFixture('after-status');
+  const oldData = reviewDataFixture('before-status');
+  harness.reviewRequests[1].resolve(reviewResponse(newData));
+  await saving;
+  harness.reviewRequests[0].resolve(reviewResponse(oldData));
+  assert.equal(await oldLoad, newData);
+  assert.equal(harness.getReviewData(), newData);
+  assert.deepEqual(harness.renders, { list: 1, current: 1, details: 1 });
+});
+
+test('completeReview invalidates an older load before committing mutation review data', async () => {
+  const harness = createReviewMutationHarness();
+  const oldLoad = harness.loadReviews(false);
+  const newData = reviewDataFixture('completed-review');
+  harness.setCompleteResponse({ ok: true, reviews: newData });
+  await harness.completeReview('p1');
+
+  const oldData = reviewDataFixture('before-completion');
+  harness.reviewRequests[0].resolve(reviewResponse(oldData));
+  assert.equal(await oldLoad, newData);
+  assert.equal(harness.getReviewData(), newData);
+  assert.deepEqual(harness.renders, { list: 1, current: 1, details: 1 });
+});
+
+test('completeReview without review data uses a forced versioned load', async () => {
+  const harness = createReviewMutationHarness();
+  const oldLoad = harness.loadReviews(false);
+  harness.setCompleteResponse({ ok: true });
+  const completing = harness.completeReview('p1');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(harness.reviewRequests.length, 2);
+
+  const newData = reviewDataFixture('forced-after-completion');
+  const oldData = reviewDataFixture('before-completion');
+  harness.reviewRequests[1].resolve(reviewResponse(newData));
+  await completing;
+  harness.reviewRequests[0].resolve(reviewResponse(oldData));
+  assert.equal(await oldLoad, newData);
+  assert.equal(harness.getReviewData(), newData);
+  assert.deepEqual(harness.renders, { list: 1, current: 1, details: 1 });
 });
