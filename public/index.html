@@ -47,9 +47,11 @@
           <span class="search-ico">⌕</span>
           <input id="search" type="text" placeholder="搜索…" />
         </div>
-        <div id="yearFilters" class="chips"></div>
-        <button id="semToggle" class="chip-btn sem-chip" title="语义检索：用大意或中文描述找论文（本地嵌入，跨语言）">🔮 语义</button>
-        <button id="favFilter" class="chip-btn fav-chip" title="只看收藏">☆ 收藏</button>
+        <div id="homeFilterActions" class="home-filter-actions">
+          <div id="yearFilters" class="chips"></div>
+          <button id="semToggle" class="chip-btn sem-chip" title="语义检索：用大意或中文描述找论文（本地嵌入，跨语言）">🔮 语义</button>
+          <button id="favFilter" class="chip-btn fav-chip" title="只看收藏">☆ 收藏</button>
+        </div>
       </div>
       <div class="progress-wrap">
         <div class="progress"><div id="progressBar"></div></div>
@@ -61,6 +63,60 @@
   <!-- 总览 -->
   <section id="home">
     <div class="page-head"><h1>总览<em>Overview</em></h1><span class="ph-line"></span></div>
+    <section id="spatialOverview" class="spatial-only spatial-overview" aria-labelledby="spatialHeading">
+      <div class="spatial-mobile-tools" aria-label="空间研究台面板">
+        <button id="spatialQueueToggle" type="button" aria-controls="spatialQueue" aria-expanded="false">研究目录</button>
+        <button id="spatialInspectorToggle" type="button" aria-controls="spatialInspector" aria-expanded="false">论文详情</button>
+      </div>
+      <aside id="spatialQueue" class="spatial-queue" aria-label="研究目录与队列">
+        <button id="spatialQueueClose" class="spatial-panel-close" type="button" aria-label="关闭研究目录">关闭</button>
+        <div class="spatial-kicker">RESEARCH QUEUE</div>
+        <h2 id="spatialHeading">空间研究台</h2>
+        <div id="spatialFilterSlot" class="spatial-filter-slot" aria-label="当前总览筛选"></div>
+        <div class="spatial-queue-counts" aria-live="polite">
+          <span><b id="spatialQueueTotal">0</b>当前结果</span>
+          <span><b id="spatialQueueLearning">0</b>学习中</span>
+          <span><b id="spatialQueueDone">0</b>已理解</span>
+        </div>
+        <div class="spatial-direction-block">
+          <h3>当前研究方向</h3>
+          <ul id="spatialDirections"></ul>
+        </div>
+        <p>搜索、年份、语义和收藏筛选继续使用顶部现有控件。</p>
+      </aside>
+      <div class="spatial-stage" aria-label="当前论文队列">
+        <header class="spatial-stage-head">
+          <div><span id="spatialCount">共 0 篇</span><strong id="spatialPosition">0 / 0</strong></div>
+          <a class="spatial-data-link" href="#homeTable">查看完整数据</a>
+        </header>
+        <div id="spatialLayers" class="spatial-layers" role="listbox" aria-label="筛选后的论文"></div>
+        <div id="spatialEmpty" class="spatial-empty" hidden>
+          <strong>没有可显示的论文</strong>
+          <span id="spatialEmptyText"></span>
+          <button id="spatialClearFilters" type="button">清除筛选</button>
+        </div>
+        <footer class="spatial-stage-nav">
+          <button id="spatialPrev" type="button">上一项</button>
+          <button id="spatialNext" type="button">下一项</button>
+        </footer>
+        <div id="spatialContext" class="spatial-context" aria-live="polite">已理解 0 · 学习中 0 · 当前 0 / 0</div>
+      </div>
+      <aside id="spatialInspector" class="spatial-inspector" aria-label="当前论文详情" hidden>
+        <button id="spatialInspectorClose" class="spatial-panel-close" type="button" aria-label="关闭论文详情">关闭</button>
+        <div class="spatial-kicker">CURRENT PAPER</div>
+        <h3 id="spatialInspectorTitle"></h3>
+        <p id="spatialInspectorTitleZh" class="spatial-title-zh"></p>
+        <dl class="spatial-meta">
+          <div><dt>来源</dt><dd id="spatialInspectorMeta"></dd></div>
+          <div><dt>状态</dt><dd id="spatialInspectorStatus"></dd></div>
+          <div><dt>复习</dt><dd id="spatialInspectorReview"></dd></div>
+          <div><dt>笔记</dt><dd id="spatialInspectorNote"></dd></div>
+        </dl>
+        <p id="spatialInspectorSummary" class="spatial-summary"></p>
+        <button id="spatialOpen" type="button">打开阅读</button>
+      </aside>
+      <button id="spatialScrim" class="spatial-scrim" type="button" aria-label="关闭空间面板" hidden></button>
+    </section>
     <div id="dash" class="dash"></div>
     <!-- 一键生成讲解：为缺讲解且有本地 PDF 的论文，通读全文 PDF 生成讲解（同单篇逻辑） -->
     <div id="explainBatch" class="ebatch">
@@ -559,6 +615,7 @@
   </div><!-- /#shell -->
 <script src="paper-titles.js"></script>
 <script src="ndjson.js"></script>
+<script src="spatial-workspace.js"></script>
 <script src="ingest-rendering.js"></script>
 <script src="markdown-rendering-coordinator.js"></script>
 <script src="app.js"></script>

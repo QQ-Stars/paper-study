@@ -16,6 +16,210 @@ const stringNullishPapers = [
   { id: 'undefined' },
 ];
 
+class FakeClassList {
+  constructor() { this.values = new Set(); }
+  add(...values) { values.forEach(value => this.values.add(value)); }
+  remove(...values) { values.forEach(value => this.values.delete(value)); }
+  contains(value) { return this.values.has(value); }
+  toggle(value, force) {
+    const next = force === undefined ? !this.contains(value) : Boolean(force);
+    if (next) this.add(value); else this.remove(value);
+    return next;
+  }
+}
+
+class FakeElement {
+  constructor(tagName = 'div', id = '') {
+    this.tagName = tagName.toUpperCase();
+    this.id = id;
+    this.children = [];
+    this.parentNode = null;
+    this.dataset = {};
+    this.attributes = {};
+    this.className = '';
+    this.classList = new FakeClassList();
+    this.listeners = new Map();
+    this.textContent = '';
+    this.hidden = false;
+    this.disabled = false;
+    this.checked = false;
+    this.tabIndex = -1;
+    this.focusCalls = 0;
+    this.scrollTop = 0;
+    this.style = { values: {}, setProperty: (name, value) => { this.style.values[name] = String(value); } };
+  }
+  append(...nodes) {
+    for (const node of nodes) {
+      if (node.parentNode) {
+        const index = node.parentNode.children.indexOf(node);
+        if (index >= 0) node.parentNode.children.splice(index, 1);
+      }
+      node.parentNode = this;
+      this.children.push(node);
+    }
+  }
+  replaceChildren(...nodes) {
+    this.children.forEach(node => { node.parentNode = null; });
+    this.children = [];
+    this.append(...nodes);
+  }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  getAttribute(name) { return this.attributes[name]; }
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+  listenerCount(type) { return (this.listeners.get(type) || []).length; }
+  dispatch(type, init = {}) {
+    const event = {
+      type,
+      target: init.target || this,
+      key: init.key,
+      defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    for (const listener of this.listeners.get(type) || []) listener(event);
+    return event;
+  }
+  click() { return this.dispatch('click'); }
+  focus() { this.focusCalls += 1; }
+  contains(node) {
+    for (let cursor = node; cursor; cursor = cursor.parentNode) if (cursor === this) return true;
+    return false;
+  }
+  closest(selector) {
+    if (selector === '[data-spatial-paper-id]' && this.dataset.spatialPaperId != null) return this;
+    return this.parentNode && typeof this.parentNode.closest === 'function' ? this.parentNode.closest(selector) : null;
+  }
+  querySelector(selector) {
+    if (selector === 'button, a, input, select, textarea, [tabindex="0"]') {
+      return this.children.find(child => ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'].includes(child.tagName) || child.tabIndex === 0) || null;
+    }
+    return null;
+  }
+}
+
+class FakeMediaQuery {
+  constructor(matches = false) { this.matches = matches; this.listeners = []; }
+  addEventListener(type, listener) { if (type === 'change') this.listeners.push(listener); }
+  dispatch(matches) {
+    this.matches = matches;
+    this.listeners.forEach(listener => listener({ matches }));
+  }
+}
+
+function createWorkspaceHarness(options = {}) {
+  const ids = [
+    'spatialOverview', 'spatialLayers', 'spatialCount', 'spatialPosition',
+    'spatialQueueTotal', 'spatialQueueLearning', 'spatialQueueDone', 'spatialDirections',
+    'spatialContext', 'spatialEmpty', 'spatialEmptyText', 'spatialClearFilters',
+    'spatialInspector', 'spatialInspectorTitle', 'spatialInspectorTitleZh',
+    'spatialInspectorMeta', 'spatialInspectorStatus', 'spatialInspectorReview',
+    'spatialInspectorNote', 'spatialInspectorSummary', 'spatialPrev', 'spatialNext',
+    'spatialOpen', 'spatialQueueToggle', 'spatialInspectorToggle', 'spatialQueueClose',
+    'spatialInspectorClose', 'spatialQueue', 'spatialScrim', 'spatialFilterSlot',
+    'topFilters', 'homeFilterActions',
+  ];
+  const elements = new Map(ids.map(id => [id, new FakeElement('div', id)]));
+  for (const id of [
+    'spatialClearFilters', 'spatialPrev', 'spatialNext', 'spatialOpen',
+    'spatialQueueToggle', 'spatialInspectorToggle', 'spatialQueueClose',
+    'spatialInspectorClose', 'spatialScrim',
+  ]) elements.get(id).tagName = 'BUTTON';
+  const root = elements.get('spatialOverview');
+  const queue = elements.get('spatialQueue');
+  const inspector = elements.get('spatialInspector');
+  const topFilters = elements.get('topFilters');
+  const nestedIds = new Set([
+    'spatialQueueClose', 'spatialInspectorClose', 'spatialOpen', 'spatialFilterSlot',
+    'topFilters', 'homeFilterActions',
+  ]);
+  for (const [id, element] of elements) {
+    if (id !== 'spatialOverview' && !nestedIds.has(id)) root.append(element);
+  }
+  queue.append(elements.get('spatialQueueClose'), elements.get('spatialFilterSlot'));
+  inspector.append(elements.get('spatialInspectorClose'), elements.get('spatialOpen'));
+  topFilters.append(elements.get('homeFilterActions'));
+  const documentElement = new FakeElement('html', 'documentElement');
+  const document = {
+    documentElement,
+    listeners: new Map(),
+    createElement(tagName) { return new FakeElement(tagName); },
+    getElementById(id) { return elements.get(id) || null; },
+    addEventListener(type, listener) {
+      const listeners = this.listeners.get(type) || [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    },
+    dispatch(type, init = {}) {
+      const event = { type, key: init.key, target: init.target || this };
+      for (const listener of this.listeners.get(type) || []) listener(event);
+      return event;
+    },
+  };
+  const desktopMedia = new FakeMediaQuery();
+  const mobileMedia = new FakeMediaQuery(true);
+  const scrollContainer = new FakeElement('section', 'home');
+  scrollContainer.scrollTop = Number(options.scrollTop) || 0;
+  const initialScrollTop = scrollContainer.scrollTop;
+  let details = options.getDetails || (paper => ({
+    reviewText: '尚未安排',
+    noteText: paper.hasNote ? '已有笔记' : '暂无笔记',
+  }));
+  const harness = {
+    root,
+    document,
+    desktopMedia,
+    mobileMedia,
+    scrollContainer,
+    initialScrollTop,
+    layers: elements.get('spatialLayers'),
+    count: elements.get('spatialCount'),
+    position: elements.get('spatialPosition'),
+    empty: elements.get('spatialEmpty'),
+    emptyText: elements.get('spatialEmptyText'),
+    clearButton: elements.get('spatialClearFilters'),
+    inspector: elements.get('spatialInspector'),
+    inspectorTitle: elements.get('spatialInspectorTitle'),
+    inspectorReview: elements.get('spatialInspectorReview'),
+    previous: elements.get('spatialPrev'),
+    next: elements.get('spatialNext'),
+    queueToggle: elements.get('spatialQueueToggle'),
+    inspectorToggle: elements.get('spatialInspectorToggle'),
+    queueClose: elements.get('spatialQueueClose'),
+    inspectorClose: elements.get('spatialInspectorClose'),
+    scrim: elements.get('spatialScrim'),
+    filterActions: elements.get('homeFilterActions'),
+    filterHome: elements.get('topFilters'),
+    filterSlot: elements.get('spatialFilterSlot'),
+    options: {
+      root,
+      document,
+      scrollContainer,
+      desktopMedia,
+      mobileMedia,
+      onOpen: options.onOpen,
+      onClearFilters: options.onClearFilters,
+      getDetails: paper => details(paper),
+    },
+    setDetails(next) { details = next; },
+    dispatchPaper(type, id) {
+      const target = this.layers.children.find(node => String(node.dataset.spatialPaperId) === String(id));
+      assert.ok(target, `missing rendered paper ${id}`);
+      return root.dispatch(type, { target });
+    },
+    dispatchPaperKey(id, key) {
+      const target = this.layers.children.find(node => String(node.dataset.spatialPaperId) === String(id));
+      assert.ok(target, `missing rendered paper ${id}`);
+      return root.dispatch('keydown', { target, key });
+    },
+    dispatchRootKey(key) { return root.dispatch('keydown', { target: root, key }); },
+    dispatchDocumentKey(key) { return document.dispatch('keydown', { target: document, key }); },
+  };
+  return harness;
+}
+
 test('empty results have no selection and no fake layers', () => {
   const { createWorkspaceState } = require(workspacePath);
   const state = createWorkspaceState([], 'missing');
@@ -110,4 +314,123 @@ test('nullish direct selections are no-ops', () => {
   const state = createWorkspaceState(stringNullishPapers, 'first');
   assert.equal(selectPaper(state, null), state);
   assert.equal(selectPaper(state, undefined), state);
+});
+
+test('controller update renders only real layers with one selected option', () => {
+  const { createWorkspaceController } = require(workspacePath);
+  const harness = createWorkspaceHarness();
+  const controller = createWorkspaceController(harness.options);
+  controller.update(papers, { preferredId: 'p4', emptyMessage: '没有匹配的论文。' });
+  assert.equal(harness.layers.children.length, 5);
+  assert.equal(harness.layers.children.filter(node => node.attributes['aria-selected'] === 'true').length, 1);
+  assert.equal(harness.count.textContent, '共 8 篇');
+  assert.equal(harness.position.textContent, '4 / 8');
+});
+
+test('controller selection updates the inspector without opening', () => {
+  const opened = [];
+  const harness = createWorkspaceHarness({ onOpen: paper => opened.push(paper.id) });
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers);
+  controller.select('p3');
+  assert.equal(controller.getState().selectedId, 'p3');
+  assert.equal(harness.inspectorTitle.textContent, 'Paper 3');
+  assert.deepEqual(opened, []);
+});
+
+test('a changed external current is followed once, then preview selection stays independent', () => {
+  const harness = createWorkspaceHarness();
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers, { preferredId: 'p2' });
+  controller.select('p3');
+  controller.update(papers, { preferredId: 'p6' });
+  assert.equal(controller.getState().selectedId, 'p6');
+  controller.select('p5');
+  controller.update(papers.slice().reverse(), { preferredId: 'p6' });
+  assert.equal(controller.getState().selectedId, 'p5');
+});
+
+test('an external current excluded by filters is followed when it later becomes visible', () => {
+  const harness = createWorkspaceHarness();
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers.slice(0, 3), { preferredId: 'p1' });
+  controller.update(papers.slice(0, 3), { preferredId: 'p8' });
+  assert.equal(controller.getState().selectedId, 'p1');
+  controller.update(papers, { preferredId: 'p8' });
+  assert.equal(controller.getState().selectedId, 'p8');
+});
+
+test('review loading and a loaded result with no plan use different text', () => {
+  const harness = createWorkspaceHarness({
+    getDetails: () => ({ reviewText: '复习数据载入中…', noteText: '暂无笔记' }),
+  });
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers.slice(0, 1));
+  assert.equal(harness.inspectorReview.textContent, '复习数据载入中…');
+  harness.setDetails(() => ({ reviewText: '尚未安排', noteText: '暂无笔记' }));
+  controller.refreshDetails();
+  assert.equal(harness.inspectorReview.textContent, '尚未安排');
+});
+
+test('single click keeps the layer node stable so native double-click opens once', () => {
+  const opened = [];
+  const harness = createWorkspaceHarness({ onOpen: paper => opened.push(paper.id) });
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers, { preferredId: 'p2' });
+  controller.bind();
+  const before = harness.layers.children.find(node => node.dataset.spatialPaperId === 'p3');
+  harness.dispatchPaper('click', 'p3');
+  const after = harness.layers.children.find(node => node.dataset.spatialPaperId === 'p3');
+  assert.equal(after, before);
+  harness.dispatchPaper('dblclick', 'p3');
+  assert.deepEqual(opened, ['p3']);
+});
+
+test('data refresh with the same paper ids refreshes live layer text', () => {
+  const harness = createWorkspaceHarness();
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers, { preferredId: 'p3' });
+  const changed = papers.map(paper => paper.id === 'p3'
+    ? { ...paper, title: 'Updated Paper 3', status: '已理解' }
+    : paper);
+  controller.update(changed);
+  const layer = harness.layers.children.find(node => node.dataset.spatialPaperId === 'p3');
+  assert.equal(layer.children[1].textContent, 'Updated Paper 3');
+  assert.equal(layer.children[3].textContent, '已理解');
+});
+
+test('explicit open and Enter reuse the selected paper callback', () => {
+  const opened = [];
+  const harness = createWorkspaceHarness({ onOpen: paper => opened.push(paper.id) });
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers, { preferredId: 'p2' });
+  controller.bind();
+  controller.openSelected();
+  harness.dispatchPaperKey('p4', 'Enter');
+  assert.deepEqual(opened, ['p2', 'p4']);
+});
+
+test('empty results show the real empty state and clear-filter action', () => {
+  let clears = 0;
+  const harness = createWorkspaceHarness({ onClearFilters: () => { clears += 1; } });
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update([], { emptyMessage: '语义检索没有命中。' });
+  controller.bind();
+  assert.equal(harness.empty.hidden, false);
+  assert.equal(harness.emptyText.textContent, '语义检索没有命中。');
+  assert.equal(harness.inspector.hidden, true);
+  assert.equal(harness.inspectorToggle.disabled, true);
+  harness.clearButton.click();
+  assert.equal(clears, 1);
+});
+
+test('controller binding is single-shot and boundary buttons stay disabled', () => {
+  const harness = createWorkspaceHarness();
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers.slice(0, 1));
+  controller.bind();
+  controller.bind();
+  assert.equal(harness.previous.disabled, true);
+  assert.equal(harness.next.disabled, true);
+  assert.equal(harness.root.listenerCount('click'), 1);
 });
