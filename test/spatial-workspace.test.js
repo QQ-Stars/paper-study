@@ -10,6 +10,11 @@ const papers = Array.from({ length: 8 }, (_, index) => ({
   year: '2026',
   status: index % 2 ? '学习中' : '未开始',
 }));
+const stringNullishPapers = [
+  { id: 'first' },
+  { id: 'null' },
+  { id: 'undefined' },
+];
 
 test('empty results have no selection and no fake layers', () => {
   const { createWorkspaceState } = require(workspacePath);
@@ -76,4 +81,33 @@ test('previous and next never wrap', () => {
   assert.equal(moveSelection(first, -1).selectedId, 'p1');
   const last = createWorkspaceState(papers.slice(0, 3), 'p3');
   assert.equal(moveSelection(last, 1).selectedId, 'p3');
+});
+
+test('nullish preferred ids do not collide with string paper ids', () => {
+  const { createWorkspaceState } = require(workspacePath);
+  assert.equal(createWorkspaceState(stringNullishPapers).selectedId, 'first');
+  assert.equal(createWorkspaceState(stringNullishPapers, null).selectedId, 'first');
+  assert.equal(createWorkspaceState(stringNullishPapers, undefined).selectedId, 'first');
+});
+
+test('an explicit string null id remains selectable', () => {
+  const { createWorkspaceState, selectPaper } = require(workspacePath);
+  assert.equal(createWorkspaceState(stringNullishPapers, 'null').selectedId, 'null');
+  const state = createWorkspaceState(stringNullishPapers, 'first');
+  assert.equal(selectPaper(state, 'null').selectedId, 'null');
+});
+
+test('reconciliation preserves an explicit string null selection', () => {
+  const { createWorkspaceState, reconcilePapers } = require(workspacePath);
+  const state = createWorkspaceState(stringNullishPapers, 'null');
+  const next = reconcilePapers(state, [stringNullishPapers[2], stringNullishPapers[1]]);
+  assert.equal(next.selectedId, 'null');
+  assert.equal(next.selectedIndex, 1);
+});
+
+test('nullish direct selections are no-ops', () => {
+  const { createWorkspaceState, selectPaper } = require(workspacePath);
+  const state = createWorkspaceState(stringNullishPapers, 'first');
+  assert.equal(selectPaper(state, null), state);
+  assert.equal(selectPaper(state, undefined), state);
 });

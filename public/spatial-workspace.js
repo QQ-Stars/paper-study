@@ -34,7 +34,10 @@
 
   function createWorkspaceState(papers, preferredId = null) {
     const items = paperList(papers);
-    let selectedIndex = items.findIndex(paper => String(paper.id) === String(preferredId));
+    let selectedIndex = -1;
+    if (preferredId != null) {
+      selectedIndex = items.findIndex(paper => String(paper.id) === String(preferredId));
+    }
     if (selectedIndex < 0) selectedIndex = items.length ? 0 : -1;
     return stateFrom(items, selectedIndex);
   }
@@ -44,7 +47,7 @@
   }
 
   function selectPaper(state, paperId) {
-    if (!state) return state;
+    if (!state || paperId == null) return state;
     const nextIndex = state.papers.findIndex(paper => String(paper.id) === String(paperId));
     if (nextIndex < 0 || nextIndex === state.selectedIndex) return state;
     return stateFrom(state.papers, nextIndex, state.visibleStart);
