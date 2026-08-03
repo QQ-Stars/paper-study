@@ -18,6 +18,8 @@ let homeSort = { key: 'year', dir: 1 };
 let manageSrc = 'all';
 let titleZhAbort = null;
 let reviewData = null;
+let reviewLoadPromise = null;
+let reviewLoadVersion = 0;
 let spatialWorkspace = null;
 let chProgress = null, chDir = null, chVenue = null;
 let chTrend = null, chTree = null, chCited = null, chCite = null;  // 洞察：趋势面积 / 馆藏树图 / 被引 / 引用图
@@ -302,10 +304,17 @@ function clearHomeFilters() {
 }
 
 function spatialPaperDetails(paper) {
+  const noteText = paper && paper.hasNote ? '已有笔记' : '暂无笔记';
   if (!reviewData) {
     return {
       reviewText: '复习数据载入中…',
-      noteText: paper && paper.hasNote ? '已有笔记' : '暂无笔记',
+      noteText,
+    };
+  }
+  if (reviewData.error) {
+    return {
+      reviewText: '复习信息暂不可用',
+      noteText,
     };
   }
   const review = currentReviewItem(paper && paper.id);
@@ -313,7 +322,7 @@ function spatialPaperDetails(paper) {
     reviewText: review
       ? `第 ${review.current_step || 1}/${review.total_steps || 7} 轮 · ${dueText(review, reviewData && reviewData.today)}`
       : '尚未安排',
-    noteText: paper && paper.hasNote ? '已有笔记' : '暂无笔记',
+    noteText,
   };
 }
 
@@ -479,17 +488,38 @@ function blankReviewData(error = '') {
     completed: []
   };
 }
-async function loadReviews(renderList = true) {
-  try {
-    const data = await (await fetch('/api/reviews')).json();
-    reviewData = data && data.counts ? data : blankReviewData('复习数据格式异常');
-  } catch (e) {
-    reviewData = blankReviewData(String(e));
-  }
-  spatialWorkspace?.refreshDetails();
+function startReviewLoad(force = false) {
+  if (reviewLoadPromise && !force) return reviewLoadPromise;
+  const version = ++reviewLoadVersion;
+  let trackedPromise;
+  const request = (async () => {
+    try {
+      const data = await (await fetch('/api/reviews')).json();
+      return data && data.counts ? data : blankReviewData('复习数据格式异常');
+    } catch (e) {
+      return blankReviewData(String(e));
+    }
+  })();
+  trackedPromise = request.then(data => {
+    if (version !== reviewLoadVersion) {
+      return reviewLoadPromise && reviewLoadPromise !== trackedPromise
+        ? reviewLoadPromise
+        : reviewData;
+    }
+    reviewData = data;
+    spatialWorkspace?.refreshDetails();
+    renderCurrentReviewStatus();
+    return reviewData;
+  }).finally(() => {
+    if (reviewLoadPromise === trackedPromise) reviewLoadPromise = null;
+  });
+  reviewLoadPromise = trackedPromise;
+  return trackedPromise;
+}
+async function loadReviews(renderList = true, force = false) {
+  const data = await startReviewLoad(force);
   if (renderList) renderReviews();
-  renderCurrentReviewStatus();
-  return reviewData;
+  return data;
 }
 function reviewItems(data = reviewData) {
   const d = data || blankReviewData();
