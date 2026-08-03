@@ -5,8 +5,12 @@ const test = require('node:test');
 
 const css = fs.readFileSync(path.resolve(__dirname, '..', 'public', 'spatial.css'), 'utf8');
 
+function withoutComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
 function selectorPreludes(source) {
-  const clean = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  const clean = withoutComments(source);
   const selectors = [];
   let tokenStart = 0;
   for (let index = 0; index < clean.length; index += 1) {
@@ -44,31 +48,66 @@ function ruleBody(source, selector) {
   return match[1];
 }
 
-function themeHex(theme, token) {
+function themeBlock(theme) {
   const block = css.match(new RegExp(`data-theme="${theme}"[^\\{]*\\{([^}]*)\\}`, 's'));
   assert.ok(block, `missing ${theme} theme block`);
-  const value = block[1].match(new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, 'i'));
-  assert.ok(value, `missing ${token} in ${theme}`);
-  return value[1];
+  return block[1];
 }
 
-function relativeLuminance(hex) {
-  const channels = hex.slice(1).match(/../g).map(channel => parseInt(channel, 16) / 255);
-  const linear = channels.map(channel => (
-    channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
-  ));
+function themeValue(theme, token) {
+  const value = themeBlock(theme).match(new RegExp(`${token}:\\s*([^;]+);`, 'i'));
+  assert.ok(value, `missing ${token} in ${theme}`);
+  return value[1].trim();
+}
+
+function themeHex(theme, token) {
+  const value = themeValue(theme, token);
+  assert.match(value, /^#[0-9a-f]{6}$/i, `${token} in ${theme} must be a six-digit hex color`);
+  return value;
+}
+
+function themeRgba(theme, token) {
+  const value = themeValue(theme, token);
+  const match = value.match(/^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i);
+  assert.ok(match, `${token} in ${theme} must be rgba`);
+  const channels = match.slice(1).map(Number);
+  assert.ok(channels.slice(0, 3).every(channel => channel >= 0 && channel <= 255));
+  assert.ok(channels[3] >= 0 && channels[3] <= 1);
+  return channels;
+}
+
+function hexChannels(hex) {
+  return hex.slice(1).match(/../g).map(channel => parseInt(channel, 16));
+}
+
+function relativeLuminance(channels) {
+  const linear = channels.map(value => {
+    const channel = value / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
   return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
 }
 
-function contrastRatio(first, second) {
+function compositeRgbaOverHex(rgba, hex) {
+  const background = hexChannels(hex);
+  return rgba.slice(0, 3).map((channel, index) => (
+    channel * rgba[3] + background[index] * (1 - rgba[3])
+  ));
+}
+
+function channelContrastRatio(first, second) {
   const a = relativeLuminance(first);
   const b = relativeLuminance(second);
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
+function contrastRatio(first, second) {
+  return channelContrastRatio(hexChannels(first), hexChannels(second));
+}
+
 test('every spatial selector is positively scoped', () => {
   const selectors = selectorPreludes(css);
-  assert.ok(selectors.length > 25);
+  assert.ok(selectors.length >= 180, `expected desktop system scale, found ${selectors.length}`);
   for (const selector of selectors) {
     assert.ok(
       selector.startsWith('html[data-ui-style="spatial"]'),
@@ -76,6 +115,16 @@ test('every spatial selector is positively scoped', () => {
     );
   }
   assert.doesNotMatch(css, /(^|\n)\s*:root\b/);
+});
+
+test('spatial blocks stay balanced after comments are removed', () => {
+  let depth = 0;
+  for (const character of withoutComments(css)) {
+    if (character === '{') depth += 1;
+    if (character === '}') depth -= 1;
+    assert.ok(depth >= 0, 'a spatial block closes before it opens');
+  }
+  assert.equal(depth, 0, 'spatial blocks must finish at depth zero');
 });
 
 test('dark and light themes have emerald role ledgers', () => {
@@ -119,6 +168,33 @@ test('dark and light themes have emerald role ledgers', () => {
       contrastRatio(themeHex(theme, '--sp-border-strong'), themeHex(theme, '--sp-surface-solid')) >= 3,
       `${theme} strong control boundaries must meet non-text contrast`,
     );
+  }
+});
+
+test('theme copy and semantic states remain readable on their rendered surfaces', () => {
+  for (const theme of ['dark', 'light']) {
+    for (const foreground of ['--sp-text', '--sp-muted']) {
+      for (const background of ['--sp-bg', '--sp-surface-solid']) {
+        assert.ok(
+          contrastRatio(themeHex(theme, foreground), themeHex(theme, background)) >= 4.5,
+          `${theme} ${foreground} must remain readable on ${background}`,
+        );
+      }
+    }
+
+    const surface = themeHex(theme, '--sp-surface-solid');
+    for (const role of ['danger', 'warning']) {
+      const foreground = themeHex(theme, `--sp-${role}`);
+      assert.ok(
+        contrastRatio(foreground, surface) >= 4.5,
+        `${theme} ${role} foreground must remain readable on the solid surface`,
+      );
+      const softSurface = compositeRgbaOverHex(themeRgba(theme, `--sp-${role}-soft`), surface);
+      assert.ok(
+        channelContrastRatio(hexChannels(foreground), softSurface) >= 4.5,
+        `${theme} ${role} foreground must remain readable on its composited soft surface`,
+      );
+    }
   }
 });
 
