@@ -6,6 +6,7 @@ const test = require('node:test');
 const publicDir = path.resolve(__dirname, '..', 'public');
 const html = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8');
 const style = fs.readFileSync(path.join(publicDir, 'style.css'), 'utf8');
+const app = fs.readFileSync(path.join(publicDir, 'app.js'), 'utf8');
 
 test('classic mode hides one semantic spatial overview while preserving homeTable', () => {
   assert.equal((html.match(/id="spatialOverview"/g) || []).length, 1);
@@ -46,4 +47,38 @@ test('spatial-workspace loads once before the protected markdown script trio', (
     'markdown-rendering-coordinator.js',
     'app.js',
   ]);
+});
+
+test('renderHome gives the same filtered sorted list to table and spatial controller', () => {
+  const body = app.slice(app.indexOf('function renderHome()'), app.indexOf('function updateCharts'));
+  assert.match(body, /spatialWorkspace\.update\(list,/);
+  assert.match(body, /emptyMessage:\s*emptyMsg/);
+});
+
+test('spatial opening reuses openPaper and never duplicates the reading workflow', () => {
+  const builder = app.slice(app.indexOf('function buildSpatialWorkspace'), app.indexOf('function renderHome'));
+  assert.match(builder, /onOpen:\s*openPaper/);
+  assert.doesNotMatch(builder, /fetch\(|showView\(|renderPdf\(/);
+});
+
+test('clearing spatial filters resets only home filtering controls', () => {
+  const clear = app.slice(app.indexOf('function clearHomeFilters'), app.indexOf('function buildSpatialWorkspace'));
+  for (const assignment of [
+    /yearFilter\s*=\s*['"]all['"]/,
+    /favOnly\s*=\s*false/,
+    /semActive\s*=\s*false/,
+    /semRank\s*=\s*null/,
+    /q\s*=\s*['"]/,
+  ]) assert.match(clear, assignment);
+  assert.doesNotMatch(clear, /homeSort\s*=/);
+});
+
+test('opening and review refresh keep the spatial inspector current', () => {
+  assert.match(app, /spatialWorkspace\?\.select\(p\.id\)/);
+  assert.match(app, /spatialWorkspace\?\.refreshDetails\(\)/);
+});
+
+test('the controller receives the real home scroll container', () => {
+  const builder = app.slice(app.indexOf('function buildSpatialWorkspace'), app.indexOf('function renderHome'));
+  assert.match(builder, /scrollContainer:\s*\$\(['"]#home['"]\)/);
 });

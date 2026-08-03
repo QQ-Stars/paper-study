@@ -18,6 +18,7 @@ let homeSort = { key: 'year', dir: 1 };
 let manageSrc = 'all';
 let titleZhAbort = null;
 let reviewData = null;
+let spatialWorkspace = null;
 let chProgress = null, chDir = null, chVenue = null;
 let chTrend = null, chTree = null, chCited = null, chCite = null;  // 洞察：趋势面积 / 馆藏树图 / 被引 / 引用图
 
@@ -85,11 +86,13 @@ async function init() {
   buildSideYears();
   renderSidebar();
   buildDashShell();
+  buildSpatialWorkspace();
   renderHome();
   bindUI();
   initResizers();
   showView('home');
   appReady = true;
+  void loadReviews(false);
 }
 
 let appReady = false;
@@ -280,6 +283,53 @@ function buildDashShell() {
 }
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
+function clearHomeFilters() {
+  yearFilter = 'all';
+  favOnly = false;
+  semActive = false;
+  semRank = null;
+  q = '';
+  const search = $('#search');
+  search.value = '';
+  search.placeholder = '搜索…';
+  $('#favFilter').classList.remove('on');
+  $('#favFilter').textContent = '☆ 收藏';
+  $('#semToggle').classList.remove('on');
+  $('#semToggle').textContent = '🔮 语义';
+  buildYearFilters();
+  refresh();
+  search.focus();
+}
+
+function spatialPaperDetails(paper) {
+  if (!reviewData) {
+    return {
+      reviewText: '复习数据载入中…',
+      noteText: paper && paper.hasNote ? '已有笔记' : '暂无笔记',
+    };
+  }
+  const review = currentReviewItem(paper && paper.id);
+  return {
+    reviewText: review
+      ? `第 ${review.current_step || 1}/${review.total_steps || 7} 轮 · ${dueText(review, reviewData && reviewData.today)}`
+      : '尚未安排',
+    noteText: paper && paper.hasNote ? '已有笔记' : '暂无笔记',
+  };
+}
+
+function buildSpatialWorkspace() {
+  if (spatialWorkspace || !window.SpatialWorkspace || !$('#spatialOverview')) return;
+  spatialWorkspace = window.SpatialWorkspace.createWorkspaceController({
+    root: $('#spatialOverview'),
+    document,
+    scrollContainer: $('#home'),
+    onOpen: openPaper,
+    onClearFilters: clearHomeFilters,
+    getDetails: spatialPaperDetails,
+  });
+  spatialWorkspace.bind();
+}
+
 function renderHome() {
   let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter) && (!favOnly || p.favorite));
   const sem = semActive && semRank;
@@ -290,6 +340,12 @@ function renderHome() {
   if (sem) list.sort((a, b) => semRank.get(b.id) - semRank.get(a.id));
   else list.sort(cmpHome);
   const emptyMsg = sem ? '语义检索没有命中（试试换种说法）。' : (favOnly ? '还没有收藏的论文。在阅读界面点「☆ 收藏」即可。' : '没有匹配的论文。');
+  if (spatialWorkspace) {
+    spatialWorkspace.update(list, {
+      preferredId: current && current.id,
+      emptyMessage: emptyMsg,
+    });
+  }
   $('#homeBody').innerHTML = list.map((p, i) => rowHTML(p, i + 1)).join('') || `<tr><td colspan="11" class="empty-row">${emptyMsg}</td></tr>`;
   document.querySelectorAll('#homeBody tr[data-id]').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
   document.querySelectorAll('#homeBody .fav-star').forEach(s => s.onclick = (e) => { e.stopPropagation(); toggleFavorite(s.dataset.id); });
@@ -430,6 +486,7 @@ async function loadReviews(renderList = true) {
   } catch (e) {
     reviewData = blankReviewData(String(e));
   }
+  spatialWorkspace?.refreshDetails();
   if (renderList) renderReviews();
   renderCurrentReviewStatus();
   return reviewData;
@@ -806,6 +863,7 @@ function paperItem(p) {
 // ====== 打开论文 ======
 async function openPaper(p) {
   if (!p) return;
+  spatialWorkspace?.select(p.id);
   current = p;
   showView('read');
   renderSidebar();
