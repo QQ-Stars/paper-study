@@ -45,6 +45,10 @@ class FakeElement {
     this.checked = false;
     this.tabIndex = -1;
     this.focusCalls = 0;
+    this.focusOptions = [];
+    this.focusScrollContainer = null;
+    this.focusScrollTop = 0;
+    this.rejectFocusOptions = false;
     this.ownerDocument = null;
     this.scrollTop = 0;
     this.style = { values: {}, setProperty: (name, value) => { this.style.values[name] = String(value); } };
@@ -84,9 +88,15 @@ class FakeElement {
     return event;
   }
   click() { return this.dispatch('click'); }
-  focus() {
+  focus(options) {
     this.focusCalls += 1;
-    if (this.ownerDocument) this.ownerDocument.activeElement = this;
+    this.focusOptions.push(options);
+    if (options && this.rejectFocusOptions) throw new TypeError('focus options are unsupported');
+    if (this.focusScrollContainer) this.focusScrollContainer.scrollTop = this.focusScrollTop;
+    if (this.ownerDocument) {
+      this.ownerDocument.activeElement = this;
+      this.ownerDocument.dispatch('focusin', { target: this });
+    }
   }
   contains(node) {
     for (let cursor = node; cursor; cursor = cursor.parentNode) if (cursor === this) return true;
@@ -146,8 +156,11 @@ function createWorkspaceHarness(options = {}) {
   inspector.append(elements.get('spatialInspectorClose'), elements.get('spatialOpen'));
   topFilters.append(elements.get('homeFilterActions'));
   const documentElement = new FakeElement('html', 'documentElement');
+  const body = new FakeElement('body', 'body');
+  documentElement.append(body);
   const document = {
     documentElement,
+    body,
     activeElement: null,
     listeners: new Map(),
     createElement(tagName) {
@@ -161,6 +174,7 @@ function createWorkspaceHarness(options = {}) {
       listeners.push(listener);
       this.listeners.set(type, listeners);
     },
+    listenerCount(type) { return (this.listeners.get(type) || []).length; },
     dispatch(type, init = {}) {
       const event = { type, key: init.key, target: init.target || this };
       for (const listener of this.listeners.get(type) || []) listener(event);
@@ -168,6 +182,7 @@ function createWorkspaceHarness(options = {}) {
     },
   };
   documentElement.ownerDocument = document;
+  body.ownerDocument = document;
   for (const element of elements.values()) element.ownerDocument = document;
   const desktopMedia = new FakeMediaQuery();
   const mobileMedia = new FakeMediaQuery(true);
@@ -445,6 +460,7 @@ test('controller binding is single-shot and boundary buttons stay disabled', () 
   assert.equal(harness.previous.disabled, true);
   assert.equal(harness.next.disabled, true);
   assert.equal(harness.root.listenerCount('click'), 1);
+  assert.equal(harness.document.listenerCount('focusin'), 1);
 });
 
 test('mobile panels are mutually exclusive and restore trigger focus', () => {
@@ -489,14 +505,17 @@ test('a desktop breakpoint transition closes a focused panel before moving focus
   assert.ok(selectedLayer);
   let stateWhenFocused = null;
   const focusSelectedLayer = selectedLayer.focus.bind(selectedLayer);
-  selectedLayer.focus = () => {
+  selectedLayer.focusScrollContainer = harness.scrollContainer;
+  selectedLayer.focusScrollTop = 5;
+  selectedLayer.focus = (options) => {
     stateWhenFocused = {
       panelOpen: harness.root.classList.contains('is-inspector-open'),
       scrollTop: harness.scrollContainer.scrollTop,
     };
-    focusSelectedLayer();
+    focusSelectedLayer(options);
   };
   harness.scrollContainer.scrollTop = 25;
+  harness.document.activeElement = harness.document.body;
   harness.desktopMedia.dispatch(true);
   assert.equal(harness.root.classList.contains('is-inspector-open'), false);
   assert.equal(harness.document.documentElement.classList.contains('spatial-inspector-open'), false);
@@ -505,6 +524,7 @@ test('a desktop breakpoint transition closes a focused panel before moving focus
   assert.equal(harness.scrollContainer.scrollTop, harness.initialScrollTop);
   assert.equal(harness.filterActions.parentNode, harness.filterHome);
   assert.deepEqual(stateWhenFocused, { panelOpen: false, scrollTop: harness.initialScrollTop });
+  assert.deepEqual(selectedLayer.focusOptions.at(-1), { preventScroll: true });
   assert.equal(harness.document.activeElement, selectedLayer);
   assert.equal(harness.inspectorToggle.focusCalls, 0);
 });
@@ -516,13 +536,24 @@ test('leaving the mobile breakpoint moves focus from an empty queue to clear fil
   controller.bind();
   controller.openPanel('queue');
   assert.equal(harness.document.activeElement, harness.queueClose);
+  harness.clearButton.focusScrollContainer = harness.scrollContainer;
+  harness.clearButton.focusScrollTop = 7;
+  harness.clearButton.rejectFocusOptions = true;
   harness.scrollContainer.scrollTop = 30;
   harness.mobileMedia.dispatch(false);
   assert.equal(harness.root.classList.contains('is-queue-open'), false);
   assert.equal(harness.scrim.hidden, true);
   assert.equal(harness.filterActions.parentNode, harness.filterHome);
-  assert.equal(harness.scrollContainer.scrollTop, 190);
   assert.equal(harness.document.activeElement, harness.clearButton);
+  assert.deepEqual({
+    attemptedFocusOptions: harness.clearButton.focusOptions.at(-2),
+    fallbackFocusOptions: harness.clearButton.focusOptions.at(-1),
+    scrollTop: harness.scrollContainer.scrollTop,
+  }, {
+    attemptedFocusOptions: { preventScroll: true },
+    fallbackFocusOptions: undefined,
+    scrollTop: 190,
+  });
   assert.equal(harness.queueToggle.focusCalls, 0);
 });
 
@@ -533,9 +564,10 @@ test('breakpoint closure does not steal unrelated focus', () => {
   controller.bind();
   controller.openPanel('inspector');
   harness.clearButton.focus();
+  harness.document.activeElement = harness.document.body;
   harness.desktopMedia.dispatch(true);
   assert.equal(harness.root.classList.contains('is-inspector-open'), false);
-  assert.equal(harness.document.activeElement, harness.clearButton);
+  assert.equal(harness.document.activeElement, harness.document.body);
 });
 
 test('Escape and scrim close a panel without changing selection or home scroll', () => {

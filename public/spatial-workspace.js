@@ -131,6 +131,29 @@
     let panelTrigger = null;
     let savedScrollTop = 0;
     let activePanel = null;
+    let lastMeaningfulFocusPanel = null;
+
+    function panelForFocusTarget(target) {
+      if (!target) return null;
+      if (target === elements.queueToggle || elements.queue.contains(target)) return 'queue';
+      if (target === elements.inspectorToggle || elements.inspector.contains(target)) return 'inspector';
+      return null;
+    }
+
+    function rememberMeaningfulFocus(event) {
+      const target = event && event.target;
+      if (!target || target === document.body || target === document.documentElement) return;
+      const focusedPanel = panelForFocusTarget(target);
+      lastMeaningfulFocusPanel = focusedPanel === activePanel ? focusedPanel : null;
+    }
+
+    function usableFocusTarget(target) {
+      return Boolean(target
+        && target !== document.body
+        && target !== document.documentElement
+        && target.isConnected !== false
+        && typeof target.focus === 'function');
+    }
 
     function resetPanelPresentation() {
       root.classList.remove('is-queue-open', 'is-inspector-open');
@@ -148,6 +171,7 @@
       resetPanelPresentation();
       activePanel = null;
       panelTrigger = null;
+      lastMeaningfulFocusPanel = null;
       if (!wasActive) return;
       if (scrollContainer) scrollContainer.scrollTop = scrollTop;
       if (restoreFocus && trigger && typeof trigger.focus === 'function') trigger.focus();
@@ -155,19 +179,24 @@
 
     function closePanelsForBreakpoint() {
       const activeElement = document.activeElement;
-      const panel = activePanel === 'inspector'
-        ? elements.inspector
-        : activePanel === 'queue' ? elements.queue : null;
-      const shouldMoveFocus = Boolean(activeElement && (
-        activeElement === panelTrigger
-        || (panel && typeof panel.contains === 'function' && panel.contains(activeElement))
-      ));
+      const focusedPanel = usableFocusTarget(activeElement)
+        ? panelForFocusTarget(activeElement)
+        : lastMeaningfulFocusPanel;
+      const shouldMoveFocus = Boolean(activePanel && focusedPanel === activePanel);
+      const restoredScrollTop = savedScrollTop;
       closePanels({ restoreFocus: false });
       if (!shouldMoveFocus) return;
       const selectedLayer = Array.from(elements.layers.children || [])
         .find(layer => layer.getAttribute('aria-selected') === 'true');
       const target = selectedLayer || (!elements.clear.disabled ? elements.clear : null);
-      if (target && typeof target.focus === 'function') target.focus();
+      if (!target || typeof target.focus !== 'function') return;
+      try {
+        target.focus({ preventScroll: true });
+      } catch {
+        target.focus();
+      } finally {
+        if (scrollContainer) scrollContainer.scrollTop = restoredScrollTop;
+      }
     }
 
     function openPanel(name) {
@@ -429,6 +458,7 @@
       elements.queueClose.addEventListener('click', () => closePanels());
       elements.inspectorClose.addEventListener('click', () => closePanels());
       elements.scrim.addEventListener('click', () => closePanels());
+      document.addEventListener('focusin', rememberMeaningfulFocus);
       document.addEventListener('keydown', event => {
         if (event.key !== 'Escape' || !activePanel) return;
         if (typeof event.preventDefault === 'function') event.preventDefault();
