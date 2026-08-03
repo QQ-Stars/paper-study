@@ -29,13 +29,13 @@ html[data-ui-style="spatial"][data-theme="light"] {
   --sp-surface-solid: #f8fbf9;
   --sp-surface-muted: #dde7e1;
   --sp-text: #14211a;
-  --sp-muted: #596b62;
+  --sp-muted: #57695f;
   --sp-border: rgba(32, 73, 51, 0.16);
   --sp-border-strong: #769082;
   --sp-highlight: rgba(255, 255, 255, 0.8);
   --sp-accent: #08944f;
   --sp-accent-strong: #067a45;
-  --sp-accent-fg: #067a45;
+  --sp-accent-fg: #056b3d;
   --sp-accent-ink: #031b0e;
   --sp-accent-soft: rgba(8, 148, 79, 0.12);
   --sp-danger: #b52f3d;

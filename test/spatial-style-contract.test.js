@@ -4,6 +4,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const css = fs.readFileSync(path.resolve(__dirname, '..', 'public', 'spatial.css'), 'utf8');
+const legacyCss = fs.readFileSync(path.resolve(__dirname, '..', 'public', 'style.css'), 'utf8');
+const academicCss = fs.readFileSync(path.resolve(__dirname, '..', 'public', 'academic.css'), 'utf8');
 
 function withoutComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -43,9 +45,18 @@ function atRuleBody(source, header) {
 
 function ruleBody(source, selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = source.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  const match = source.match(new RegExp(`(?:^|[},])\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'));
   assert.ok(match, `missing rule ${selector}`);
   return match[1];
+}
+
+function colorMixAlpha(declarations, token) {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = declarations.match(new RegExp(
+    `background:\\s*color-mix\\(in srgb,\\s*var\\(${escaped}\\)\\s*(\\d+(?:\\.\\d+)?)%,\\s*transparent\\s*\\)`,
+  ));
+  assert.ok(match, `missing transparent ${token} color mix`);
+  return Number(match[1]) / 100;
 }
 
 function themeBlock(theme) {
@@ -193,6 +204,54 @@ test('theme copy and semantic states remain readable on their rendered surfaces'
       assert.ok(
         channelContrastRatio(hexChannels(foreground), softSurface) >= 4.5,
         `${theme} ${role} foreground must remain readable on its composited soft surface`,
+      );
+    }
+  }
+});
+
+test('actual legacy badges meet normal-text contrast in both themes', () => {
+  const ccfA = ruleBody(legacyCss, '.ccf-A');
+  assert.match(ccfA, /color:\s*var\(--accent-ink\)/);
+  const ccfAlpha = colorMixAlpha(ccfA, '--accent');
+  assert.equal(ccfAlpha, 0.18);
+
+  const verified = ruleBody(legacyCss, '.vbadge.ok');
+  assert.match(verified, /color:\s*var\(--ok\)/);
+  const verifiedAlpha = colorMixAlpha(verified, '--ok');
+  assert.equal(verifiedAlpha, 0.16);
+
+  const order = ruleBody(academicCss, '.order-badge');
+  assert.match(order, /background:\s*var\(--surface-3\)/);
+  assert.match(order, /color:\s*var\(--ink-2\)/);
+
+  const missing = ruleBody(legacyCss, '.vbadge.miss');
+  assert.match(missing, /background:\s*var\(--surface-3\)/);
+  assert.match(missing, /color:\s*var\(--ink-3\)/);
+
+  assert.match(css, /--accent:\s*var\(--sp-accent-fg\)/);
+  assert.match(css, /--accent-ink:\s*var\(--sp-accent-fg\)/);
+  assert.match(css, /--ok:\s*var\(--sp-accent-fg\)/);
+  assert.match(css, /--surface-3:\s*var\(--sp-surface-muted\)/);
+  assert.match(css, /--ink-2:\s*var\(--sp-muted\)/);
+  assert.match(css, /--ink-3:\s*var\(--sp-muted\)/);
+
+  for (const theme of ['dark', 'light']) {
+    const accentForeground = hexChannels(themeHex(theme, '--sp-accent-fg'));
+    const surface = themeHex(theme, '--sp-surface-solid');
+    for (const [badge, alpha] of [['ccf-A', ccfAlpha], ['vbadge.ok', verifiedAlpha]]) {
+      const tint = compositeRgbaOverHex([...accentForeground, alpha], surface);
+      assert.ok(
+        channelContrastRatio(accentForeground, tint) >= 4.5,
+        `${theme} ${badge} must remain readable on its actual tint`,
+      );
+    }
+
+    const muted = themeHex(theme, '--sp-muted');
+    const mutedSurface = themeHex(theme, '--sp-surface-muted');
+    for (const badge of ['order-badge', 'vbadge.miss']) {
+      assert.ok(
+        contrastRatio(muted, mutedSurface) >= 4.5,
+        `${theme} ${badge} must remain readable on surface-3`,
       );
     }
   }
