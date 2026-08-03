@@ -110,6 +110,67 @@ function createReviewMutationHarness() {
   };
 }
 
+function createSettingsHarness(initialView = 'home', scrollTop = 240) {
+  const start = app.indexOf('let settingsReturnFocus');
+  assert.notEqual(start, -1, 'Settings modal state must exist');
+  const source = app.slice(start);
+  const hiddenClasses = new Set(['hidden']);
+  const modal = {
+    classList: {
+      add(value) { hiddenClasses.add(value); },
+      remove(value) { hiddenClasses.delete(value); },
+      contains(value) { return hiddenClasses.has(value); },
+    },
+  };
+  const returnFocus = { focusCalls: 0, focus() { this.focusCalls += 1; } };
+  const closeButton = { focusCalls: 0, focus() { this.focusCalls += 1; } };
+  const elements = {
+    settingsModal: modal,
+    setClose: closeButton,
+    home: { scrollTop },
+    insights: { scrollTop },
+    pdfScroll: { scrollTop },
+  };
+  const queries = [];
+  const panelCloses = [];
+  let settingsLoads = 0;
+  const factory = Function(
+    'document',
+    '$',
+    'spatialWorkspace',
+    'loadSettings',
+    'setTimeout',
+    'initialView',
+    `let currentView = initialView;
+    ${source}
+    return {
+      openSettingsModal,
+      closeSettingsModal,
+      getCapturedState: () => ({ settingsReturnFocus, settingsScrollContainer, settingsScrollTop }),
+    };`,
+  );
+  const api = factory(
+    { activeElement: returnFocus },
+    selector => {
+      queries.push(selector);
+      return elements[selector.slice(1)] || null;
+    },
+    { closePanels(options) { panelCloses.push(options); } },
+    () => { settingsLoads += 1; },
+    callback => { callback(); },
+    initialView,
+  );
+  return {
+    ...api,
+    closeButton,
+    elements,
+    panelCloses,
+    queries,
+    returnFocus,
+    settingsLoads: () => settingsLoads,
+  };
+}
+
 test('classic mode hides one semantic spatial overview while preserving homeTable', () => {
   assert.equal((html.match(/id="spatialOverview"/g) || []).length, 1);
   assert.equal((html.match(/id="homeTable"/g) || []).length, 1);
@@ -285,22 +346,51 @@ test('reduced-motion preference controls ECharts animation as well as CSS', () =
   assert.doesNotMatch(app, /animationDuration(?:Update)?:\s*(?:600|700|750)\b/);
 });
 
-test('Settings close is idempotent and restores the active view scroll and focus', () => {
-  const settings = app.slice(app.indexOf('function activeViewScrollContainer'), app.indexOf('function closeSettingsModal') + 900);
-  assert.match(settings, /document\.activeElement/);
-  assert.match(settings, /openSettingsModal[\s\S]*spatialWorkspace\?\.closePanels/);
-  assert.match(settings, /scrollTop/);
-  assert.match(settings, /classList\.contains\(['"]hidden['"]\)/);
-  assert.match(settings, /\.focus\(\)/);
+test('Settings close restores captured home scroll and focus exactly once', () => {
+  const harness = createSettingsHarness('home', 240);
+  harness.openSettingsModal();
+  assert.deepEqual(harness.panelCloses, [{ restoreFocus: false }]);
+  assert.equal(harness.settingsLoads(), 1);
+  assert.equal(harness.elements.settingsModal.classList.contains('hidden'), false);
+  assert.equal(harness.closeButton.focusCalls, 1);
+  assert.equal(harness.getCapturedState().settingsReturnFocus, harness.returnFocus);
+  assert.equal(harness.getCapturedState().settingsScrollContainer, harness.elements.home);
+  assert.equal(harness.getCapturedState().settingsScrollTop, 240);
+
+  harness.elements.home.scrollTop = 12;
+  harness.closeSettingsModal();
+  assert.equal(harness.elements.settingsModal.classList.contains('hidden'), true);
+  assert.equal(harness.elements.home.scrollTop, 240);
+  assert.equal(harness.returnFocus.focusCalls, 1);
+  assert.equal(harness.getCapturedState().settingsReturnFocus, null);
+  assert.equal(harness.getCapturedState().settingsScrollContainer, null);
+
+  harness.elements.home.scrollTop = 88;
+  harness.closeSettingsModal();
+  assert.equal(harness.elements.home.scrollTop, 88);
+  assert.equal(harness.returnFocus.focusCalls, 1);
+});
+
+test('Settings captures pdfScroll for reading and the named container for other views', () => {
+  const reading = createSettingsHarness('read', 130);
+  reading.openSettingsModal();
+  assert.equal(reading.getCapturedState().settingsScrollContainer, reading.elements.pdfScroll);
+  assert.equal(reading.queries.includes('#pdfScroll'), true);
+  assert.equal(reading.queries.includes('#read'), false);
+
+  const insights = createSettingsHarness('insights', 150);
+  insights.openSettingsModal();
+  assert.equal(insights.getCapturedState().settingsScrollContainer, insights.elements.insights);
+  assert.equal(insights.queries.includes('#insights'), true);
 });
 
 test('leaving Home closes transient spatial panels without changing navigation state', () => {
   const showView = app.slice(app.indexOf('function showView'), app.indexOf('function fmtTime'));
-  assert.match(showView, /v\s*!=\s*['"]home['"][^\n]*spatialWorkspace\?\.closePanels/);
+  assert.match(showView, /v\s*!==\s*['"]home['"][^\n]*spatialWorkspace\?\.closePanels/);
 });
 
 test('leaving spatial appearance clears transient panels without changing view', () => {
   const handler = app.slice(app.indexOf('function handleAppearanceChange'), app.indexOf("document.addEventListener('paperstudy:appearancechange'"));
-  assert.match(handler, /event\.detail\.uiStyle\s*!=\s*['"]spatial['"][^\n]*spatialWorkspace\?\.closePanels/);
+  assert.match(handler, /event\.detail\.uiStyle\s*!==\s*['"]spatial['"][^\n]*spatialWorkspace\?\.closePanels/);
   assert.doesNotMatch(handler, /showView\(/);
 });

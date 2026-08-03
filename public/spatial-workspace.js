@@ -156,8 +156,8 @@
     function openPanel(name) {
       const nextPanel = name === 'inspector' ? 'inspector' : 'queue';
       const inspector = nextPanel === 'inspector';
-      if (inspector && elements.inspectorToggle.disabled) {
-        resetPanelPresentation();
+      if (inspector && (!selectedPaper(state) || elements.inspectorToggle.disabled)) {
+        closePanels({ restoreFocus: false });
         return;
       }
       if (!activePanel) savedScrollTop = Number(scrollContainer && scrollContainer.scrollTop) || 0;

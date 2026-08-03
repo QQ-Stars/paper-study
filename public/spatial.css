@@ -989,7 +989,18 @@ html[data-ui-style="spatial"] .appearance-options label:has(input:checked) {
     transition-delay: 0s !important;
   }
 
+  html[data-ui-style="spatial"] .spatial-layers {
+    display: grid;
+    min-height: 0;
+    perspective: none;
+    gap: 8px;
+  }
+
   html[data-ui-style="spatial"] .spatial-layer {
+    position: relative;
+    inset: auto;
+    transform: none !important;
+    opacity: 1 !important;
     pointer-events: auto;
   }
 
@@ -1004,19 +1015,54 @@ html[data-ui-style="spatial"] .appearance-options label:has(input:checked) {
     --sp-surface: var(--sp-surface-solid);
   }
 
-  html[data-ui-style="spatial"] #rail,
-  html[data-ui-style="spatial"] #topbar,
-  html[data-ui-style="spatial"] .spatial-queue,
-  html[data-ui-style="spatial"] .spatial-stage,
-  html[data-ui-style="spatial"] .spatial-inspector,
-  html[data-ui-style="spatial"] .modal,
+  html[data-ui-style="spatial"] #rail {
+    background: var(--sp-surface-solid);
+    border-color: var(--sp-border-strong);
+  }
+
+  html[data-ui-style="spatial"] #topbar {
+    background: var(--sp-surface-solid);
+    border-color: var(--sp-border-strong);
+  }
+
+  html[data-ui-style="spatial"] .spatial-queue {
+    background: var(--sp-surface-solid);
+    border-color: var(--sp-border-strong);
+  }
+
+  html[data-ui-style="spatial"] .spatial-stage {
+    background: var(--sp-surface-solid);
+    border-color: var(--sp-border-strong);
+  }
+
+  html[data-ui-style="spatial"] .spatial-inspector {
+    background: var(--sp-surface-solid);
+    border-color: var(--sp-border-strong);
+  }
+
+  html[data-ui-style="spatial"] .modal {
+    background: var(--sp-surface-solid);
+    border-color: var(--sp-border-strong);
+  }
+
   html[data-ui-style="spatial"] .modal-card {
     background: var(--sp-surface-solid);
     border-color: var(--sp-border-strong);
   }
 
+  html[data-ui-style="spatial"] .spatial-layers {
+    display: grid;
+    min-height: 0;
+    perspective: none;
+    gap: 8px;
+  }
+
   html[data-ui-style="spatial"] .spatial-layer {
+    position: relative;
+    inset: auto;
     background: var(--sp-surface-solid);
+    transform: none !important;
+    opacity: 1 !important;
     pointer-events: auto;
   }
 }

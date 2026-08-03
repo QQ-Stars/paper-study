@@ -115,7 +115,7 @@ function redrawInsightChartsFromCache() {
 }
 
 function handleAppearanceChange(event) {
-  if (event.detail.uiStyle != 'spatial') spatialWorkspace?.closePanels({ restoreFocus: false });
+  if (event.detail.uiStyle !== 'spatial') spatialWorkspace?.closePanels({ restoreFocus: false });
   if (!appReady) return;
   try {
     if (currentView === 'home') renderHome();
@@ -239,7 +239,7 @@ function refresh() { renderSidebar(); renderHome(); }
 
 // ====== 视图切换 ======
 function showView(v) {
-  if (v != 'home') spatialWorkspace?.closePanels({ restoreFocus: false });
+  if (v !== 'home') spatialWorkspace?.closePanels({ restoreFocus: false });
   currentView = v;
   document.querySelectorAll('.viewnav button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
   $('#home').classList.toggle('hidden', v !== 'home');

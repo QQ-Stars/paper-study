@@ -438,6 +438,7 @@ test('controller binding is single-shot and boundary buttons stay disabled', () 
 test('mobile panels are mutually exclusive and restore trigger focus', () => {
   const harness = createWorkspaceHarness();
   const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.update(papers, { preferredId: 'p2' });
   controller.bind();
   controller.openPanel('queue');
   assert.equal(harness.root.classList.contains('is-queue-open'), true);
@@ -521,16 +522,62 @@ test('Escape and scrim close a panel without changing selection or home scroll',
 test('idempotent close clears stale panel presentation even without active state', () => {
   const harness = createWorkspaceHarness({ scrollTop: 180 });
   const controller = require(workspacePath).createWorkspaceController(harness.options);
-  harness.root.classList.add('is-queue-open');
-  harness.document.documentElement.classList.add('spatial-queue-open');
+  harness.filterSlot.append(harness.filterActions);
+  harness.root.classList.add('is-queue-open', 'is-inspector-open');
+  harness.document.documentElement.classList.add('spatial-queue-open', 'spatial-inspector-open');
   harness.queueToggle.setAttribute('aria-expanded', 'true');
+  harness.inspectorToggle.setAttribute('aria-expanded', 'true');
   harness.scrim.hidden = false;
-  controller.closePanels({ restoreFocus: false });
+  controller.closePanels();
   assert.equal(harness.root.classList.contains('is-queue-open'), false);
+  assert.equal(harness.root.classList.contains('is-inspector-open'), false);
   assert.equal(harness.document.documentElement.classList.contains('spatial-queue-open'), false);
+  assert.equal(harness.document.documentElement.classList.contains('spatial-inspector-open'), false);
   assert.equal(harness.queueToggle.attributes['aria-expanded'], 'false');
+  assert.equal(harness.inspectorToggle.attributes['aria-expanded'], 'false');
   assert.equal(harness.scrim.hidden, true);
+  assert.equal(harness.filterActions.parentNode, harness.filterHome);
+  assert.equal(harness.filterSlot.children.includes(harness.filterActions), false);
   assert.equal(harness.scrollContainer.scrollTop, 180);
+  assert.equal(harness.queueToggle.focusCalls, 0);
+  assert.equal(harness.inspectorToggle.focusCalls, 0);
+});
+
+test('inspector refuses to open before a valid paper has been rendered', () => {
+  const harness = createWorkspaceHarness();
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.bind();
+  controller.openPanel('inspector');
+  assert.equal(harness.root.classList.contains('is-inspector-open'), false);
+  assert.equal(harness.document.documentElement.classList.contains('spatial-inspector-open'), false);
+  assert.equal(harness.inspectorToggle.attributes['aria-expanded'], 'false');
+  assert.equal(harness.scrim.hidden, true);
+  assert.equal(harness.inspectorClose.focusCalls, 0);
+});
+
+test('a rejected inspector open fully closes an active queue without stale restoration', () => {
+  const harness = createWorkspaceHarness({ scrollTop: 260 });
+  const controller = require(workspacePath).createWorkspaceController(harness.options);
+  controller.bind();
+  controller.openPanel('queue');
+  harness.scrollContainer.scrollTop = 25;
+  controller.update([]);
+  controller.openPanel('inspector');
+  assert.equal(harness.root.classList.contains('is-queue-open'), false);
+  assert.equal(harness.root.classList.contains('is-inspector-open'), false);
+  assert.equal(harness.document.documentElement.classList.contains('spatial-queue-open'), false);
+  assert.equal(harness.document.documentElement.classList.contains('spatial-inspector-open'), false);
+  assert.equal(harness.queueToggle.attributes['aria-expanded'], 'false');
+  assert.equal(harness.inspectorToggle.attributes['aria-expanded'], 'false');
+  assert.equal(harness.scrim.hidden, true);
+  assert.equal(harness.filterActions.parentNode, harness.filterHome);
+  assert.equal(harness.scrollContainer.scrollTop, 260);
+  assert.equal(harness.queueToggle.focusCalls, 0);
+
+  harness.scrollContainer.scrollTop = 70;
+  controller.closePanels();
+  assert.equal(harness.scrollContainer.scrollTop, 70);
+  assert.equal(harness.queueToggle.focusCalls, 0);
 });
 
 test('empty results cannot open an invisible inspector and close one already open', () => {

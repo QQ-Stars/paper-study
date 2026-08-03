@@ -358,10 +358,36 @@ test('reduced motion and missing backdrop filter have usable fallbacks', () => {
   const reduced = atRuleBody(css, '@media (prefers-reduced-motion: reduce)');
   const noBlur = atRuleBody(css, '@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))');
   const modal = ruleBody(css, 'html[data-ui-style="spatial"] .modal');
-  assert.match(ruleBody(reduced, 'html[data-ui-style="spatial"] .spatial-layer'), /pointer-events:\s*auto/);
-  assert.match(ruleBody(noBlur, 'html[data-ui-style="spatial"] .spatial-layer'), /pointer-events:\s*auto/);
+  const reducedLayers = ruleBody(reduced, 'html[data-ui-style="spatial"] .spatial-layers');
+  const reducedLayer = ruleBody(reduced, 'html[data-ui-style="spatial"] .spatial-layer');
+  const noBlurLayers = ruleBody(noBlur, 'html[data-ui-style="spatial"] .spatial-layers');
+  const noBlurLayer = ruleBody(noBlur, 'html[data-ui-style="spatial"] .spatial-layer');
+  assert.match(reducedLayers, /display:\s*grid/);
+  assert.match(reducedLayers, /min-height:\s*0/);
+  assert.match(reducedLayers, /perspective:\s*none/);
+  assert.match(reducedLayers, /gap:\s*8px/);
+  assert.match(reducedLayer, /position:\s*relative/);
+  assert.match(reducedLayer, /inset:\s*auto/);
+  assert.match(reducedLayer, /transform:\s*none\s*!important/);
+  assert.match(reducedLayer, /opacity:\s*1\s*!important/);
+  assert.match(reducedLayer, /pointer-events:\s*auto/);
+  assert.match(noBlurLayers, /display:\s*grid/);
+  assert.match(noBlurLayers, /min-height:\s*0/);
+  assert.match(noBlurLayers, /perspective:\s*none/);
+  assert.match(noBlurLayers, /gap:\s*8px/);
+  assert.match(noBlurLayer, /position:\s*relative/);
+  assert.match(noBlurLayer, /inset:\s*auto/);
+  assert.match(noBlurLayer, /transform:\s*none\s*!important/);
+  assert.match(noBlurLayer, /opacity:\s*1\s*!important/);
+  assert.match(noBlurLayer, /pointer-events:\s*auto/);
   assert.match(noBlur, /--sp-surface:\s*var\(--sp-surface-solid\)/);
-  assert.match(noBlur, /background:\s*var\(--sp-surface-solid\)/);
+  for (const selector of [
+    'html[data-ui-style="spatial"] .spatial-queue',
+    'html[data-ui-style="spatial"] .spatial-stage',
+    'html[data-ui-style="spatial"] .spatial-inspector',
+    'html[data-ui-style="spatial"] #topbar',
+    'html[data-ui-style="spatial"] .modal',
+  ]) assert.match(ruleBody(noBlur, selector), /background:\s*var\(--sp-surface-solid\)/);
   assert.match(modal, /(?:^|\n)\s*-webkit-backdrop-filter:\s*blur\(9px\)/);
   assert.match(modal, /(?:^|\n)\s*backdrop-filter:\s*blur\(9px\)/);
 });
