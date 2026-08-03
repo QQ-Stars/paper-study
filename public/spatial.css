@@ -173,6 +173,17 @@ html[data-ui-style="spatial"] #spatialClearFilters {
 html[data-ui-style="spatial"] .paper-item.active .order-badge { background: var(--sp-accent-strong); color: #fff; }
 html[data-ui-style="spatial"] .panel-stub:hover .stub-ico { background: var(--sp-accent-strong); color: #fff; }
 
+html[data-ui-style="spatial"] .ccf-B {
+  background: color-mix(in srgb, var(--sp-muted) 12%, transparent);
+  color: var(--sp-muted);
+}
+
+html[data-ui-style="spatial"] .m-tag.local {
+  background: color-mix(in srgb, var(--sp-muted) 12%, transparent);
+  color: var(--sp-muted);
+  border-color: transparent;
+}
+
 html[data-ui-style="spatial"] .progress,
 html[data-ui-style="spatial"] .eb-bar { background: var(--sp-surface-muted); }
 

@@ -59,6 +59,16 @@ function colorMixAlpha(declarations, token) {
   return Number(match[1]) / 100;
 }
 
+function literalColorMixAlpha(declarations, color) {
+  const escaped = color.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = declarations.match(new RegExp(
+    `background:\\s*color-mix\\(in srgb,\\s*${escaped}\\s*(\\d+(?:\\.\\d+)?)%,\\s*transparent\\s*\\)`,
+    'i',
+  ));
+  assert.ok(match, `missing transparent ${color} color mix`);
+  return Number(match[1]) / 100;
+}
+
 function themeBlock(theme) {
   const block = css.match(new RegExp(`data-theme="${theme}"[^\\{]*\\{([^}]*)\\}`, 's'));
   assert.ok(block, `missing ${theme} theme block`);
@@ -228,6 +238,24 @@ test('actual legacy badges meet normal-text contrast in both themes', () => {
   assert.match(missing, /background:\s*var\(--surface-3\)/);
   assert.match(missing, /color:\s*var\(--ink-3\)/);
 
+  const ccfB = ruleBody(legacyCss, '.ccf-B');
+  assert.match(ccfB, /color:\s*#5b7387/i);
+  assert.equal(literalColorMixAlpha(ccfB, '#5b7387'), 0.18);
+
+  const local = ruleBody(legacyCss, '.m-tag.local');
+  assert.match(local, /color:\s*#5b7387/i);
+  assert.match(local, /border-color:\s*transparent/);
+  assert.equal(literalColorMixAlpha(local, '#5b7387'), 0.16);
+
+  const spatialCcfB = ruleBody(css, 'html[data-ui-style="spatial"] .ccf-B');
+  assert.match(spatialCcfB, /color:\s*var\(--sp-muted\)/);
+  const spatialCcfBAlpha = colorMixAlpha(spatialCcfB, '--sp-muted');
+
+  const spatialLocal = ruleBody(css, 'html[data-ui-style="spatial"] .m-tag.local');
+  assert.match(spatialLocal, /color:\s*var\(--sp-muted\)/);
+  assert.match(spatialLocal, /border-color:\s*transparent/);
+  const spatialLocalAlpha = colorMixAlpha(spatialLocal, '--sp-muted');
+
   assert.match(css, /--accent:\s*var\(--sp-accent-fg\)/);
   assert.match(css, /--accent-ink:\s*var\(--sp-accent-fg\)/);
   assert.match(css, /--ok:\s*var\(--sp-accent-fg\)/);
@@ -252,6 +280,15 @@ test('actual legacy badges meet normal-text contrast in both themes', () => {
       assert.ok(
         contrastRatio(muted, mutedSurface) >= 4.5,
         `${theme} ${badge} must remain readable on surface-3`,
+      );
+    }
+
+    const neutralForeground = hexChannels(muted);
+    for (const [badge, alpha] of [['ccf-B', spatialCcfBAlpha], ['m-tag.local', spatialLocalAlpha]]) {
+      const tint = compositeRgbaOverHex([...neutralForeground, alpha], surface);
+      assert.ok(
+        channelContrastRatio(neutralForeground, tint) >= 4.5,
+        `${theme} ${badge} must remain readable on its scoped spatial tint`,
       );
     }
   }
