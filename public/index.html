@@ -1,11 +1,13 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-ui-style="classic" data-theme="light">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>论文精读 · Paper Study</title>
+<script src="appearance.js"></script>
 <link rel="stylesheet" href="style.css" />
 <link rel="stylesheet" href="academic.css" />
+<link rel="stylesheet" href="spatial.css" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css" />
 <script src="vendor/marked.min.js"></script>
 <script defer src="vendor/katex/katex.min.js"></script>
@@ -335,6 +337,23 @@
     <div class="modal-card wide">
       <div class="modal-head"><span>⚙ 模型与数据源设置<span id="setSummaryMeta" class="set-meta-inline">—</span></span><button id="setClose" class="modal-x" title="关闭">×</button></div>
       <div class="modal-body">
+        <fieldset class="set-card appearance-card" aria-labelledby="appearanceLegend">
+          <legend id="appearanceLegend" class="settings-sub">外观<span class="sub-note">仅保存在当前设备</span></legend>
+          <div class="appearance-row">
+            <span class="appearance-label">界面风格</span>
+            <div class="appearance-options" role="radiogroup" aria-label="界面风格">
+              <label><input type="radio" name="uiStyle" data-appearance-field="uiStyle" value="classic" />经典模式</label>
+              <label><input type="radio" name="uiStyle" data-appearance-field="uiStyle" value="spatial" />空间研究台</label>
+            </div>
+          </div>
+          <div class="appearance-row">
+            <span class="appearance-label">明暗模式</span>
+            <div class="appearance-options" role="radiogroup" aria-label="明暗模式">
+              <label><input type="radio" name="theme" data-appearance-field="theme" value="light" />浅色</label>
+              <label><input type="radio" name="theme" data-appearance-field="theme" value="dark" />深色</label>
+            </div>
+          </div>
+        </fieldset>
         <div class="set-card set-card-theme">
           <div class="settings-sub">研究主题<span class="sub-note">决定采集分类与相关度</span></div>
           <input id="setTheme" class="theme-input" placeholder="如：多模态大模型的幻觉检测与缓解" />

@@ -77,10 +77,8 @@ if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf
 let pdfDoc = null, baseW = 600, zoomFactor = 1, renderToken = 0, io = null;
 
 // ====== 初始化 ======
-init();
 async function init() {
   PAPERS = normPapers(await (await fetch('/api/papers')).json());
-  applyTheme(localStorage.getItem('theme') || 'light');
   if (localStorage.getItem('hide-left') === '1') $('#layout').classList.add('hide-left');
   if (localStorage.getItem('hide-right') === '1') $('#layout').classList.add('hide-right');
   buildYearFilters();
@@ -91,17 +89,46 @@ async function init() {
   bindUI();
   initResizers();
   showView('home');
+  appReady = true;
 }
-function applyTheme(t) {
-  document.documentElement.setAttribute('data-theme', t);
-  const b = $('#themeBtn');
-  if (b) {
-    b.textContent = t === 'dark' ? 'Light' : 'Dark';
-    b.setAttribute('aria-label', t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+
+let appReady = false;
+let appearanceFrame = 0;
+let insightCiteGraph = null;
+
+function redrawInsightChartsFromCache() {
+  buildInsightsShell();
+  renderTree();
+  renderTrend();
+  if (insightCiteGraph && insightCiteGraph.edgeCount > 0) {
+    renderCite(insightCiteGraph);
+    renderCited(insightCiteGraph);
+  } else {
+    showCitePrompt();
+    renderCited(null);
   }
-  localStorage.setItem('theme', t);
 }
-function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); renderHome(); if (currentView === 'insights') renderInsights(); }
+
+function handleAppearanceChange() {
+  if (!appReady) return;
+  try {
+    if (currentView === 'home') renderHome();
+    if (currentView === 'insights') redrawInsightChartsFromCache();
+  } catch (error) {
+    console.warn('Appearance chart redraw failed', error);
+  }
+  if (appearanceFrame) cancelAnimationFrame(appearanceFrame);
+  appearanceFrame = requestAnimationFrame(() => {
+    appearanceFrame = 0;
+    [chProgress, chDir, chVenue, chTrend, chTree, chCited, chCite]
+      .forEach(chart => {
+        try { if (chart) chart.resize(); } catch (error) { console.warn('Chart resize failed', error); }
+      });
+  });
+}
+
+document.addEventListener('paperstudy:appearancechange', handleAppearanceChange);
+init();
 function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); localStorage.setItem(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
 const MIN_VIEWER = 320; // 中间 PDF 区最小宽度，任何时候都保留
 function initResizers() {
@@ -521,9 +548,20 @@ async function renderInsights() {
   renderTrend();
   try {
     const g = await (await fetch('/api/citegraph')).json();
-    if (g && g.edgeCount > 0) { renderCite(g); renderCited(g); }
-    else { showCitePrompt(); renderCited(null); }
-  } catch (e) { showCitePrompt(); renderCited(null); }
+    insightCiteGraph = g;
+    if (g && g.edgeCount > 0) {
+      renderCite(g);
+      renderCited(g);
+    } else {
+      insightCiteGraph = null;
+      showCitePrompt();
+      renderCited(null);
+    }
+  } catch (error) {
+    insightCiteGraph = null;
+    showCitePrompt();
+    renderCited(null);
+  }
 }
 // 馆藏构成：研究方向 → 主题 的矩形树图（块大小=论文数，颜色=方向）
 function renderTree() {
@@ -646,18 +684,40 @@ function showCitePrompt() {
   chCite.setOption({ graphic: { type: 'text', left: 'center', top: 'center', style: { text: '还没有引用图\n点上方「⟳ 构建 / 刷新引用图」（抓取参考文献，约 1~2 分钟）', fill: cssVar('--ink-3'), fontSize: 13, lineHeight: 24, textAlign: 'center' } } });
 }
 async function buildCite() {
-  const btn = $('#citeBuildBtn'), hint = $('#citeHint');
-  btn.disabled = true; const old = btn.textContent; btn.textContent = '构建中…';
+  const btn = $('#citeBuildBtn');
+  const hint = $('#citeHint');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '构建中…';
   hint.textContent = '抓取参考文献中（约 1~2 分钟，有 S2 key 更快）…';
   try {
-    await streamNDJSON('/api/cite-build', {}, (ev) => {
-      if (ev.type === 'progress') { const m = /^PROG::(\d+)::(\d+)/.exec(ev.line); if (m) hint.textContent = `抓取参考文献 ${m[1]} / ${m[2]}…`; }
-      else if (ev.type === 'result') { hint.textContent = ev.ok ? `✅ 已建 ${ev.edges} 条引用` : ('失败：' + (ev.error || '未知')); }
+    await streamNDJSON('/api/cite-build', {}, event => {
+      if (event.type === 'progress') {
+        const match = /^PROG::(\d+)::(\d+)/.exec(event.line);
+        if (match) hint.textContent = `抓取参考文献 ${match[1]} / ${match[2]}…`;
+      } else if (event.type === 'result') {
+        hint.textContent = event.ok ? `✅ 已建 ${event.edges} 条引用` : `失败：${event.error || '未知'}`;
+      }
     });
     const g = await (await fetch('/api/citegraph')).json();
-    if (g && g.edgeCount > 0) renderCite(g); else showCitePrompt();
-  } catch (e) { hint.textContent = '失败：' + e; }
-  finally { btn.disabled = false; btn.textContent = old; }
+    insightCiteGraph = g;
+    if (g && g.edgeCount > 0) {
+      renderCite(g);
+      renderCited(g);
+    } else {
+      insightCiteGraph = null;
+      showCitePrompt();
+      renderCited(null);
+    }
+  } catch (error) {
+    insightCiteGraph = null;
+    showCitePrompt();
+    renderCited(null);
+    hint.textContent = '失败：' + error;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
 }
 
 function cmpHome(a, b) {
@@ -1362,7 +1422,6 @@ function bindUI() {
     document.querySelectorAll('#libSrcFilter .fchip').forEach(x => x.classList.remove('active'));
     c.classList.add('active'); manageSrc = c.dataset.src; renderManage();
   });
-  $('#themeBtn').onclick = toggleTheme;
   $('#toggleLeft').onclick = () => togglePane('hide-left');
   $('#toggleRight').onclick = () => togglePane('hide-right');
   $('#stubLeft').onclick = () => togglePane('hide-left');
@@ -2074,9 +2133,20 @@ async function saveSettings() {
   if (ak) body.apiKey = ak;
   if (sk) body.s2ApiKey = sk;
   if (ek) body.embedApiKey = ek;
-  await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const h = $('#setHint'); h.textContent = '已保存 ✓（下次采集生效）'; setTimeout(() => h.textContent = '', 3000);
-  loadSettings();
+  const hint = $('#setHint');
+  try {
+    const response = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    hint.textContent = '已保存 ✓（下次采集生效）';
+    setTimeout(() => { hint.textContent = ''; }, 3000);
+    loadSettings();
+  } catch (error) {
+    hint.textContent = `保存失败：${error.message || error}`;
+  }
 }
 function openSettingsModal() { loadSettings(); $('#settingsModal').classList.remove('hidden'); }
 function closeSettingsModal() { $('#settingsModal').classList.add('hidden'); }
