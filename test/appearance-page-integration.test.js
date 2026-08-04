@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const publicDir = path.resolve(__dirname, '..', 'public');
 const html = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8');
@@ -69,4 +70,25 @@ test('server Settings payload never contains local appearance fields', () => {
   assert.doesNotMatch(saveSettings, /uiStyle|paperstudy\.uiStyle|data-theme|\btheme\s*:/);
   assert.match(saveSettings, /try\s*\{/);
   assert.match(saveSettings, /catch\s*\(/);
+});
+
+test('application storage failures fall back without escaping into startup or interactions', () => {
+  const start = app.indexOf('function createSafeStorage');
+  const end = app.indexOf('// ====== 初始化 ======');
+  assert.ok(start >= 0 && end > start, 'app.js must define its guarded storage adapter before init');
+
+  const adapter = app.slice(start, end);
+  const context = { result: null };
+  vm.runInNewContext(`${adapter}\nresult = createSafeStorage(() => { throw new Error('storage blocked'); });`, context);
+
+  assert.equal(context.result.get('hide-left', 'fallback'), 'fallback');
+  assert.equal(context.result.set('hide-left', '1'), false);
+  assert.equal(context.result.remove('hide-left'), false);
+
+  const appOutsideAdapter = app.slice(0, start) + app.slice(end);
+  assert.doesNotMatch(
+    appOutsideAdapter,
+    /\blocalStorage\s*\.\s*(?:getItem|setItem|removeItem)\s*\(/,
+    'all application preferences must use the guarded adapter',
+  );
 });

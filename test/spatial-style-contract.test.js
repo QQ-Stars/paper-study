@@ -360,6 +360,13 @@ test('mobile is a distinct bottom-navigation and drawer state', () => {
     'html[data-ui-style="spatial"] #settingsModal button',
     'html[data-ui-style="spatial"] #settingsModal input:not([type="radio"])',
     'html[data-ui-style="spatial"] #settingsModal select',
+    'html[data-ui-style="spatial"] .src-chip',
+    'html[data-ui-style="spatial"] #jbYears',
+    'html[data-ui-style="spatial"] #jbMax',
+    'html[data-ui-style="spatial"] #jbRel',
+    'html[data-ui-style="spatial"] .fchip',
+    'html[data-ui-style="spatial"] #mSearch',
+    'html[data-ui-style="spatial"] #ebLimit',
   ]) {
     const declarations = ruleBody(mobile, selector);
     assert.match(declarations, /min-width:\s*44px/);

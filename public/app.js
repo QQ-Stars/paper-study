@@ -79,11 +79,42 @@ const normPapers = (arr) => { (arr || []).forEach(p => { p.venue = normVenue(p.v
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
 let pdfDoc = null, baseW = 600, zoomFactor = 1, renderToken = 0, io = null;
 
+function createSafeStorage(getStorage = () => localStorage) {
+  const resolve = () => {
+    try { return getStorage(); } catch (error) { return null; }
+  };
+  return {
+    get(key, fallback = null) {
+      try {
+        const value = resolve()?.getItem(key);
+        return value == null ? fallback : value;
+      } catch (error) { return fallback; }
+    },
+    set(key, value) {
+      try {
+        const storage = resolve();
+        if (!storage) return false;
+        storage.setItem(key, value);
+        return true;
+      } catch (error) { return false; }
+    },
+    remove(key) {
+      try {
+        const storage = resolve();
+        if (!storage) return false;
+        storage.removeItem(key);
+        return true;
+      } catch (error) { return false; }
+    },
+  };
+}
+const appStorage = createSafeStorage();
+
 // ====== 初始化 ======
 async function init() {
   PAPERS = normPapers(await (await fetch('/api/papers')).json());
-  if (localStorage.getItem('hide-left') === '1') $('#layout').classList.add('hide-left');
-  if (localStorage.getItem('hide-right') === '1') $('#layout').classList.add('hide-right');
+  if (appStorage.get('hide-left') === '1') $('#layout').classList.add('hide-left');
+  if (appStorage.get('hide-right') === '1') $('#layout').classList.add('hide-right');
   buildYearFilters();
   buildSideYears();
   renderSidebar();
@@ -135,22 +166,22 @@ function handleAppearanceChange(event) {
 
 document.addEventListener('paperstudy:appearancechange', handleAppearanceChange);
 init();
-function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); localStorage.setItem(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
+function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); appStorage.set(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
 const MIN_VIEWER = 320; // 中间 PDF 区最小宽度，任何时候都保留
 function initResizers() {
   const layout = $('#layout');
   const apply = (k, v) => document.documentElement.style.setProperty(k, v + 'px');
   // 载入时校验持久化宽度：单边夹值 + 保证两侧之和给中间 PDF 留 ≥MIN_VIEWER，否则整体复位默认（修复历史异常拖拽值把布局挤坏的问题）
-  let lw = parseInt(localStorage.getItem('left-w'), 10) || 0;
-  let rw = parseInt(localStorage.getItem('right-w'), 10) || 0;
+  let lw = parseInt(appStorage.get('left-w'), 10) || 0;
+  let rw = parseInt(appStorage.get('right-w'), 10) || 0;
   if (lw) lw = Math.max(200, lw);
   if (rw) rw = Math.max(220, rw);
   if ((lw || 300) + (rw || 420) > window.innerWidth - MIN_VIEWER) {
-    localStorage.removeItem('left-w'); localStorage.removeItem('right-w');
+    appStorage.remove('left-w'); appStorage.remove('right-w');
     document.documentElement.style.removeProperty('--left-w'); document.documentElement.style.removeProperty('--right-w');
   } else {
-    if (lw) { apply('--left-w', lw); localStorage.setItem('left-w', lw); }
-    if (rw) { apply('--right-w', rw); localStorage.setItem('right-w', rw); }
+    if (lw) { apply('--left-w', lw); appStorage.set('left-w', lw); }
+    if (rw) { apply('--right-w', rw); appStorage.set('right-w', rw); }
   }
   document.querySelectorAll('.gutter').forEach(g => {
     const side = g.dataset.side;
@@ -166,7 +197,7 @@ function initResizers() {
       const move = (ev) => {
         const raw = side === 'left' ? (ev.clientX - rect.left) : (rect.right - ev.clientX);
         const w = Math.max(side === 'left' ? 200 : 220, Math.min(Math.round(raw), maxW));
-        apply(cssVar, w); localStorage.setItem(key, w);
+        apply(cssVar, w); appStorage.set(key, w);
       };
       const up = () => {
         g.classList.remove('dragging'); layout.classList.remove('resizing');
@@ -177,7 +208,7 @@ function initResizers() {
     });
     g.addEventListener('dblclick', () => { // 双击复位默认宽度
       document.documentElement.style.removeProperty(cssVar);
-      localStorage.removeItem(key);
+      appStorage.remove(key);
       if (pdfDoc && currentView === 'read') layoutPages(++renderToken);
     });
   });
@@ -1499,7 +1530,7 @@ function bindUI() {
   $('#ingEditBtn').onclick = editQueries;
   $('#ingSearchWithBtn').onclick = () => runSearch(currentQueries());
   $('#ingQueryAdd').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const a = currentQueries() || []; a.push(e.target.value.trim()); e.target.value = ''; renderQueryChips(a); } };
-  $('#ingHistClear').onclick = () => { try { localStorage.removeItem(HIST_KEY); } catch (e) {} renderHist(); };
+  $('#ingHistClear').onclick = () => { appStorage.remove(HIST_KEY); renderHist(); };
   renderHist();
   $('#ingestSelBtn').onclick = ingestSelected;
   $('#verifyVenueBtn').onclick = verifyVenues;
@@ -1870,8 +1901,8 @@ function renderQueryChips(qs) {
 }
 // ====== 采集检索历史（localStorage） ======
 const HIST_KEY = 'paperstudy.searchHistory', HIST_MAX = 12;
-function loadHist() { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch (e) { return []; } }
-function saveHist(a) { try { localStorage.setItem(HIST_KEY, JSON.stringify(a.slice(0, HIST_MAX))); } catch (e) {} }
+function loadHist() { try { return JSON.parse(appStorage.get(HIST_KEY, '[]')); } catch (e) { return []; } }
+function saveHist(a) { appStorage.set(HIST_KEY, JSON.stringify(a.slice(0, HIST_MAX))); }
 function pushHist(q, queries) {
   q = (q || '').trim(); if (!q) return;
   const a = loadHist().filter(e => e.q !== q);

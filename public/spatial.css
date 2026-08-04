@@ -734,6 +734,13 @@ html[data-ui-style="spatial"] .appearance-options label:has(input:checked) {
   html[data-ui-style="spatial"] #settingsModal button { min-width: 44px; min-height: 44px; }
   html[data-ui-style="spatial"] #settingsModal input:not([type="radio"]) { min-width: 44px; min-height: 44px; }
   html[data-ui-style="spatial"] #settingsModal select { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] .src-chip { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] #jbYears { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] #jbMax { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] #jbRel { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] .fchip { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] #mSearch { min-width: 44px; min-height: 44px; }
+  html[data-ui-style="spatial"] #ebLimit { min-width: 44px; min-height: 44px; }
 
   html[data-ui-style="spatial"] .rail-brand,
   html[data-ui-style="spatial"] .rail-spacer { display: none; }
