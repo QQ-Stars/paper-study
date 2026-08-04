@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const dbapi = require('./db');
 const { createAgentRunner } = require('./lib/agent-runner');
 const { createArtifactLocator, scanPdfDirectory } = require('./lib/artifacts');
+const frontendAssets = require('./lib/frontend-assets');
 const { MIME, readBody, safeBase, send, startNdjson } = require('./lib/http');
 const { createTitleTranslationService } = require('./lib/title-translations');
 const {
@@ -19,6 +20,19 @@ const {
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
+const REACT_DIST = path.join(ROOT, 'frontend', 'dist');
+const UI_ENTRY = process.env.UI_ENTRY;
+const FRONTEND_ROOTS = Object.freeze({
+  react: REACT_DIST,
+  reactIndex: path.join(REACT_DIST, 'index.html'),
+  legacy: PUBLIC,
+  legacyIndex: path.join(PUBLIC, 'index.html'),
+});
+const FRONTEND_CONFIG = frontendAssets.createFrontendConfig({
+  roots: FRONTEND_ROOTS,
+  uiEntry: UI_ENTRY,
+  warn: (message) => console.warn(message),
+});
 
 let cfg = { papersDir: '../paper', port: 5173 };
 try { Object.assign(cfg, JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'))); } catch (e) {}
@@ -105,8 +119,9 @@ const translateTextViaPython = (text) => new Promise((resolve) => {
 });
 
 const server = http.createServer(async (req, res) => {
+  const rawPathname = frontendAssets.extractRawPathname(req.url);
   const u = new URL(req.url, 'http://localhost');
-  const p = u.pathname;
+  const p = frontendAssets.selectRoutingPathname(rawPathname, u.pathname);
   try {
     // ---- API（SQLite）----
     if (p === '/api/papers') {
@@ -584,6 +599,9 @@ const server = http.createServer(async (req, res) => {
       dbapi.deleteSchedule(parseInt(b.id));
       return send(res, 200, JSON.stringify({ ok: true }), MIME['.json']);
     }
+    if (p === '/api' || p.startsWith('/api/')) {
+      return send(res, 404, 'API not found');
+    }
     // ---- PDF 字节（绕过迅雷类下载器：路径不含 .pdf，由脚本 fetch 取字节）----
     if (p === '/pdfbytes') {
       const f = resolvePdfById(safeBase(u.searchParams.get('id')));
@@ -598,15 +616,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': MIME[path.extname(f).toLowerCase()] || 'application/octet-stream' });
       return fs.createReadStream(f).pipe(res);
     }
-    // ---- 静态前端 ----
-    let rel = p === '/' ? 'index.html' : decodeURIComponent(p).replace(/^\/+/, '');
-    const fp = path.normalize(path.join(PUBLIC, rel));
-    if (!fp.startsWith(PUBLIC)) return send(res, 403, 'forbidden');
-    if (fs.existsSync(fp) && fs.statSync(fp).isFile()) {
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(fp).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
-      return fs.createReadStream(fp).pipe(res);
-    }
-    return send(res, 404, 'not found');
+    // ---- 显式 React / legacy 入口与旧版无前缀静态资源回退 ----
+    return frontendAssets.serveFrontendRequest(req, res, rawPathname, FRONTEND_ROOTS, FRONTEND_CONFIG);
   } catch (e) {
     return send(res, 500, String(e && e.stack || e));
   }
