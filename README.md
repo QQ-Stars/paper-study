@@ -49,7 +49,7 @@
 
 | 软件 | 用途 | 下载地址 | 验证方式 |
 |---|---|---|---|
-| **Node.js**（建议 LTS 20 或更高） | 运行网页服务器 | <https://nodejs.org> | 终端执行 `node -v`，显示版本号（如 v20.x） |
+| **Node.js**（20.19+ 或 22.13+） | 运行网页服务器与 React 构建工具 | <https://nodejs.org> | 终端执行 `node -v`，显示受支持版本（如 v22.13） |
 | **Python 3.10 或更高** | 运行 AI 采集 / 讲解 / 翻译 | <https://www.python.org/downloads/> | 终端执行 `python --version`，显示版本号 |
 | **Git**（可选） | 获取本项目源码 | <https://git-scm.com> | 终端执行 `git --version`，显示版本号 |
 

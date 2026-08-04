@@ -5,6 +5,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 const legacyDynamicImportSelector = String.raw`ImportExpression[source.value=/((^|\/)(public|legacy)(\/|$))/]`;
+const nonLiteralDynamicImportSelector = String.raw`ImportExpression[source.type!='Literal']`;
 
 export default tseslint.config(
   {
@@ -46,6 +47,10 @@ export default tseslint.config(
           message: 'The React workspace cannot dynamically import legacy application assets.',
         },
         {
+          selector: nonLiteralDynamicImportSelector,
+          message: 'Dynamic imports must use a string literal so the clean-room build can verify them.',
+        },
+        {
           selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
           message: 'Raw HTML is restricted to the TrustedMathHtml adapter.',
         },
@@ -67,11 +72,15 @@ export default tseslint.config(
           selector: legacyDynamicImportSelector,
           message: 'The React workspace cannot dynamically import legacy application assets.',
         },
+        {
+          selector: nonLiteralDynamicImportSelector,
+          message: 'Dynamic imports must use a string literal so the clean-room build can verify them.',
+        },
       ],
     },
   },
   {
-    files: ['vite.config.ts'],
+    files: ['vite.config.ts', 'build/**/*.ts'],
     languageOptions: {
       globals: globals.node,
     },
