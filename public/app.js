@@ -18,6 +18,9 @@ let homeSort = { key: 'year', dir: 1 };
 let manageSrc = 'all';
 let titleZhAbort = null;
 let reviewData = null;
+let reviewLoadPromise = null;
+let reviewLoadVersion = 0;
+let spatialWorkspace = null;
 let chProgress = null, chDir = null, chVenue = null;
 let chTrend = null, chTree = null, chCited = null, chCite = null;  // 洞察：趋势面积 / 馆藏树图 / 被引 / 引用图
 
@@ -76,48 +79,109 @@ const normPapers = (arr) => { (arr || []).forEach(p => { p.venue = normVenue(p.v
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
 let pdfDoc = null, baseW = 600, zoomFactor = 1, renderToken = 0, io = null;
 
+function createSafeStorage(getStorage = () => localStorage) {
+  const resolve = () => {
+    try { return getStorage(); } catch (error) { return null; }
+  };
+  return {
+    get(key, fallback = null) {
+      try {
+        const value = resolve()?.getItem(key);
+        return value == null ? fallback : value;
+      } catch (error) { return fallback; }
+    },
+    set(key, value) {
+      try {
+        const storage = resolve();
+        if (!storage) return false;
+        storage.setItem(key, value);
+        return true;
+      } catch (error) { return false; }
+    },
+    remove(key) {
+      try {
+        const storage = resolve();
+        if (!storage) return false;
+        storage.removeItem(key);
+        return true;
+      } catch (error) { return false; }
+    },
+  };
+}
+const appStorage = createSafeStorage();
+
 // ====== 初始化 ======
-init();
 async function init() {
   PAPERS = normPapers(await (await fetch('/api/papers')).json());
-  applyTheme(localStorage.getItem('theme') || 'light');
-  if (localStorage.getItem('hide-left') === '1') $('#layout').classList.add('hide-left');
-  if (localStorage.getItem('hide-right') === '1') $('#layout').classList.add('hide-right');
+  if (appStorage.get('hide-left') === '1') $('#layout').classList.add('hide-left');
+  if (appStorage.get('hide-right') === '1') $('#layout').classList.add('hide-right');
   buildYearFilters();
   buildSideYears();
   renderSidebar();
   buildDashShell();
+  buildSpatialWorkspace();
   renderHome();
   bindUI();
   initResizers();
   showView('home');
+  appReady = true;
+  void loadReviews(false);
 }
-function applyTheme(t) {
-  document.documentElement.setAttribute('data-theme', t);
-  const b = $('#themeBtn');
-  if (b) {
-    b.textContent = t === 'dark' ? 'Light' : 'Dark';
-    b.setAttribute('aria-label', t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+
+let appReady = false;
+let appearanceFrame = 0;
+let insightCiteGraph = null;
+
+function redrawInsightChartsFromCache() {
+  buildInsightsShell();
+  renderTree();
+  renderTrend();
+  if (insightCiteGraph && insightCiteGraph.edgeCount > 0) {
+    renderCite(insightCiteGraph);
+    renderCited(insightCiteGraph);
+  } else {
+    showCitePrompt();
+    renderCited(null);
   }
-  localStorage.setItem('theme', t);
 }
-function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); renderHome(); if (currentView === 'insights') renderInsights(); }
-function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); localStorage.setItem(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
+
+function handleAppearanceChange(event) {
+  if (event.detail.uiStyle !== 'spatial') spatialWorkspace?.closePanels({ restoreFocus: false });
+  if (!appReady) return;
+  try {
+    if (currentView === 'home') renderHome();
+    if (currentView === 'insights') redrawInsightChartsFromCache();
+  } catch (error) {
+    console.warn('Appearance chart redraw failed', error);
+  }
+  if (appearanceFrame) cancelAnimationFrame(appearanceFrame);
+  appearanceFrame = requestAnimationFrame(() => {
+    appearanceFrame = 0;
+    [chProgress, chDir, chVenue, chTrend, chTree, chCited, chCite]
+      .forEach(chart => {
+        try { if (chart) chart.resize(); } catch (error) { console.warn('Chart resize failed', error); }
+      });
+  });
+}
+
+document.addEventListener('paperstudy:appearancechange', handleAppearanceChange);
+init();
+function togglePane(cls) { const L = $('#layout'); L.classList.toggle(cls); appStorage.set(cls, L.classList.contains(cls) ? '1' : '0'); if (pdfDoc && currentView === 'read') setTimeout(() => layoutPages(++renderToken), 240); }
 const MIN_VIEWER = 320; // 中间 PDF 区最小宽度，任何时候都保留
 function initResizers() {
   const layout = $('#layout');
   const apply = (k, v) => document.documentElement.style.setProperty(k, v + 'px');
   // 载入时校验持久化宽度：单边夹值 + 保证两侧之和给中间 PDF 留 ≥MIN_VIEWER，否则整体复位默认（修复历史异常拖拽值把布局挤坏的问题）
-  let lw = parseInt(localStorage.getItem('left-w'), 10) || 0;
-  let rw = parseInt(localStorage.getItem('right-w'), 10) || 0;
+  let lw = parseInt(appStorage.get('left-w'), 10) || 0;
+  let rw = parseInt(appStorage.get('right-w'), 10) || 0;
   if (lw) lw = Math.max(200, lw);
   if (rw) rw = Math.max(220, rw);
   if ((lw || 300) + (rw || 420) > window.innerWidth - MIN_VIEWER) {
-    localStorage.removeItem('left-w'); localStorage.removeItem('right-w');
+    appStorage.remove('left-w'); appStorage.remove('right-w');
     document.documentElement.style.removeProperty('--left-w'); document.documentElement.style.removeProperty('--right-w');
   } else {
-    if (lw) { apply('--left-w', lw); localStorage.setItem('left-w', lw); }
-    if (rw) { apply('--right-w', rw); localStorage.setItem('right-w', rw); }
+    if (lw) { apply('--left-w', lw); appStorage.set('left-w', lw); }
+    if (rw) { apply('--right-w', rw); appStorage.set('right-w', rw); }
   }
   document.querySelectorAll('.gutter').forEach(g => {
     const side = g.dataset.side;
@@ -133,7 +197,7 @@ function initResizers() {
       const move = (ev) => {
         const raw = side === 'left' ? (ev.clientX - rect.left) : (rect.right - ev.clientX);
         const w = Math.max(side === 'left' ? 200 : 220, Math.min(Math.round(raw), maxW));
-        apply(cssVar, w); localStorage.setItem(key, w);
+        apply(cssVar, w); appStorage.set(key, w);
       };
       const up = () => {
         g.classList.remove('dragging'); layout.classList.remove('resizing');
@@ -144,7 +208,7 @@ function initResizers() {
     });
     g.addEventListener('dblclick', () => { // 双击复位默认宽度
       document.documentElement.style.removeProperty(cssVar);
-      localStorage.removeItem(key);
+      appStorage.remove(key);
       if (pdfDoc && currentView === 'read') layoutPages(++renderToken);
     });
   });
@@ -206,6 +270,7 @@ function refresh() { renderSidebar(); renderHome(); }
 
 // ====== 视图切换 ======
 function showView(v) {
+  if (v !== 'home') spatialWorkspace?.closePanels({ restoreFocus: false });
   currentView = v;
   document.querySelectorAll('.viewnav button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
   $('#home').classList.toggle('hidden', v !== 'home');
@@ -253,6 +318,70 @@ function buildDashShell() {
 }
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function chartAnimationDuration(duration) {
+  return prefersReducedMotion() ? 0 : duration;
+}
+
+function clearHomeFilters() {
+  yearFilter = 'all';
+  favOnly = false;
+  semActive = false;
+  semRank = null;
+  q = '';
+  const search = $('#search');
+  search.value = '';
+  search.placeholder = '搜索…';
+  $('#favFilter').classList.remove('on');
+  $('#favFilter').textContent = '☆ 收藏';
+  $('#semToggle').classList.remove('on');
+  $('#semToggle').textContent = '🔮 语义';
+  buildYearFilters();
+  refresh();
+  search.focus();
+}
+
+function spatialPaperDetails(paper) {
+  const noteText = paper && paper.hasNote ? '已有笔记' : '暂无笔记';
+  if (!reviewData) {
+    return {
+      reviewText: '复习数据载入中…',
+      noteText,
+    };
+  }
+  if (reviewData.error) {
+    return {
+      reviewText: '复习信息暂不可用',
+      noteText,
+    };
+  }
+  const review = currentReviewItem(paper && paper.id);
+  return {
+    reviewText: review
+      ? `第 ${review.current_step || 1}/${review.total_steps || 7} 轮 · ${dueText(review, reviewData && reviewData.today)}`
+      : '尚未安排',
+    noteText,
+  };
+}
+
+function buildSpatialWorkspace() {
+  if (spatialWorkspace || !window.SpatialWorkspace || !$('#spatialOverview')) return;
+  spatialWorkspace = window.SpatialWorkspace.createWorkspaceController({
+    root: $('#spatialOverview'),
+    document,
+    scrollContainer: $('#home'),
+    onOpen: openPaper,
+    onClearFilters: clearHomeFilters,
+    getDetails: spatialPaperDetails,
+  });
+  spatialWorkspace.bind();
+}
+
 function renderHome() {
   let list = PAPERS.filter(p => (yearFilter === 'all' || p.year === yearFilter) && (!favOnly || p.favorite));
   const sem = semActive && semRank;
@@ -263,6 +392,12 @@ function renderHome() {
   if (sem) list.sort((a, b) => semRank.get(b.id) - semRank.get(a.id));
   else list.sort(cmpHome);
   const emptyMsg = sem ? '语义检索没有命中（试试换种说法）。' : (favOnly ? '还没有收藏的论文。在阅读界面点「☆ 收藏」即可。' : '没有匹配的论文。');
+  if (spatialWorkspace) {
+    spatialWorkspace.update(list, {
+      preferredId: current && current.id,
+      emptyMessage: emptyMsg,
+    });
+  }
   $('#homeBody').innerHTML = list.map((p, i) => rowHTML(p, i + 1)).join('') || `<tr><td colspan="11" class="empty-row">${emptyMsg}</td></tr>`;
   document.querySelectorAll('#homeBody tr[data-id]').forEach(tr => tr.onclick = () => openPaper(PAPERS.find(x => x.id === tr.dataset.id)));
   document.querySelectorAll('#homeBody .fav-star').forEach(s => s.onclick = (e) => { e.stopPropagation(); toggleFavorite(s.dataset.id); });
@@ -303,7 +438,7 @@ function updateCharts(d) {
   const surf = cssVar('--surface'), ok = cssVar('--ok'), warn = cssVar('--warn'), idle = cssVar('--idle');
   const compact = window.innerWidth < 700;
   chProgress.setOption({
-    animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
+    animationDuration: chartAnimationDuration(750), animationDurationUpdate: chartAnimationDuration(600), animationEasing: 'cubicOut',
     title: {
       text: d.pct + '%', subtext: '已理解', left: compact ? '50%' : '33%', top: compact ? '38%' : 'center', textAlign: 'center', itemGap: 4,
       textStyle: { fontSize: 26, fontWeight: 700, color: text }, subtextStyle: { fontSize: 10.5, color: t3 }
@@ -359,7 +494,7 @@ function barOption(items, t2, t3) {
   const labels = items.map(i => i.name).reverse();
   const data = items.map(i => ({ value: i.value, itemStyle: { color: i.color, borderRadius: [0, 6, 6, 0] } })).reverse();
   return {
-    animationDuration: 750, animationDurationUpdate: 600, animationEasing: 'cubicOut',
+    animationDuration: chartAnimationDuration(750), animationDurationUpdate: chartAnimationDuration(600), animationEasing: 'cubicOut',
     grid: { left: 4, right: 30, top: 8, bottom: 4, containLabel: true },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' }, appendToBody: true,
@@ -396,16 +531,44 @@ function blankReviewData(error = '') {
     completed: []
   };
 }
-async function loadReviews(renderList = true) {
-  try {
-    const data = await (await fetch('/api/reviews')).json();
-    reviewData = data && data.counts ? data : blankReviewData('复习数据格式异常');
-  } catch (e) {
-    reviewData = blankReviewData(String(e));
+function commitReviewData(data, invalidateLoads = false) {
+  if (invalidateLoads) {
+    reviewLoadVersion++;
+    reviewLoadPromise = null;
   }
-  if (renderList) renderReviews();
+  reviewData = data && data.counts ? data : blankReviewData('复习数据格式异常');
+  spatialWorkspace?.refreshDetails();
   renderCurrentReviewStatus();
   return reviewData;
+}
+function startReviewLoad(force = false) {
+  if (reviewLoadPromise && !force) return reviewLoadPromise;
+  const version = ++reviewLoadVersion;
+  let trackedPromise;
+  const request = (async () => {
+    try {
+      return await (await fetch('/api/reviews')).json();
+    } catch (e) {
+      return blankReviewData(String(e));
+    }
+  })();
+  trackedPromise = request.then(data => {
+    if (version !== reviewLoadVersion) {
+      return reviewLoadPromise && reviewLoadPromise !== trackedPromise
+        ? reviewLoadPromise
+        : reviewData;
+    }
+    return commitReviewData(data);
+  }).finally(() => {
+    if (reviewLoadPromise === trackedPromise) reviewLoadPromise = null;
+  });
+  reviewLoadPromise = trackedPromise;
+  return trackedPromise;
+}
+async function loadReviews(renderList = true, force = false) {
+  const data = await startReviewLoad(force);
+  if (renderList) renderReviews();
+  return data;
 }
 function reviewItems(data = reviewData) {
   const d = data || blankReviewData();
@@ -499,9 +662,12 @@ async function completeReview(id) {
     body: JSON.stringify({ id })
   })).json();
   if (!r.ok) { alert(r.error || '复习更新失败'); return; }
-  reviewData = r.reviews || await (await fetch('/api/reviews')).json();
-  renderReviews();
-  renderCurrentReviewStatus();
+  if (r.reviews) {
+    commitReviewData(r.reviews, true);
+    renderReviews();
+  } else {
+    await loadReviews(true, true);
+  }
 }
 
 // ====== 洞察：研究趋势(堆叠面积) + 馆藏构成(树图) + 被引Top10 + 引用关系图 ======
@@ -521,9 +687,20 @@ async function renderInsights() {
   renderTrend();
   try {
     const g = await (await fetch('/api/citegraph')).json();
-    if (g && g.edgeCount > 0) { renderCite(g); renderCited(g); }
-    else { showCitePrompt(); renderCited(null); }
-  } catch (e) { showCitePrompt(); renderCited(null); }
+    insightCiteGraph = g;
+    if (g && g.edgeCount > 0) {
+      renderCite(g);
+      renderCited(g);
+    } else {
+      insightCiteGraph = null;
+      showCitePrompt();
+      renderCited(null);
+    }
+  } catch (error) {
+    insightCiteGraph = null;
+    showCitePrompt();
+    renderCited(null);
+  }
 }
 // 馆藏构成：研究方向 → 主题 的矩形树图（块大小=论文数，颜色=方向）
 function renderTree() {
@@ -538,7 +715,8 @@ function renderTree() {
     return { name: d.name, value: d.value, itemStyle: { color: d.color }, children: kids.length ? kids : undefined };
   });
   chTree.setOption({
-    animationDuration: 600,
+    animationDuration: chartAnimationDuration(600),
+    animationDurationUpdate: chartAnimationDuration(600),
     tooltip: { formatter: (p) => `${(p.treePathInfo || []).map(x => x.name).filter(Boolean).join(' / ') || p.name}　${p.value} 篇` },
     series: [{
       type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false }, visibleMin: 1,
@@ -571,7 +749,7 @@ function renderTrend() {
     data: years.map(y => PAPERS.filter(p => p.year === y && bucket(p) === d.name).length)
   }));
   chTrend.setOption({
-    animationDuration: 700, animationEasing: 'cubicOut',
+    animationDuration: chartAnimationDuration(700), animationDurationUpdate: chartAnimationDuration(700), animationEasing: 'cubicOut',
     color: dirItems.map(d => d.color),
     legend: { top: 2, textStyle: { color: t2, fontSize: 11 }, itemWidth: 11, itemHeight: 11, itemGap: 12 },
     grid: { left: 6, right: 18, top: 40, bottom: 4, containLabel: true },
@@ -594,7 +772,8 @@ function renderCited(g) {
   const labels = nodes.map(n => (n.title.length > 20 ? n.title.slice(0, 20) + '…' : n.title)).reverse();
   const rows = nodes.map(n => ({ value: n.indeg, id: n.id })).reverse();
   chCited.setOption({
-    animationDuration: 600,
+    animationDuration: chartAnimationDuration(600),
+    animationDurationUpdate: chartAnimationDuration(600),
     grid: { left: 6, right: 30, top: 6, bottom: 6, containLabel: true },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (p) => `被库内 ${p[0].value} 篇引用` },
     xAxis: { type: 'value', max: 'dataMax', axisLabel: { show: false }, splitLine: { show: false }, axisLine: { show: false }, axisTick: { show: false } },
@@ -626,6 +805,7 @@ function renderCite(g) {
     label: { show: n.indeg >= labelMin }
   }));
   chCite.setOption({
+    animation: !prefersReducedMotion(),
     tooltip: { confine: true, formatter: (p) => p.dataType === 'node' ? `${esc(p.data.name)}<br>被库内 <b>${p.data.value}</b> 篇引用` : '' },
     legend: [{ data: cats, top: 2, textStyle: { color: t2, fontSize: 11 }, itemWidth: 11, itemHeight: 11, itemGap: 12 }],
     series: [{
@@ -646,18 +826,40 @@ function showCitePrompt() {
   chCite.setOption({ graphic: { type: 'text', left: 'center', top: 'center', style: { text: '还没有引用图\n点上方「⟳ 构建 / 刷新引用图」（抓取参考文献，约 1~2 分钟）', fill: cssVar('--ink-3'), fontSize: 13, lineHeight: 24, textAlign: 'center' } } });
 }
 async function buildCite() {
-  const btn = $('#citeBuildBtn'), hint = $('#citeHint');
-  btn.disabled = true; const old = btn.textContent; btn.textContent = '构建中…';
+  const btn = $('#citeBuildBtn');
+  const hint = $('#citeHint');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '构建中…';
   hint.textContent = '抓取参考文献中（约 1~2 分钟，有 S2 key 更快）…';
   try {
-    await streamNDJSON('/api/cite-build', {}, (ev) => {
-      if (ev.type === 'progress') { const m = /^PROG::(\d+)::(\d+)/.exec(ev.line); if (m) hint.textContent = `抓取参考文献 ${m[1]} / ${m[2]}…`; }
-      else if (ev.type === 'result') { hint.textContent = ev.ok ? `✅ 已建 ${ev.edges} 条引用` : ('失败：' + (ev.error || '未知')); }
+    await streamNDJSON('/api/cite-build', {}, event => {
+      if (event.type === 'progress') {
+        const match = /^PROG::(\d+)::(\d+)/.exec(event.line);
+        if (match) hint.textContent = `抓取参考文献 ${match[1]} / ${match[2]}…`;
+      } else if (event.type === 'result') {
+        hint.textContent = event.ok ? `✅ 已建 ${event.edges} 条引用` : `失败：${event.error || '未知'}`;
+      }
     });
     const g = await (await fetch('/api/citegraph')).json();
-    if (g && g.edgeCount > 0) renderCite(g); else showCitePrompt();
-  } catch (e) { hint.textContent = '失败：' + e; }
-  finally { btn.disabled = false; btn.textContent = old; }
+    insightCiteGraph = g;
+    if (g && g.edgeCount > 0) {
+      renderCite(g);
+      renderCited(g);
+    } else {
+      insightCiteGraph = null;
+      showCitePrompt();
+      renderCited(null);
+    }
+  } catch (error) {
+    insightCiteGraph = null;
+    showCitePrompt();
+    renderCited(null);
+    hint.textContent = '失败：' + error;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
 }
 
 function cmpHome(a, b) {
@@ -746,6 +948,7 @@ function paperItem(p) {
 // ====== 打开论文 ======
 async function openPaper(p) {
   if (!p) return;
+  spatialWorkspace?.select(p.id);
   current = p;
   showView('read');
   renderSidebar();
@@ -1327,7 +1530,7 @@ function bindUI() {
   $('#ingEditBtn').onclick = editQueries;
   $('#ingSearchWithBtn').onclick = () => runSearch(currentQueries());
   $('#ingQueryAdd').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { const a = currentQueries() || []; a.push(e.target.value.trim()); e.target.value = ''; renderQueryChips(a); } };
-  $('#ingHistClear').onclick = () => { try { localStorage.removeItem(HIST_KEY); } catch (e) {} renderHist(); };
+  $('#ingHistClear').onclick = () => { appStorage.remove(HIST_KEY); renderHist(); };
   renderHist();
   $('#ingestSelBtn').onclick = ingestSelected;
   $('#verifyVenueBtn').onclick = verifyVenues;
@@ -1362,7 +1565,6 @@ function bindUI() {
     document.querySelectorAll('#libSrcFilter .fchip').forEach(x => x.classList.remove('active'));
     c.classList.add('active'); manageSrc = c.dataset.src; renderManage();
   });
-  $('#themeBtn').onclick = toggleTheme;
   $('#toggleLeft').onclick = () => togglePane('hide-left');
   $('#toggleRight').onclick = () => togglePane('hide-right');
   $('#stubLeft').onclick = () => togglePane('hide-left');
@@ -1411,7 +1613,7 @@ async function saveStatus(status) {
   current.status = status;
   const p = PAPERS.find(x => x.id === current.id); if (p) p.status = status;
   renderSidebar();
-  if (status === '已理解' || reviewData) await loadReviews(currentView === 'review');
+  if (status === '已理解' || reviewData) await loadReviews(currentView === 'review', true);
   else renderCurrentReviewStatus();
 }
 
@@ -1699,8 +1901,8 @@ function renderQueryChips(qs) {
 }
 // ====== 采集检索历史（localStorage） ======
 const HIST_KEY = 'paperstudy.searchHistory', HIST_MAX = 12;
-function loadHist() { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch (e) { return []; } }
-function saveHist(a) { try { localStorage.setItem(HIST_KEY, JSON.stringify(a.slice(0, HIST_MAX))); } catch (e) {} }
+function loadHist() { try { return JSON.parse(appStorage.get(HIST_KEY, '[]')); } catch (e) { return []; } }
+function saveHist(a) { appStorage.set(HIST_KEY, JSON.stringify(a.slice(0, HIST_MAX))); }
 function pushHist(q, queries) {
   q = (q || '').trim(); if (!q) return;
   const a = loadHist().filter(e => e.q !== q);
@@ -2074,9 +2276,45 @@ async function saveSettings() {
   if (ak) body.apiKey = ak;
   if (sk) body.s2ApiKey = sk;
   if (ek) body.embedApiKey = ek;
-  await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const h = $('#setHint'); h.textContent = '已保存 ✓（下次采集生效）'; setTimeout(() => h.textContent = '', 3000);
-  loadSettings();
+  const hint = $('#setHint');
+  try {
+    const response = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    hint.textContent = '已保存 ✓（下次采集生效）';
+    setTimeout(() => { hint.textContent = ''; }, 3000);
+    loadSettings();
+  } catch (error) {
+    hint.textContent = `保存失败：${error.message || error}`;
+  }
 }
-function openSettingsModal() { loadSettings(); $('#settingsModal').classList.remove('hidden'); }
-function closeSettingsModal() { $('#settingsModal').classList.add('hidden'); }
+let settingsReturnFocus = null;
+let settingsScrollContainer = null;
+let settingsScrollTop = 0;
+
+function activeViewScrollContainer() {
+  return currentView === 'read' ? $('#pdfScroll') : $('#' + currentView);
+}
+
+function openSettingsModal() {
+  spatialWorkspace?.closePanels({ restoreFocus: false });
+  settingsReturnFocus = document.activeElement;
+  settingsScrollContainer = activeViewScrollContainer();
+  settingsScrollTop = Number(settingsScrollContainer && settingsScrollContainer.scrollTop) || 0;
+  loadSettings();
+  $('#settingsModal').classList.remove('hidden');
+  setTimeout(() => $('#setClose').focus(), 0);
+}
+
+function closeSettingsModal() {
+  const modal = $('#settingsModal');
+  if (!modal || modal.classList.contains('hidden')) return;
+  modal.classList.add('hidden');
+  if (settingsScrollContainer) settingsScrollContainer.scrollTop = settingsScrollTop;
+  if (settingsReturnFocus && typeof settingsReturnFocus.focus === 'function') settingsReturnFocus.focus();
+  settingsReturnFocus = null;
+  settingsScrollContainer = null;
+}

@@ -30,6 +30,9 @@
   --card-shadow:0 1px 2px rgba(20,24,40,.04),0 20px 54px -34px rgba(30,34,60,.30);
   --pdf-stage:#e7eaf1;
 }
+
+.spatial-only { display: none; }
+.home-filter-actions { display: contents; }
 html[data-theme=dark]{
   --bg:#0d0e13; --surface:#15161e; --surface-2:#1c1e29; --surface-3:#262a38;
   --border:#262835; --border-2:#353a4a;
