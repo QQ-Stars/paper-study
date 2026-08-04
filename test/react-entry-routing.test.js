@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
@@ -10,6 +11,7 @@ const {
   extractRawPathname,
   resolveFrontendPath,
   selectRoutingPathname,
+  serveFrontendRequest,
 } = require('../lib/frontend-assets');
 
 function writeFile(file, contents = '') {
@@ -26,10 +28,17 @@ function createFixture() {
 
   writeFile(reactIndex, '<div id="root"></div>');
   writeFile(path.join(react, 'assets', 'index-AbC_d123.js'), 'hashed');
+  writeFile(path.join(react, 'assets', 'license-apache20.txt'), 'not a content hash');
   writeFile(path.join(react, 'assets', 'theme.css'), 'plain');
   writeFile(path.join(react, 'reader-worker.mjs'), 'worker');
   writeFile(path.join(react, 'fonts', 'research.woff2'), 'font');
   writeFile(path.join(react, 'runtime.wasm'), 'wasm');
+  writeFile(path.join(react, '.vite', 'manifest.json'), JSON.stringify({
+    'index.html': {
+      file: 'assets/index-AbC_d123.js',
+      isEntry: true,
+    },
+  }));
 
   writeFile(legacyIndex, '<main>legacy</main>');
   writeFile(path.join(legacy, 'style.css'), 'legacy style');
@@ -45,12 +54,49 @@ function createFixture() {
 const fixture = createFixture();
 test.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
 
+const reactConfig = createFrontendConfig({
+  roots: fixture.roots,
+  uiEntry: 'react',
+  warn: () => {},
+});
+
 function resolve(pathname, overrides = {}) {
   return resolveFrontendPath(pathname, fixture.roots, {
-    rootEntry: 'react',
-    reactAvailable: true,
+    ...reactConfig,
     ...overrides,
   });
+}
+
+async function requestFrontend(pathname, { method = 'GET', fileOps } = {}) {
+  const server = http.createServer((req, res) => {
+    serveFrontendRequest(
+      req,
+      res,
+      extractRawPathname(req.url),
+      fixture.roots,
+      reactConfig,
+      fileOps,
+    );
+  });
+  await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+  try {
+    const address = server.address();
+    const response = await fetch(`http://127.0.0.1:${address.port}${pathname}`, {
+      headers: { Connection: 'close' },
+      method,
+      redirect: 'manual',
+    });
+    return {
+      body: await response.text(),
+      headers: response.headers,
+      status: response.status,
+    };
+  } finally {
+    await new Promise((resolveClose, rejectClose) => server.close((error) => {
+      if (error) rejectClose(error);
+      else resolveClose();
+    }));
+  }
 }
 
 test('UI_ENTRY defaults to React and is read into an immutable startup decision', () => {
@@ -148,6 +194,7 @@ test('a dotted Reader deep link resolves to the React index, not a guessed file'
 
 test('React serves real files and applies immutable caching only to Vite-hashed assets', () => {
   const hashed = resolve('/workspace/assets/index-AbC_d123.js');
+  const hashLookalike = resolve('/workspace/assets/license-apache20.txt');
   const nonHashed = resolve('/workspace/assets/theme.css');
   const worker = resolve('/workspace/reader-worker.mjs');
   const font = resolve('/workspace/fonts/research.woff2');
@@ -156,15 +203,71 @@ test('React serves real files and applies immutable caching only to Vite-hashed 
   assert.equal(hashed.kind, 'react-file');
   assert.equal(hashed.headers['Content-Type'], 'text/javascript; charset=utf-8');
   assert.equal(hashed.headers['Cache-Control'], 'public,max-age=31536000,immutable');
+  assert.equal(hashLookalike.headers['Cache-Control'], 'no-cache');
   assert.equal(nonHashed.kind, 'react-file');
   assert.equal(nonHashed.headers['Cache-Control'], 'no-cache');
   assert.equal(worker.headers['Content-Type'], 'text/javascript; charset=utf-8');
   assert.equal(worker.headers['Cache-Control'], 'no-cache');
   assert.equal(font.headers['Content-Type'], 'font/woff2');
   assert.equal(wasm.headers['Content-Type'], 'application/wasm');
-  for (const result of [hashed, nonHashed, worker, font, wasm]) {
+  for (const result of [hashed, hashLookalike, nonHashed, worker, font, wasm]) {
     assert.equal('Content-Security-Policy' in result.headers, false);
   }
+});
+
+test('a missing or malformed Vite manifest falls back to conservative caching', () => {
+  const missingManifestRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'study-app-no-manifest-'));
+  const react = path.join(missingManifestRoot, 'frontend', 'dist');
+  const legacy = path.join(missingManifestRoot, 'public');
+  writeFile(path.join(react, 'index.html'), '<div id="root"></div>');
+  writeFile(path.join(react, 'assets', 'index-AbC_d123.js'), 'asset');
+  writeFile(path.join(legacy, 'index.html'), 'legacy');
+  const roots = { react, legacy };
+  const config = createFrontendConfig({ roots, uiEntry: 'react', warn: () => {} });
+
+  try {
+    const result = resolveFrontendPath('/workspace/assets/index-AbC_d123.js', roots, config);
+    assert.equal(result.headers['Cache-Control'], 'no-cache');
+  } finally {
+    fs.rmSync(missingManifestRoot, { recursive: true, force: true });
+  }
+});
+
+test('the real frontend server permits reads and rejects write methods', async () => {
+  const get = await requestFrontend('/workspace/');
+  const head = await requestFrontend('/workspace/assets/index-AbC_d123.js', { method: 'HEAD' });
+  const post = await requestFrontend('/workspace/', { method: 'POST' });
+
+  assert.equal(get.status, 200);
+  assert.match(get.body, /id="root"/u);
+  assert.equal(head.status, 200);
+  assert.equal(head.body, '');
+  assert.equal(head.headers.get('content-length'), String('hashed'.length));
+  assert.equal(post.status, 405);
+  assert.equal(post.headers.get('allow'), 'GET, HEAD');
+  assert.equal(post.headers.get('cache-control'), 'no-store');
+});
+
+test('an asset removed between resolution and open returns a controlled response', async () => {
+  const volatile = path.join(fixture.roots.react, 'assets', 'volatile.txt');
+  writeFile(volatile, 'temporary');
+  let removed = false;
+  const fileOps = {
+    ...fs,
+    open(file, flags, callback) {
+      if (!removed && path.resolve(file) === path.resolve(volatile)) {
+        removed = true;
+        fs.rmSync(volatile);
+      }
+      fs.open(file, flags, callback);
+    },
+  };
+
+  const response = await requestFrontend('/workspace/assets/volatile.txt', { fileOps });
+
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.match(response.body, /not found/u);
 });
 
 test('a missing Vite asset is a 404 while non-asset deep routes use the SPA index', () => {

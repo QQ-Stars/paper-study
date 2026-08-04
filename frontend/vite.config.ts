@@ -10,6 +10,9 @@ const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 
 export default defineConfig({
   base: '/workspace/',
+  build: {
+    manifest: true,
+  },
   plugins: [cleanRoomGuard({ repositoryRoot }), react()],
   server: {
     port: 5174,
