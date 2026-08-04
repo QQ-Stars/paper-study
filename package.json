@@ -8,6 +8,11 @@
   },
   "scripts": {
     "test": "node --test",
+    "frontend:install": "npm ci --prefix frontend",
+    "frontend:test": "npm run test:run --prefix frontend",
+    "frontend:typecheck": "npm run typecheck --prefix frontend",
+    "frontend:build": "npm run build --prefix frontend",
+    "test:all": "npm test && npm run frontend:test",
     "rename-pdfs": "node scripts/rename-pdfs-by-title.js",
     "start": "node server.js"
   },
