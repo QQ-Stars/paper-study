@@ -6,8 +6,13 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type KeyboardEvent,
 } from 'react';
 
+import {
+  focusFirstWithin,
+  focusSafely,
+} from '../../lib/accessibility/focus';
 import {
   capturePageViewportAnchor,
   resolvePageViewportAnchor,
@@ -167,6 +172,7 @@ export function PdfWorkspace({
     pageNumber: 1,
   });
   const viewportRef = useRef<HTMLDivElement>(null);
+  const popoverElementRef = useRef<HTMLDivElement>(null);
   const snapshot = useSessionSnapshot(session);
   const selection = useSelectionSnapshot(selectionController);
   const ownsPaper = snapshot.paperId === paperId && snapshot.generation > 0;
@@ -217,11 +223,33 @@ export function PdfWorkspace({
 
   useEffect(() => () => {
     translator.dispose();
-    void session.dispose();
+    void session.dispose().catch(() => undefined);
   }, [session, translator]);
+
+  useEffect(() => {
+    if (!ownsSelection || !selection.popoverOpen) return undefined;
+    const popover = popoverElementRef.current;
+    if (!popover) return undefined;
+    const fallbackFocus = viewportRef.current;
+    const { activeElement, body, documentElement } = popover.ownerDocument;
+    const previousFocus =
+      activeElement instanceof HTMLElement &&
+      activeElement !== body &&
+      activeElement !== documentElement
+        ? activeElement
+        : fallbackFocus;
+    focusFirstWithin(popover);
+    return () => {
+      const currentFocus = popover.ownerDocument.activeElement;
+      const lostFocus = currentFocus === body || currentFocus === documentElement;
+      if (!popover.contains(currentFocus) && !lostFocus) return;
+      if (!focusSafely(previousFocus)) focusSafely(fallbackFocus);
+    };
+  }, [ownsSelection, selection.popoverOpen]);
 
   const popoverRef = useCallback(
     (element: HTMLDivElement | null) => {
+      popoverElementRef.current = element;
       selectionController.setPopoverElement(element);
     },
     [selectionController],
@@ -254,6 +282,7 @@ export function PdfWorkspace({
   };
 
   const translateSelection = () => {
+    if (activeTranslation.status === 'loading') return;
     const fixedSelection = selectionController.getSnapshot();
     if (
       generation < 1 ||
@@ -310,6 +339,13 @@ export function PdfWorkspace({
     translator.abort();
     selectionController.closePopover();
     setTranslation(emptyTranslation);
+  };
+
+  const handlePopoverKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    closePopover();
   };
 
   const popoverStyle = useMemo<CSSProperties | undefined>(() => {
@@ -469,6 +505,7 @@ export function PdfWorkspace({
         <div
           aria-label="选文翻译"
           className="pdf-workspace__translation-popover floating-material"
+          onKeyDown={handlePopoverKeyDown}
           ref={popoverRef}
           role="dialog"
           style={popoverStyle}
@@ -477,9 +514,20 @@ export function PdfWorkspace({
             <strong>选文翻译</strong>
             <button aria-label="关闭选文翻译" onClick={closePopover} type="button">×</button>
           </header>
-          {activeTranslation.status === 'idle' ? (
-            <button onClick={translateSelection} type="button">翻译选文</button>
-          ) : null}
+          <button
+            aria-disabled={activeTranslation.status === 'loading'}
+            data-panel-autofocus="true"
+            onClick={translateSelection}
+            type="button"
+          >
+            {activeTranslation.status === 'loading'
+              ? '正在翻译…'
+              : activeTranslation.status === 'ready'
+                ? '重新翻译'
+                : activeTranslation.status === 'error'
+                  ? '重试翻译'
+                  : '翻译选文'}
+          </button>
           {activeTranslation.status === 'loading' ? (
             <p role="status">正在翻译选文…</p>
           ) : null}

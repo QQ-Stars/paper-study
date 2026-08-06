@@ -55,8 +55,8 @@ function createPageRenderHandle(
   const viewport = page.getViewport({ scale: zoom });
   const outputScale = Math.max(1, globalThis.devicePixelRatio || 1);
   if (surface.target instanceof HTMLElement) {
-    surface.target.style.setProperty('--scale-factor', String(zoom));
-    surface.target.style.setProperty('--user-unit', '1');
+    surface.target.style.setProperty('--scale-factor', String(viewport.scale));
+    surface.target.style.setProperty('--user-unit', String(viewport.userUnit));
     surface.target.style.setProperty(
       '--total-scale-factor',
       'calc(var(--scale-factor) * var(--user-unit))',

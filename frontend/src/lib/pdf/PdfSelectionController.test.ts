@@ -24,6 +24,25 @@ function selectionFor(root: HTMLElement) {
   } as unknown as Selection;
 }
 
+function domRect(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+): DOMRect {
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
 describe('PdfSelectionController', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
@@ -168,6 +187,49 @@ describe('PdfSelectionController', () => {
       text: 'new',
       fragments: [{ text: 'new' }],
     });
+  });
+
+  it('clips the first and last text-layer spans to the native Range offsets', () => {
+    const root = document.createElement('div');
+    const page = document.createElement('article');
+    page.dataset.pdfPageNumber = '1';
+    const textLayer = document.createElement('div');
+    textLayer.className = 'textLayer';
+    const first = document.createElement('span');
+    const second = document.createElement('span');
+    first.textContent = 'AlphaBeta';
+    second.textContent = 'GammaDelta';
+    textLayer.append(first, second);
+    page.append(textLayer);
+    root.append(page);
+    document.body.append(root);
+    vi.spyOn(page, 'getBoundingClientRect').mockReturnValue(
+      domRect(0, 0, 600, 900),
+    );
+    vi.spyOn(first, 'getBoundingClientRect').mockReturnValue(
+      domRect(40, 80, 120, 100),
+    );
+    vi.spyOn(second, 'getBoundingClientRect').mockReturnValue(
+      domRect(130, 80, 220, 100),
+    );
+    const controller = new PdfSelectionController({ delayMs: 1 });
+    controller.mount(root);
+    controller.switchPaper('paper-a', 1);
+    const range = document.createRange();
+    range.setStart(first.firstChild!, 5);
+    range.setEnd(second.firstChild!, 5);
+    const selection = document.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    vi.runAllTimers();
+
+    expect(controller.getSnapshot()).toMatchObject({
+      status: 'selected',
+      text: 'Beta Gamma',
+    });
+    controller.dispose();
   });
 
   it('remounts without duplicate listeners and final cleanup cancels pending work', () => {

@@ -63,7 +63,7 @@ it('configures the Vite worker URL and disables PDF evaluation', async () => {
 it('uses one viewport for canvas and text and releases both page tasks', async () => {
   const renderCancel = vi.fn();
   const renderPromise = Promise.resolve();
-  const viewport = { width: 320, height: 480 };
+  const viewport = { width: 320, height: 480, scale: 1.5, userUnit: 2 };
   const page = {
     cleanup: vi.fn(),
     getViewport: vi.fn(() => viewport),
@@ -106,6 +106,7 @@ it('uses one viewport for canvas and text and releases both page tasks', async (
   expect(surface.canvas.width).toBe(320);
   expect(surface.canvas.height).toBe(480);
   expect(surface.target.style.getPropertyValue('--scale-factor')).toBe('1.5');
+  expect(surface.target.style.getPropertyValue('--user-unit')).toBe('2');
   expect(surface.target.style.getPropertyValue('--total-scale-factor')).toBe(
     'calc(var(--scale-factor) * var(--user-unit))',
   );

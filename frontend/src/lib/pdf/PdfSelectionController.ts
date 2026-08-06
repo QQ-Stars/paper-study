@@ -67,6 +67,37 @@ function geometryRect(rect: Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>):
   };
 }
 
+function boundaryTextOffset(
+  span: HTMLElement,
+  container: Node,
+  offset: number,
+): number | null {
+  if (!span.contains(container)) return null;
+  const probe = span.ownerDocument.createRange();
+  probe.selectNodeContents(span);
+  try {
+    probe.setEnd(container, offset);
+    return probe.toString().length;
+  } catch {
+    return null;
+  }
+}
+
+function clippedSpanText(span: HTMLElement, range: Range): string {
+  const fullText = span.textContent ?? '';
+  const startOffset = boundaryTextOffset(
+    span,
+    range.startContainer,
+    range.startOffset,
+  );
+  const endOffset = boundaryTextOffset(
+    span,
+    range.endContainer,
+    range.endOffset,
+  );
+  return fullText.slice(startOffset ?? 0, endOffset ?? fullText.length);
+}
+
 function inferredBreak(
   previous: PdfSelectionFragment | undefined,
   currentRect: PdfGeometryRect,
@@ -118,7 +149,7 @@ function defaultResolveSelection(
   let startFragmentIndex = -1;
   let endFragmentIndex = -1;
   for (const span of selectedSpans) {
-    const text = span.textContent ?? '';
+    const text = clippedSpanText(span, range);
     if (!text.trim()) continue;
     const rect = geometryRect(span.getBoundingClientRect());
     const parsedFontSize = Number.parseFloat(view?.getComputedStyle(span).fontSize ?? '');

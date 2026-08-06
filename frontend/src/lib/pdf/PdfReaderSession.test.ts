@@ -352,3 +352,63 @@ it('does not notify an unsubscribed listener after teardown', async () => {
 
   expect(listener).not.toHaveBeenCalled();
 });
+
+it('makes every concurrent dispose wait for all prior owner cleanups', async () => {
+  const firstDestroy = deferred<void>();
+  const secondDestroy = deferred<void>();
+  const firstDocument = {
+    ...documentHandle(),
+    destroy: vi.fn(() => firstDestroy.promise),
+  };
+  const secondDocument = {
+    ...documentHandle(),
+    destroy: vi.fn(() => secondDestroy.promise),
+  };
+  const session = new PdfReaderSession({
+    fetchBytes: vi.fn(async () => new ArrayBuffer(8)),
+    createLoadingTask: vi
+      .fn()
+      .mockReturnValueOnce(loadingHandle(Promise.resolve(firstDocument)))
+      .mockReturnValueOnce(loadingHandle(Promise.resolve(secondDocument))),
+  });
+  await session.open('paper-a');
+  await session.open('paper-b');
+  const firstDispose = session.dispose();
+  const secondDispose = session.dispose();
+  let firstDone = false;
+  let secondDone = false;
+  void firstDispose.then(() => { firstDone = true; });
+  void secondDispose.then(() => { secondDone = true; });
+  await Promise.resolve();
+  expect(firstDone).toBe(false);
+  expect(secondDone).toBe(false);
+
+  secondDestroy.resolve();
+  await Promise.resolve();
+  expect(firstDone).toBe(false);
+  expect(secondDone).toBe(false);
+
+  firstDestroy.resolve();
+  await Promise.all([firstDispose, secondDispose]);
+  expect(firstDone).toBe(true);
+  expect(secondDone).toBe(true);
+  expect(firstDocument.destroy).toHaveBeenCalledOnce();
+  expect(secondDocument.destroy).toHaveBeenCalledOnce();
+});
+
+it('absorbs teardown failures instead of creating unhandled dispose rejections', async () => {
+  const pdfDocument = {
+    ...documentHandle(),
+    destroy: vi.fn(async () => {
+      throw new Error('worker teardown failed');
+    }),
+  };
+  const session = new PdfReaderSession({
+    fetchBytes: vi.fn(async () => new ArrayBuffer(8)),
+    createLoadingTask: vi.fn(() => loadingHandle(Promise.resolve(pdfDocument))),
+  });
+  await session.open('paper-a');
+
+  await expect(session.dispose()).resolves.toBeUndefined();
+  expect(pdfDocument.destroy).toHaveBeenCalledOnce();
+});

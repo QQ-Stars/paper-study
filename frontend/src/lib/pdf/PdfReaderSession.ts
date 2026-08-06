@@ -204,6 +204,7 @@ export class PdfReaderSession {
   #listeners = new Set<() => void>();
   #mountedPages = new Map<number, MountedPageOwner>();
   #viewport: ViewportOwner | null = null;
+  #cleanupTasks = new Set<Promise<void>>();
 
   constructor(dependencies: PdfReaderSessionDependencies = defaultDependencies) {
     this.#dependencies = dependencies;
@@ -316,7 +317,7 @@ export class PdfReaderSession {
       error: null,
       pages: {},
     });
-    void this.#destroyOwner(previousOwner).catch(() => undefined);
+    void this.#trackOwnerCleanup(previousOwner);
 
     try {
       const bytes = await this.#dependencies.fetchBytes(
@@ -402,7 +403,8 @@ export class PdfReaderSession {
       pages: {},
     });
     this.#listeners.clear();
-    await this.#destroyOwner(owner);
+    void this.#trackOwnerCleanup(owner);
+    await Promise.all([...this.#cleanupTasks]);
   }
 
   #setSnapshot(snapshot: PdfReaderSessionSnapshot): void {
@@ -677,5 +679,13 @@ export class PdfReaderSession {
       }
     })();
     return owner.cleanupPromise;
+  }
+
+  #trackOwnerCleanup(owner: SessionOwner | null): Promise<void> {
+    if (!owner) return Promise.resolve();
+    const cleanup = this.#destroyOwner(owner).catch(() => undefined);
+    this.#cleanupTasks.add(cleanup);
+    void cleanup.then(() => this.#cleanupTasks.delete(cleanup));
+    return cleanup;
   }
 }

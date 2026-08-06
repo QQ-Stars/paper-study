@@ -72,9 +72,10 @@ export function PdfPage({
         ref={canvasRef}
       />
       <div
-        aria-hidden="true"
+        aria-label={`第 ${pageNumber} 页文本`}
         className="textLayer pdf-page__text-layer"
         ref={textLayerRef}
+        role="document"
       />
       {status === 'loading' ? (
         <p

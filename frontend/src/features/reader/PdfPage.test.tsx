@@ -45,6 +45,8 @@ it('mounts one canvas/text-layer owner and releases it on unmount', () => {
   expect(surface).toMatchObject({ pageNumber: 2, target: page });
   expect(surface?.canvas).toBeInstanceOf(HTMLCanvasElement);
   expect(surface?.textLayer).toHaveClass('textLayer');
+  expect(surface?.textLayer).not.toHaveAttribute('aria-hidden');
+  expect(surface?.textLayer).toHaveAttribute('role', 'document');
 
   view.unmount();
   expect(release).toHaveBeenCalledOnce();

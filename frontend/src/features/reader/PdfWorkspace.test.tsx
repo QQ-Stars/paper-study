@@ -147,19 +147,44 @@ it('keeps buffered text while zoom cancels the old page owner', async () => {
     resolveSelection: () => policyInput('kept across zoom'),
     delayMs: 0,
   });
+  const translation = deferred<string>();
+  let translationSignal: AbortSignal | undefined;
+  const translator = new SelectionTranslator<PageRectAnchor | null>({
+    translate: vi.fn((_text, signal) => {
+      translationSignal = signal;
+      return translation.promise;
+    }),
+  });
   const view = render(
     <PdfWorkspace
       createSelectionController={() => controller}
       createSession={() => session}
+      createTranslator={() => translator}
       paperId="paper-a"
     />,
   );
   await screen.findByRole('article', { name: '第 1 页' });
   await waitFor(() => expect(renders).toHaveLength(1));
   const viewport = screen.getByTestId('pdf-viewport');
+  viewport.focus();
   selection = nativeSelection(viewport);
   fireEvent.mouseUp(viewport);
   await screen.findByText('kept across zoom');
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: '翻译选文' })).toHaveFocus();
+  });
+  await userEvent.keyboard('{Enter}');
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: '正在翻译…' })).toHaveFocus();
+  });
+  fireEvent.keyDown(screen.getByRole('dialog', { name: '选文翻译' }), {
+    key: 'Escape',
+  });
+  await waitFor(() => {
+    expect(screen.queryByRole('dialog', { name: '选文翻译' })).not.toBeInTheDocument();
+  });
+  expect(translationSignal?.aborted).toBe(true);
+  expect(viewport).toHaveFocus();
 
   await userEvent.click(screen.getByRole('button', { name: '放大 PDF' }));
 
