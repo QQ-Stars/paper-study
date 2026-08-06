@@ -1,6 +1,8 @@
 # 关键：绝不把宿主机的 node_modules / .venv 带进镜像——它们是 Windows 平台产物，
 # 会覆盖镜像内为 Linux 编译/安装的 better-sqlite3 与 Python venv，导致运行崩溃。
 node_modules
+frontend/node_modules
+frontend/dist
 .venv
 
 # 体积大 / 可再生 / 由数据卷提供

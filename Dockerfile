@@ -2,7 +2,16 @@
 # server.js 用 spawn 调 .venv/bin/python -m agent 跑各任务，故两套运行时都要在镜像里。
 # 基础镜像默认用官方规范名；网络受限时可用 --build-arg NODE_IMAGE=<镜像源>/library/node:20-bookworm-slim 覆盖。
 ARG NODE_IMAGE=node:20-bookworm-slim
-FROM ${NODE_IMAGE}
+
+FROM ${NODE_IMAGE} AS frontend-build
+
+WORKDIR /build/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM ${NODE_IMAGE} AS runtime
 
 # 系统依赖：python3+venv（跑 agent，且 better-sqlite3 原生编译需要 python）、构建工具、CA 证书（pip/外部 API 走 HTTPS）
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,10 +33,14 @@ RUN python3 -m venv .venv \
 # 3) 应用代码（node_modules / .venv / data / .models / .env 由 .dockerignore 排除，不会覆盖上面装好的）
 COPY . .
 
+# React 生产资源只来自隔离的构建阶段，不能使用宿主机上的 dist。
+COPY --from=frontend-build /build/frontend/dist /app/frontend/dist
+
 # 运行期产物目录兜底（未挂卷时也能启动；挂了卷则被卷覆盖）
 RUN mkdir -p data/pdfs data/explainers data/translations .models/hf
 
 ENV PORT=5173 \
+    UI_ENTRY=react \
     DB_PATH=/app/data/app.db \
     PYTHONUNBUFFERED=1 \
     PYTHONUTF8=1 \
