@@ -9,6 +9,7 @@ const { createAgentRunner } = require('./lib/agent-runner');
 const { createArtifactLocator, scanPdfDirectory } = require('./lib/artifacts');
 const frontendAssets = require('./lib/frontend-assets');
 const { MIME, readBody, safeBase, send, startNdjson } = require('./lib/http');
+const { buildImportPdfsTerminal } = require('./lib/import-pdfs-result');
 const { createTitleTranslationService } = require('./lib/title-translations');
 const {
   applySettingsUpdate,
@@ -447,7 +448,7 @@ const server = http.createServer(async (req, res) => {
       ch.stderr.on('data', d => String(d).split(/\r?\n/).forEach(l => l.trim() && emit({ type: 'progress', line: l })));
       ch.stdout.on('data', d => out += d.toString());
       ch.on('error', e => { emit({ type: 'result', ok: false, error: String(e) }); res.end(); });
-      ch.on('close', code => { let r = {}; try { r = JSON.parse(out); } catch (e) {} emit({ type: 'result', ok: code === 0 && r.ok !== false, added: r.added || 0, dup: r.dup || 0, failed: r.failed || 0, error: r.error || '' }); res.end(); });
+      ch.on('close', code => { emit(buildImportPdfsTerminal(code, out)); res.end(); });
       ch.stdin.write(JSON.stringify(paths)); ch.stdin.end();
       return;
     }
