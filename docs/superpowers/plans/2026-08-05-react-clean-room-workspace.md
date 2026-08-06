@@ -27,7 +27,7 @@ Tasks 4–6 can run in parallel after Tasks 1–3 because they own disjoint feat
 ## Delivery snapshot — 2026-08-06
 
 - Implementation is isolated on `codex/react-clean-room-workspace`; the stable branch and the user's main working tree are not used for the refactor.
-- Tasks 1–12 are implemented on this branch. The final automated gate is green: Node 273/273, frontend Vitest 51 files / 247 tests, TypeScript, ESLint, production build, and Playwright 28/28.
+- Tasks 1–12 and the reference-aligned Dashboard pass are implemented on this branch. The final automated gate is green: Node 275/275, frontend Vitest 52 files / 251 tests, TypeScript, ESLint, production build, and Playwright 28/28.
 - The final architecture tightens the original file map: route handles and the preference-only workspace store live behind `frontend/src/lib/workspace/index.ts`; every route is loaded through its feature `index.ts`; shared acquisition draft behavior lives behind `frontend/src/lib/research-search/index.ts`. Dependency-boundary tests enforce those seams.
 - The React application is clean-room isolated under `frontend/` and is served only below `/workspace/`. It does not import or request legacy application HTML, CSS, JavaScript, or vendor bundles. The old `public/` application remains available below `/legacy/` as a reversible fallback.
 - The production-entry drill passed: default `/` redirects to `/workspace/`; React deep routes refresh and survive history navigation; `/legacy/` remains functional; with `UI_ENTRY=legacy`, `/` serves the same legacy document while `/workspace/` remains reachable. The recorded Chromium smoke observed 72 requests with no legacy asset request, console/page/request failure, or CSP violation.

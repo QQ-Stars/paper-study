@@ -22,7 +22,46 @@ describe('DashboardView', () => {
     expect(handle).toEqual(expect.objectContaining({
       title: '研究概览',
       layout: 'inspector-timeline',
+      pageHeader: 'route',
     }));
+  });
+
+  it('uses an explicit full-width stage when the shell owns the inspector', () => {
+    const { container, rerender } = render(
+      <DashboardView
+        papers={[paper('1', 'Paper One')]}
+        reviews={[]}
+        jobs={[]}
+        inspectorMode="rail"
+        showInspector={false}
+        showTimeline={false}
+        onSelectionChange={vi.fn()}
+        onOpenPaper={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('.dashboard-route__workspace')).toHaveClass(
+      'dashboard-route__workspace--stage-only',
+    );
+    expect(screen.queryByRole('complementary', { name: '论文上下文' })).not.toBeInTheDocument();
+
+    rerender(
+      <DashboardView
+        papers={[paper('1', 'Paper One')]}
+        reviews={[]}
+        jobs={[]}
+        inspectorMode="rail"
+        showInspector
+        showTimeline={false}
+        onSelectionChange={vi.fn()}
+        onOpenPaper={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('.dashboard-route__workspace')).toHaveClass(
+      'dashboard-route__workspace--with-inline-inspector',
+    );
+    expect(screen.getByRole('complementary', { name: '论文上下文' })).toBeInTheDocument();
   });
 
   it('keeps the deck and inspector on one reducer-owned selection', async () => {

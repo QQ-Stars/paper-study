@@ -32,6 +32,18 @@ function positionText(state: DeckState): string {
   return `${String(position).padStart(width, '0')} / ${String(state.total).padStart(width, '0')}`;
 }
 
+function layoutOffset(
+  visibleIndex: number,
+  selectedVisibleIndex: number,
+  visibleCount: number,
+): number {
+  const offset = visibleIndex - selectedVisibleIndex;
+  const radius = Math.floor(visibleCount / 2);
+  if (offset > radius) return offset - visibleCount;
+  if (offset < -radius) return offset + visibleCount;
+  return offset;
+}
+
 export function PaperDeck({
   papers,
   state,
@@ -86,6 +98,9 @@ export function PaperDeck({
   const selectedPaper = state.selectedId == null
     ? undefined
     : paperById.get(state.selectedId);
+  const selectedVisibleIndex = state.selectedId == null
+    ? -1
+    : state.visible.indexOf(state.selectedId);
 
   return (
     <section
@@ -116,12 +131,17 @@ export function PaperDeck({
           aria-label="论文甲板"
           aria-activedescendant={state.selectedId == null ? undefined : `deck-paper-${state.selectedId}`}
         >
-          {state.visible.map((paperId) => {
+          {state.visible.map((paperId, visibleIndex) => {
             const paper = paperById.get(paperId);
             if (paper == null) return null;
             const selected = paperId === state.selectedId;
             const sourceIndex = state.ids.indexOf(paperId);
             const offset = sourceIndex - state.selectedIndex;
+            const cardLayoutOffset = layoutOffset(
+              visibleIndex,
+              selectedVisibleIndex,
+              state.visible.length,
+            );
 
             return (
               <div
@@ -134,6 +154,7 @@ export function PaperDeck({
                 className="paper-deck__card"
                 data-deck-card=""
                 data-offset={offset}
+                data-layout-offset={cardLayoutOffset}
                 data-paper-id={paperId}
                 role="option"
                 aria-label={optionLabel(paper)}

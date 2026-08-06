@@ -105,12 +105,22 @@ export interface DashboardViewProps {
 export const handle = {
   title: '研究概览',
   layout: 'inspector-timeline',
+  pageHeader: 'route',
   queue: DashboardQueueSlot,
   inspector: DashboardInspectorSlot,
   timeline: DashboardTimelineSlot,
 } satisfies WorkspaceRouteHandle;
 
-export const ErrorBoundary = RouteErrorBoundary;
+export function ErrorBoundary() {
+  return (
+    <>
+      <h1 id="workspace-page-title" className="dashboard-route__page-title" tabIndex={-1}>
+        研究概览
+      </h1>
+      <RouteErrorBoundary />
+    </>
+  );
+}
 
 export function DashboardView({
   papers,
@@ -184,6 +194,9 @@ export function DashboardView({
   if (status === 'pending' && papers.length === 0) {
     return (
       <section className="dashboard-route dashboard-route--pending" aria-label="研究概览">
+        <h1 id="workspace-page-title" className="dashboard-route__page-title" tabIndex={-1}>
+          研究概览
+        </h1>
         <div className="dashboard-route__state" role="status">
           <strong>正在载入真实论文…</strong>
           <span>甲板会在论文列表通过数据契约后显示。</span>
@@ -195,6 +208,9 @@ export function DashboardView({
   if (status === 'error' && papers.length === 0) {
     return (
       <section className="dashboard-route dashboard-route--error" aria-label="研究概览">
+        <h1 id="workspace-page-title" className="dashboard-route__page-title" tabIndex={-1}>
+          研究概览
+        </h1>
         <div className="dashboard-route__state" role="alert">
           <strong>无法载入研究概览</strong>
           <span>{errorMessage}</span>
@@ -230,9 +246,12 @@ export function DashboardView({
     <section className="dashboard-route" aria-label="研究概览">
       <header className="dashboard-route__intro">
         <div>
+          <h1 id="workspace-page-title" className="dashboard-route__page-title" tabIndex={-1}>
+            研究概览
+          </h1>
           <p className="dashboard-route__kicker">TODAY / RESEARCH CONTROL</p>
-          <h2>从当前论文继续</h2>
-          <p>论文选择、复习节点与后台任务均来自当前工作区事实。</p>
+          <h2>今天回到研究现场</h2>
+          <p>从当前论文继续，或处理已经到期的复习。</p>
         </div>
         {inspectorMode !== 'rail' ? (
           <button
@@ -290,7 +309,11 @@ export function DashboardView({
         <p className="dashboard-route__refresh" role="status">正在刷新研究事实…</p>
       ) : null}
 
-      <div className="dashboard-route__workspace">
+      <div
+        className={`dashboard-route__workspace ${showInspector
+          ? 'dashboard-route__workspace--with-inline-inspector'
+          : 'dashboard-route__workspace--stage-only'}`}
+      >
         <PaperDeck
           papers={papers}
           state={deckState}

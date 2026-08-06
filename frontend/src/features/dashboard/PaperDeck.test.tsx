@@ -54,6 +54,44 @@ describe('PaperDeck', () => {
       'aria-selected',
       'true',
     );
+    expect(
+      screen.getAllByRole('option').map((option) => option.getAttribute('data-offset')),
+    ).toEqual(['-2', '-1', '0', '1', '2']);
+    expect(
+      screen.getAllByRole('option').map((option) => option.getAttribute('data-layout-offset')),
+    ).toEqual(['-2', '-1', '0', '1', '2']);
+  });
+
+  it('keeps the selected card centered across both deck boundaries', () => {
+    const items = ['1', '2', '3', '4', '5', '6', '7'].map(makePaper);
+    const firstView = render(
+      <Harness papers={items} preferredId="1" onOpen={vi.fn()} />,
+    );
+
+    expect(
+      screen.getAllByRole('option').map((option) => option.getAttribute('data-offset')),
+    ).toEqual(['0', '1', '2', '3', '4']);
+    expect(
+      screen.getAllByRole('option').map((option) => option.getAttribute('data-layout-offset')),
+    ).toEqual(['0', '1', '2', '-2', '-1']);
+    expect(screen.getByRole('option', { name: /Paper 1/ })).toHaveAttribute(
+      'data-layout-offset',
+      '0',
+    );
+
+    firstView.unmount();
+    render(<Harness papers={items} preferredId="7" onOpen={vi.fn()} />);
+
+    expect(
+      screen.getAllByRole('option').map((option) => option.getAttribute('data-offset')),
+    ).toEqual(['-4', '-3', '-2', '-1', '0']);
+    expect(
+      screen.getAllByRole('option').map((option) => option.getAttribute('data-layout-offset')),
+    ).toEqual(['1', '2', '-2', '-1', '0']);
+    expect(screen.getByRole('option', { name: /Paper 7/ })).toHaveAttribute(
+      'data-layout-offset',
+      '0',
+    );
   });
 
   it('uses a pointer click only to select without stealing focus, then opens with Enter or double-click', async () => {

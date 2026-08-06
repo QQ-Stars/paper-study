@@ -44,6 +44,7 @@ export function WorkspaceShell() {
   const Inspector = handle.inspector;
   const Queue = handle.queue;
   const Timeline = handle.timeline;
+  const routeOwnsPageHeader = handle.pageHeader === 'route';
 
   useEffect(() => {
     document.title = `${handle.title} | Paper Study`;
@@ -102,16 +103,18 @@ export function WorkspaceShell() {
       <div className="workspace-shell__body">
         <CommandBar />
 
-        <header className="workspace-page-header">
-          <nav aria-label="面包屑">
-            <Link to="/dashboard">研究工作区</Link>
-            <span aria-hidden="true">/</span>
-            <span aria-current="page">{handle.title}</span>
-          </nav>
-          <h1 id="workspace-page-title" tabIndex={-1}>
-            {handle.title}
-          </h1>
-        </header>
+        {routeOwnsPageHeader ? null : (
+          <header className="workspace-page-header">
+            <nav aria-label="面包屑">
+              <Link to="/dashboard">研究工作区</Link>
+              <span aria-hidden="true">/</span>
+              <span aria-current="page">{handle.title}</span>
+            </nav>
+            <h1 id="workspace-page-title" tabIndex={-1}>
+              {handle.title}
+            </h1>
+          </header>
+        )}
 
         <div className="workspace-shell__content">
           <main id="workspace-main" tabIndex={-1}>

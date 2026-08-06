@@ -20,6 +20,7 @@ const workspaceLayouts: ReadonlySet<string> = new Set<WorkspaceLayout>([
 export interface WorkspaceRouteHandle {
   title: string;
   layout: WorkspaceLayout;
+  pageHeader?: 'shell' | 'route';
   queue?: ComponentType;
   inspector?: ComponentType;
   timeline?: ComponentType;
@@ -34,5 +35,10 @@ export function isWorkspaceRouteHandle(
     typeof candidate.title === 'string'
     && typeof candidate.layout === 'string'
     && workspaceLayouts.has(candidate.layout)
+    && (
+      candidate.pageHeader === undefined
+      || candidate.pageHeader === 'shell'
+      || candidate.pageHeader === 'route'
+    )
   );
 }
