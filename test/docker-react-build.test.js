@@ -6,6 +6,7 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const dockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
 const dockerignore = fs.readFileSync(path.join(root, '.dockerignore'), 'utf8');
+const dockerCompose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
 
 test('the runtime image receives a production React build from an isolated frontend stage', () => {
   const buildStage = dockerfile.indexOf('AS frontend-build');
@@ -26,4 +27,8 @@ test('the runtime image receives a production React build from an isolated front
 test('the Docker context cannot substitute host frontend artifacts for the image build', () => {
   assert.match(dockerignore, /^frontend\/node_modules\/?$/mu);
   assert.match(dockerignore, /^frontend\/dist\/?$/mu);
+});
+
+test('Docker Compose exposes the startup-only UI entry rollback switch', () => {
+  assert.match(dockerCompose, /^\s*- UI_ENTRY=\$\{UI_ENTRY:-react\}\s*$/mu);
 });

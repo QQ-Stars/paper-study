@@ -17,6 +17,7 @@ services:
       - ./.models:/app/.models     # 本地嵌入模型缓存（用外部 bge-m3 API 时可为空）
     environment:
       - PORT=5173
+      - UI_ENTRY=${UI_ENTRY:-react}
       - DB_PATH=/app/data/app.db
       - PYTHONUTF8=1
       - PYTHONIOENCODING=utf-8
