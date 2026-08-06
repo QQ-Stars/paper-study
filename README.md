@@ -5,7 +5,7 @@
 
 **适用于任意研究方向**：在 ⚙ 设置中填写研究主题，大模型采集时即按该主题对论文分类、评定相关度；更换主题即可用于其他领域。
 
-当前 `main` 分支即 v1.0 稳定版，包含学术清爽界面、论文复习队列、PDF 归档命名、翻译浮窗优化与 Codex/Claude MCP 支持。
+本次 React clean-room 重构在 `codex/react-clean-room-workspace` 分支交付。React 工作区位于独立的 `frontend/` 包中；旧版 `public/` 前端仅作为可逆回退入口保留，不会与 React 应用共同挂载或被 React 运行时加载。
 
 ---
 
@@ -27,17 +27,17 @@
 ## 功能概览
 
 - 🔎 **自动采集**：输入研究方向（中/英皆可）→ 大模型扩展检索词 → 多源（arXiv / Semantic Scholar / OpenAlex / DBLP）检索去重 → 预览候选 → 勾选入库。
-- 📖 **沉浸精读**：左侧论文列表 · 中间内嵌 PDF · 右侧「论文讲解 / 译文 / 我的笔记 / 相似论文」四栏。
+- 📖 **沉浸精读**：从「今日 / 文献库 / 复习 / 洞察」打开论文，以 URL 固定论文身份；主舞台提供 PDF 懒加载、页码/缩放、多段选文与即时翻译，资料区提供笔记、讲解和全文翻译。
 - 🧠 **大模型辅助**：一键生成**论文讲解**与**全文中文翻译**（读取 PDF 全文、跳过参考文献、公式由 KaTeX 渲染）。
 - 🔮 **语义检索**：按语义查找论文，**中文描述可直接匹配英文论文**；默认本地嵌入（无需 GPU），也可切换至更高精度的外部 API（如硅基流动 `BAAI/bge-m3`）。
-- 🔗 **相似论文**：阅读时一键查找内容相近的论文，标注是否在库，可直接收录。
+- 🗂️ **研究工作区**：「今日」论文甲板与真实时间线、「文献库」高密度筛选/排序/编辑、「任务」后台采集与定时计划协同工作。
 - 📂 **本地 PDF 导入**：批量扫描指定文件夹中的 PDF，抽取标题/摘要并自动分类入库，PDF 会归档到项目 `data/pdfs/` 并按论文标题命名。
 - 🗓️ **艾宾浩斯复习**：论文标记为「已理解」后自动进入复习计划，在「复习」页查看今日到期、逾期与未来计划。
 - 📊 **洞察看板**：研究趋势（年份 × 方向）与引用关系图（库内互引关系）。
 - 🏅 **CCF 分级**：为每篇论文标注 CCF 推荐目录级别 A/B/C；采集时可勾选「只采 CCF-A」仅收录顶会/顶刊。
 - ✅ **会议核实**：查询权威库还原论文真实发表会议，不依赖大模型臆测。
 - 🤖 **MCP 服务**：将论文库以工具形式暴露给 Codex / Claude 等客户端，支持对话式检索、讲解阅读、复习队列与研究空白分析。
-- ★ 收藏 · 学习进度 · 笔记 · 手动添加 · 深色模式 · 三栏宽度可拖拽调节。
+- ★ 收藏 · 学习进度 · 笔记 · 手动增删改 · 命令栏 · 响应式底部导航与抽屉 / sheet。
 
 ---
 
@@ -80,8 +80,18 @@ cd paper-study
 
 ### 2) 安装网页端依赖
 
+根服务与 React 工作区使用彼此独立的 lockfile。Windows PowerShell 执行：
+
+```powershell
+npm.cmd ci
+npm.cmd run frontend:install
+```
+
+macOS / Linux 执行：
+
 ```bash
-npm install
+npm ci
+npm run frontend:install
 ```
 
 ### 3) 安装 AI 端（Python）依赖
@@ -104,16 +114,44 @@ python3 -m venv .venv
 
 > 此步骤会联网下载若干 Python 包，可能耗时数分钟；**末尾若无 ERROR 即为成功**（warning 可忽略）。
 
-### 4) 启动
+### 4) 构建并启动
 
-```bash
-node server.js
+生产服务器从 `frontend/dist/` 提供 React 资源，因此首次启动或修改 React 代码后必须先构建。Windows PowerShell 执行：
+
+```powershell
+npm.cmd run frontend:build
+npm.cmd start
 ```
 
-终端显示 **`论文学习 App 已启动`** 后，在浏览器中打开 👉 **<http://localhost:5173>**
+macOS / Linux 执行：
 
-- **停止服务**：在终端按 `Ctrl + C`。
-- **后续启动**：进入项目目录执行 `node server.js` 即可，无需重新安装依赖。
+```bash
+npm run frontend:build
+npm start
+```
+
+终端显示 **`论文学习 App 已启动`** 后，在浏览器中打开 <http://localhost:5173>。默认入口行为如下：
+
+| 地址 | 行为 |
+|---|---|
+| <http://localhost:5173/> | 默认重定向到 `/workspace/` |
+| <http://localhost:5173/workspace/> | 始终进入 React 工作区，并继续到研究概览 |
+| <http://localhost:5173/legacy/> | 始终进入旧版前端 |
+
+`UI_ENTRY` 只控制根地址 `/`，不会禁用或改写两个显式入口。它只接受 `react` 或 `legacy`；未设置时默认为 `react`。例如在 Windows PowerShell 中回退根入口：
+
+```powershell
+$env:UI_ENTRY = 'legacy'
+npm.cmd start
+```
+
+macOS / Linux：
+
+```bash
+UI_ENTRY=legacy npm start
+```
+
+服务只在进程启动时读取 `UI_ENTRY`。切换值后必须先按 `Ctrl+C` 停止服务，再重新启动；运行中修改环境变量不会生效。即使根入口设为 `legacy`，`/workspace/` 仍可直接访问；恢复默认时以 `UI_ENTRY=react` 重启，或在新终端中不设置该变量后重启。
 
 ---
 
@@ -138,15 +176,15 @@ node server.js
 
 | 功能 | 操作 |
 |---|---|
-| **采集论文** | 顶栏「采集 / 管理」→ 输入研究方向（如「多模态大模型 物体幻觉 缓解」）→ 检索 →（可调整大模型扩展出的检索词）→ 勾选 → 入库 |
-| **阅读与讲解** | 「阅读」页：左侧选择论文、中间查看 PDF、右栏「论文讲解」点击「✨ 生成讲解」生成中文精读（勾选「读 PDF 全文」更准、耗时更长） |
-| **全文翻译** | 阅读页「译文」→「🌐 翻译全文」（自动跳过参考文献，约 1~3 分钟） |
-| **语义检索** | 顶栏开启「🔮 语义」→ 输入一句话描述（如「用对比解码缓解幻觉」）→ 按相关度排序全库 |
-| **相似论文** | 阅读页「相似论文」标签 →「🔗 找相似论文」，可「+ 收录」一键入库 |
-| **导入本地 PDF** | 管理页「📂 本地 PDF 批量导入」→ 填写文件夹路径 → 扫描 → 勾选 → 导入，PDF 会复制/移动到项目 `data/pdfs/` |
-| **复习论文** | 阅读页将论文标记为「已理解」后进入复习计划；「复习」页查看今日到期、逾期、未来计划并完成本轮 |
-| **趋势与空白分析** | 「洞察」页查看趋势与引用图；或配置 [MCP](#七mcp-服务可选) 由 Codex / Claude 协助分析 |
-| **收藏 / 进度 / 笔记** | 在阅读页右栏标记；顶栏「☆ 收藏」可筛选仅看收藏 |
+| **采集论文** | 全局导航「采集」→ 输入研究方向 → 生成或编辑检索词 → 选择来源并检索 → 核验候选 → 勾选入库；每个流式阶段都显示进度、取消和失败状态 |
+| **阅读与讲解** | 在「今日」「文献库」「复习」或「洞察」打开论文 → Reader 主舞台查看 PDF → 资料区切换「笔记 / 讲解」，按需保存笔记或生成讲解 |
+| **全文与选文翻译** | Reader 资料区「翻译」→「生成翻译」；或在 PDF text layer 选择文字后打开「选文翻译」 |
+| **语义检索** | 「文献库」输入自然语言研究问题 →「语义检索」→ 按语义分排序；再次点击可返回普通筛选 |
+| **导入本地 PDF** | 「采集」→「本地 PDF」→ 填写文件夹并扫描 → 勾选 →「导入选中 PDF」；界面保留 TOTAL / PARSED / ADDED / DUP / SKIP 与失败明细 |
+| **复习论文** | 在「文献库」将论文状态设为「已理解」后进入计划；「复习」页按逾期、今日、后续、已完成查看服务端快照并完成当前轮次 |
+| **后台任务与计划** | 「任务」创建后台采集，查看 pending / running / review / done / failed 状态、核对候选，并创建、启停或删除定时计划 |
+| **趋势与空白分析** | 「洞察」查看年度、主题、发表场所、高引用论文与引用网络；或配置 [MCP](#七mcp-服务可选) 由 Codex / Claude 协助分析 |
+| **收藏 / 进度 / 编辑** | 「文献库」可收藏、切换学习状态、组合筛选、添加/编辑/删除论文；Reader 资料区维护当前 URL 论文的笔记 |
 
 > 讲解、翻译、收藏等结果均**缓存至数据库**，再次打开同一篇时直接载入，无需重复生成。
 
@@ -166,6 +204,7 @@ docker compose down               # 停止
 - **配置 Key**：启动后按 [第三步](#三配置大模型-api-key)在网页 ⚙ 设置中填写即可（写入 `data/settings.json`）。
 - **修改端口**：编辑 `docker-compose.yml` 中 `ports: "5173:5173"` 左侧的数字。
 - **健康检查**：新版 `docker-compose.yml` 内置健康检查，可用 `docker compose ps` 查看 `paper-study` 是否为 `healthy`。
+- **回退根入口**：Compose 会把 `UI_ENTRY` 透传给容器。Windows PowerShell 执行 `$env:UI_ENTRY='legacy'; docker compose up -d --force-recreate`；macOS / Linux 执行 `UI_ENTRY=legacy docker compose up -d --force-recreate`。显式 `/workspace/` 仍可访问；恢复 React 根入口时以 `UI_ENTRY=react` 重新创建容器，或在新终端中不设置该变量后重新创建。
 - **Docker 内运行 MCP**：如需让 MCP 客户端连接容器内论文库，可使用容器命令作为 stdio 启动入口：
 
   ```bash
@@ -273,6 +312,33 @@ DB_PATH = '<项目路径>\data\app.db'
 
 ## 九、开发者说明
 
+### React clean-room 边界与验证
+
+- 当前交付分支是 `codex/react-clean-room-workspace`。`frontend/` 是独立的 React 19 + TypeScript + Vite 应用，构建基址固定为 `/workspace/`；`public/` 是旧版实现，只通过 `/legacy/`（或根入口回退）提供。
+- React 源码、样式和构建产物不导入旧版 `public/index.html`、`public/app.js`、`public/style.css` 或旧版 vendor 资源。两套界面只共享现有 Node/SQLite/Python API 与本地数据契约。
+- `UI_ENTRY=react|legacy` 仅决定 `/` 的启动时行为。显式 `/workspace/` 与 `/legacy/` 始终有效，切换后必须重启 Node 进程。
+- 旧版前端不会随本次切换删除。只有在 React 工作区完成**两次正式发布**或累计**14 个有记录的活跃使用日**之后，才重新审查是否删除；达到门槛不代表自动删除，仍需一次新的兼容性、数据安全与回滚评审。
+
+从项目根目录执行完整开发门禁（Windows PowerShell）：
+
+```powershell
+npm.cmd test
+npm.cmd run frontend:test
+npm.cmd run frontend:typecheck
+npm.cmd run frontend:build
+npm.cmd run test:all
+npm.cmd run e2e --prefix frontend
+```
+
+Playwright 首次运行前安装项目锁定版本对应的 Chromium，然后执行确定性 mock API 的 E2E 套件：
+
+```powershell
+npm.cmd exec --prefix frontend -- playwright install chromium
+npm.cmd run e2e --prefix frontend
+```
+
+macOS / Linux 将上述命令中的 `npm.cmd` 换成 `npm`。E2E 会先执行 lint、TypeScript 检查和 production build，再启动隔离的 Vite preview；确定性 mock API、PDF fixture 与十张版本化视觉基线都位于 `frontend/e2e/`，不会连接或修改本机 `data/app.db`。
+
 ### 技术栈与目录结构
 
 ```
@@ -297,7 +363,10 @@ paper-study/            # 克隆后的项目根目录
 │  ├─ citegraph.py      #   引用关系图：抓 S2 参考文献 → 建库内互引边
 │  ├─ verify.py         #   会议核实（查权威库，非大模型臆测）
 │  └─ mcp_server.py     #   MCP 服务（将库以工具暴露给 Claude 等客户端）
-├─ public/              # 前端（原生 JS/CSS/HTML）；vendor/ 内置 marked/pdf.js/echarts/katex
+├─ frontend/            # React 19 clean-room 工作区（TypeScript/Vite/Vitest/Playwright）
+│  ├─ src/              #   app、feature 与深模块实现
+│  └─ e2e/              #   确定性 mock API 的浏览器工作流与 clean-room 断言
+├─ public/              # 旧版原生 JS/CSS/HTML，仅由 /legacy/ 回退入口提供
 ├─ Dockerfile / docker-compose.yml   # 单机自用容器化
 └─ docs/                # 设计文档（ARCHITECTURE / AGENT / DATABASE / ROADMAP）
 ```
@@ -323,5 +392,5 @@ python -m agent ping                                  # 测试大模型连通性
 ### 约定
 
 - **PDF、数据库、密钥不入 Git**（见 `.gitignore`）；更换设备后重新采集，或将文件放回 `data/pdfs/` 即可。
-- 前端第三方库全部**本地化**于 `public/vendor/`，离线可用。
+- React 依赖由 Vite 构建进 `frontend/dist/`；旧版依赖继续本地化于 `public/vendor/`，两者不交叉加载。
 - 大模型配置优先级：`data/settings.json` > `.env`。**请妥善保管 API Key。**
