@@ -45,6 +45,9 @@ export function ResponsivePanelHost({
   const returnFocusId = useWorkspaceStore(
     (state) => state.panel.returnFocusId,
   );
+  const restoreFocusOnClose = useWorkspaceStore(
+    (state) => state.panel.restoreFocus,
+  );
   const closePanel = useWorkspaceStore((state) => state.closePanel);
   const isOverlay = useWorkspaceMediaQuery('(max-width: 1099px)');
   const isMobile = useWorkspaceMediaQuery('(max-width: 760px)');
@@ -73,18 +76,25 @@ export function ResponsivePanelHost({
         }
       });
     } else if (previousPanel && !activePanel) {
-      queueMicrotask(() => {
-        if (!cancelled && latestTriggerRef.current) {
-          restoreFocus(latestTriggerRef.current);
-        }
-      });
+      const triggerId = latestTriggerRef.current;
+      latestTriggerRef.current = null;
+      if (restoreFocusOnClose && triggerId) {
+        queueMicrotask(() => {
+          if (!cancelled) restoreFocus(triggerId);
+        });
+      }
     }
 
     previousPanelRef.current = activePanel;
     return () => {
       cancelled = true;
     };
-  }, [activePanel, returnFocusId, showModal]);
+  }, [
+    activePanel,
+    restoreFocusOnClose,
+    returnFocusId,
+    showModal,
+  ]);
 
   useEffect(() => {
     if (previousOverlayRef.current && !isOverlay && activePanel) {

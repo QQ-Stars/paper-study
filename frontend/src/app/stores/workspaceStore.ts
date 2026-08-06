@@ -14,6 +14,7 @@ export interface SurfaceFilters {
 interface WorkspacePanelState {
   active: WorkspacePanel | null;
   returnFocusId: string | null;
+  restoreFocus: boolean;
 }
 
 interface WorkspaceState {
@@ -40,7 +41,7 @@ const createInitialState = () => ({
     dashboard: { query: '', status: 'all', sort: 'recent' },
     library: { query: '', status: 'all', sort: 'updated-desc' },
   },
-  panel: { active: null, returnFocusId: null },
+  panel: { active: null, returnFocusId: null, restoreFocus: false },
   density: 'compact' as const,
   theme: 'dark' as const,
 });
@@ -57,13 +58,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       },
     })),
   openPanel: (active, returnFocusId) =>
-    set({ panel: { active, returnFocusId } }),
+    set({ panel: { active, returnFocusId, restoreFocus: true } }),
   closePanel: () =>
     set((state) => ({
       panel: { ...state.panel, active: null },
     })),
   dismissPanel: () =>
-    set({ panel: { active: null, returnFocusId: null } }),
+    set({
+      panel: {
+        active: null,
+        returnFocusId: null,
+        restoreFocus: false,
+      },
+    }),
   setDensity: (density) => set({ density }),
   setTheme: (theme) => set({ theme }),
 }));

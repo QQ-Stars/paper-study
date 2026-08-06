@@ -6,6 +6,7 @@ export class ApiError extends Error {
   readonly body?: unknown;
   readonly code?: string;
   readonly path?: string;
+  readonly requestMethod?: string;
 
   constructor(
     kind: ApiErrorKind,
@@ -15,6 +16,7 @@ export class ApiError extends Error {
       body?: unknown;
       code?: string;
       path?: string;
+      requestMethod?: string;
       cause?: unknown;
     } = {},
   ) {
@@ -25,24 +27,37 @@ export class ApiError extends Error {
     this.body = options.body;
     this.code = options.code;
     this.path = options.path;
+    this.requestMethod = options.requestMethod;
   }
 }
 
 export class HttpError extends ApiError {
   readonly statusText: string;
 
-  constructor(status: number, statusText: string, body: unknown) {
+  constructor(
+    status: number,
+    statusText: string,
+    body: unknown,
+    requestMethod?: string,
+  ) {
     const suffix = typeof body === 'string' && body.trim() ? `: ${body.trim()}` : '';
-    super('http', `HTTP ${status}${statusText ? ` ${statusText}` : ''}${suffix}`, { status, body });
+    super('http', `HTTP ${status}${statusText ? ` ${statusText}` : ''}${suffix}`, {
+      status,
+      body,
+      requestMethod,
+    });
     this.name = 'HttpError';
     this.statusText = statusText;
   }
 }
 
 export class NetworkError extends ApiError {
-  constructor(cause: unknown) {
+  constructor(cause: unknown, requestMethod?: string) {
     const detail = cause instanceof Error ? cause.message : String(cause);
-    super('network', `Network request failed: ${detail}`, { cause });
+    super('network', `Network request failed: ${detail}`, {
+      cause,
+      requestMethod,
+    });
     this.name = 'NetworkError';
   }
 }

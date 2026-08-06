@@ -81,7 +81,32 @@ describe('typed HTTP transport', () => {
     const fetchImpl = vi.fn(async () => { throw new TypeError('connection reset'); });
 
     await expect(api.text('/api/papers', { fetchImpl })).rejects.toMatchObject({
-      kind: 'network', message: expect.stringContaining('connection reset'),
+      kind: 'network',
+      message: expect.stringContaining('connection reset'),
+      requestMethod: 'GET',
+    });
+  });
+
+  it('records the normalized method on transport and HTTP failures', async () => {
+    const offline = vi.fn(async () => {
+      throw new TypeError('offline');
+    });
+
+    await expect(api.text('/api/paper/update', {
+      method: 'post',
+      fetchImpl: offline,
+    })).rejects.toMatchObject({
+      kind: 'network',
+      requestMethod: 'POST',
+    });
+
+    await expect(api.text('/api/paper/update', {
+      method: 'PATCH',
+      fetchImpl: fetchWith(new Response('', { status: 503 })),
+    })).rejects.toMatchObject({
+      kind: 'http',
+      status: 503,
+      requestMethod: 'PATCH',
     });
   });
 

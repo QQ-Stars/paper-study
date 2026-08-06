@@ -1,4 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
+import { StrictMode } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -17,6 +18,7 @@ import {
   LiveAnnouncer,
 } from '../feedback/LiveAnnouncer';
 import { announceWorkspace } from '../feedback/announcements';
+import { ResponsivePanelHost } from '../overlays/ResponsivePanelHost';
 
 type MediaOverrides = {
   mobile?: boolean;
@@ -168,7 +170,17 @@ it('keeps at most one mobile modal open and restores the latest trigger on Escap
 
 it('keeps the command dialog available on desktop and restores its trigger', async () => {
   const user = userEvent.setup();
-  renderWorkspace('/library');
+  const { router } = renderWorkspace('/library');
+
+  await act(async () => {
+    await router.navigate('/insights');
+  });
+  expect(
+    await screen.findByRole('heading', { level: 1, name: '洞察' }),
+  ).toBeInTheDocument();
+  await act(async () => {
+    await router.navigate('/library');
+  });
 
   const commandTrigger = await screen.findByRole('button', {
     name: /搜索或运行命令/,
@@ -288,6 +300,12 @@ it('limits Query retries to one retry for GET network and 5xx failures', () => {
       status: 503,
     }),
   ).toBe(false);
+  expect(
+    shouldRetryWorkspaceQuery(
+      0,
+      new NetworkError(new TypeError('post failed'), 'POST'),
+    ),
+  ).toBe(false);
 
   const client = createWorkspaceQueryClient();
   expect(client.getDefaultOptions().mutations?.retry).toBe(false);
@@ -303,8 +321,40 @@ it('keeps only workspace preferences and identifiers in the shell store', () => 
   expect(state).toHaveProperty('filters.dashboard');
   expect(state).toHaveProperty('filters.library');
   expect(state).toHaveProperty('panel.active');
+  expect(state).toHaveProperty('panel.restoreFocus', false);
   expect(state).toHaveProperty('density', 'compact');
   expect(state).toHaveProperty('theme', 'dark');
   expect(state).not.toHaveProperty('papers');
   expect(state).not.toHaveProperty('paper');
+});
+
+it('releases modal listeners and body locks after a StrictMode probe', () => {
+  const addSpy = vi.spyOn(document, 'addEventListener');
+  const removeSpy = vi.spyOn(document, 'removeEventListener');
+  useWorkspaceStore.getState().openPanel('command', 'missing-trigger');
+
+  const view = render(
+    <StrictMode>
+      <ResponsivePanelHost
+        command={<button type="button">命令内容</button>}
+      />
+    </StrictMode>,
+  );
+
+  expect(screen.getByRole('dialog', { name: '命令栏' })).toBeInTheDocument();
+  expect(document.body.style.overflow).toBe('hidden');
+
+  view.unmount();
+
+  expect(document.body.style.overflow).toBe('');
+  const keydownListeners = addSpy.mock.calls
+    .filter(([type]) => type === 'keydown')
+    .map(([, listener]) => listener);
+  expect(keydownListeners.length).toBeGreaterThan(0);
+  for (const listener of keydownListeners) {
+    expect(removeSpy.mock.calls).toContainEqual(['keydown', listener]);
+  }
+
+  addSpy.mockRestore();
+  removeSpy.mockRestore();
 });

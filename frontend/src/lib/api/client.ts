@@ -44,12 +44,25 @@ function bodyDetail(text: string): unknown {
   }
 }
 
-async function consumeBody<T>(read: () => Promise<T>): Promise<T> {
+function requestMethod(
+  input: RequestInfo | URL,
+  init: RequestInit,
+): string {
+  const fromRequest = typeof Request !== 'undefined' && input instanceof Request
+    ? input.method
+    : undefined;
+  return (init.method ?? fromRequest ?? 'GET').toUpperCase();
+}
+
+async function consumeBody<T>(
+  read: () => Promise<T>,
+  method: string,
+): Promise<T> {
   try {
     return await read();
   } catch (error) {
     if (isAbortError(error)) throw error;
-    throw new NetworkError(error);
+    throw new NetworkError(error, method);
   }
 }
 
@@ -61,11 +74,12 @@ export function createApiClient(defaultFetch?: FetchLike): ApiClient {
     const { fetchImpl, onEvent, ...init } = options;
     void onEvent;
     const selectedFetch = fetchImpl ?? defaultFetch ?? globalThis.fetch;
+    const method = requestMethod(input, init);
     try {
       return await selectedFetch(input, init);
     } catch (error) {
       if (isAbortError(error)) throw error;
-      throw new NetworkError(error);
+      throw new NetworkError(error, method);
     }
   };
 
@@ -73,10 +87,16 @@ export function createApiClient(defaultFetch?: FetchLike): ApiClient {
     input: RequestInfo | URL,
     options: TransportOptions<E, T>,
   ): Promise<Response> => {
+    const method = requestMethod(input, options);
     const response = await request(input, options);
     if (response.ok) return response;
-    const text = await consumeBody(() => response.text());
-    throw new HttpError(response.status, response.statusText, bodyDetail(text));
+    const text = await consumeBody(() => response.text(), method);
+    throw new HttpError(
+      response.status,
+      response.statusText,
+      bodyDetail(text),
+      method,
+    );
   };
 
   return {
@@ -86,7 +106,10 @@ export function createApiClient(defaultFetch?: FetchLike): ApiClient {
       options: TransportOptions<unknown, unknown> = {},
     ): Promise<T> {
       const response = await responseFor(input, options);
-      const text = await consumeBody(() => response.text());
+      const text = await consumeBody(
+        () => response.text(),
+        requestMethod(input, options),
+      );
       let value: unknown;
       try {
         value = JSON.parse(text);
@@ -103,12 +126,18 @@ export function createApiClient(defaultFetch?: FetchLike): ApiClient {
 
     async text(input, options = {}) {
       const response = await responseFor(input, options);
-      return consumeBody(() => response.text());
+      return consumeBody(
+        () => response.text(),
+        requestMethod(input, options),
+      );
     },
 
     async bytes(input, options = {}) {
       const response = await responseFor(input, options);
-      return consumeBody(() => response.arrayBuffer());
+      return consumeBody(
+        () => response.arrayBuffer(),
+        requestMethod(input, options),
+      );
     },
 
     async ndjson<E, T>(input: RequestInfo | URL, contract: StreamContract<E, T>, options: TransportOptions<E, T> = {}) {
@@ -117,7 +146,7 @@ export function createApiClient(defaultFetch?: FetchLike): ApiClient {
         return await readNdjsonResponse(response, contract, options.onEvent);
       } catch (error) {
         if (isAbortError(error) || error instanceof ApiError) throw error;
-        throw new NetworkError(error);
+        throw new NetworkError(error, requestMethod(input, options));
       }
     },
   };

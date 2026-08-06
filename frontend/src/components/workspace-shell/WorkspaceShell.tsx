@@ -12,6 +12,7 @@ import {
 } from '../../lib/accessibility/focus';
 import { CommandBar, CommandPanel } from '../command-bar/CommandBar';
 import { LiveAnnouncer } from '../feedback/LiveAnnouncer';
+import { WorkspaceSlotBoundary } from '../feedback/WorkspaceSlotBoundary';
 import { GlobalNavigation } from '../navigation/GlobalNavigation';
 import { ResponsivePanelHost } from '../overlays/ResponsivePanelHost';
 
@@ -117,13 +118,25 @@ export function WorkspaceShell() {
           </main>
           <ResponsivePanelHost
             command={<CommandPanel />}
-            inspector={Inspector ? <Inspector /> : undefined}
+            inspector={Inspector ? (
+              <WorkspaceSlotBoundary
+                key={`${routeId ?? 'fallback'}:inspector`}
+                label="论文上下文"
+              >
+                <Inspector />
+              </WorkspaceSlotBoundary>
+            ) : undefined}
           />
         </div>
 
         {Timeline ? (
           <section className="workspace-timeline" aria-label="研究时间线">
-            <Timeline />
+            <WorkspaceSlotBoundary
+              key={`${routeId ?? 'fallback'}:timeline`}
+              label="研究时间线"
+            >
+              <Timeline />
+            </WorkspaceSlotBoundary>
           </section>
         ) : null}
       </div>
