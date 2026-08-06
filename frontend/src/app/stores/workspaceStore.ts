@@ -9,6 +9,12 @@ export interface SurfaceFilters {
   query: string;
   status: string;
   sort: string;
+  venue?: string;
+  type?: string;
+  topic?: string;
+  year?: string;
+  source?: string;
+  favorite?: boolean;
 }
 
 interface WorkspacePanelState {
@@ -39,7 +45,17 @@ const createInitialState = () => ({
   workspaceSelectionId: null,
   filters: {
     dashboard: { query: '', status: 'all', sort: 'recent' },
-    library: { query: '', status: 'all', sort: 'updated-desc' },
+    library: {
+      query: '',
+      status: 'all',
+      sort: 'added',
+      venue: 'all',
+      type: 'all',
+      topic: 'all',
+      year: 'all',
+      source: 'all',
+      favorite: false,
+    },
   },
   panel: { active: null, returnFocusId: null, restoreFocus: false },
   density: 'compact' as const,
