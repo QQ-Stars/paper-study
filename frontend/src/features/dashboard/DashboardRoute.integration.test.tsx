@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resetWorkspaceStore, useWorkspaceStore } from '../../app/stores/workspaceStore';
+import { resetWorkspaceStore, useWorkspaceStore } from '../../lib/workspace';
 import type {
   JobSummary,
   PaperListItem,

@@ -9,8 +9,10 @@ import {
 } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
-import type { WorkspaceRouteHandle } from '../../app/routeHandle';
-import { useWorkspaceStore } from '../../app/stores/workspaceStore';
+import {
+  type WorkspaceRouteHandle,
+  useWorkspaceStore,
+} from '../../lib/workspace';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { artifactKeys, paperKeys, pdfKeys, reviewKeys } from '../../lib/api/keys';
 import { paperApi, type PaperDraft } from '../../lib/api/paperApi';

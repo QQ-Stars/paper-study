@@ -3,12 +3,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
-import type { WorkspaceRouteHandle } from '../../app/routeHandle';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { jobKeys } from '../../lib/api/keys';
 import type { JobSummary } from '../../lib/api/types';
 import { workspaceApi } from '../../lib/api/workspaceApi';
-import { ACADEMIC_SOURCES, normalizeSearchDraft, type AcademicSource } from '../acquire/acquireReducer';
+import type { WorkspaceRouteHandle } from '../../lib/workspace';
+import {
+  ACADEMIC_SOURCES,
+  normalizeSearchDraft,
+  type AcademicSource,
+} from '../../lib/research-search';
 import { JobDetail } from './JobDetail';
 import { SchedulesPanel } from './SchedulesPanel';
 import './jobs.css';
@@ -38,7 +42,7 @@ function errorMessage(error: unknown): string {
 function jobYears(job: JobSummary): string {
   if (job.yearFrom === null && job.yearTo === null) return '全部年份';
   if (job.yearTo === null || job.yearTo === job.yearFrom) return String(job.yearFrom ?? job.yearTo);
-  return `${job.yearFrom ?? '…'}–${job.yearTo}`;
+  return `${job.yearFrom ?? '…'}-${job.yearTo}`;
 }
 
 export function Component() {

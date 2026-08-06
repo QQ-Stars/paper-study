@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resetWorkspaceStore } from '../../app/stores/workspaceStore';
 import type { SettingsView } from '../../lib/api/types';
+import { resetWorkspaceStore } from '../../lib/workspace';
 import { Component } from './SettingsRoute';
 
 const apiMocks = vi.hoisted(() => ({

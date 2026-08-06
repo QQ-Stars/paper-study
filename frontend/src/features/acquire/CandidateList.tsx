@@ -80,7 +80,7 @@ export function CandidateList({
               <div className="candidate__body">
                 <strong>{title}</strong>
                 <p>
-                  {[candidate.venue || '—', candidate.year, candidate.type, candidate.topic]
+                  {[candidate.venue || '未标注来源', candidate.year, candidate.type, candidate.topic]
                     .filter(Boolean)
                     .join(' · ')}
                 </p>

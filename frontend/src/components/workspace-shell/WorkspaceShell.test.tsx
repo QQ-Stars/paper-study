@@ -12,7 +12,7 @@ import { createWorkspaceMemoryRouter } from '../../app/router';
 import {
   resetWorkspaceStore,
   useWorkspaceStore,
-} from '../../app/stores/workspaceStore';
+} from '../../lib/workspace';
 import { NetworkError } from '../../lib/api/errors';
 import {
   LiveAnnouncer,

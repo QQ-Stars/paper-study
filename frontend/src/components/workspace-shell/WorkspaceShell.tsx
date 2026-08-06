@@ -4,8 +4,8 @@ import { Link, Outlet, useMatches } from 'react-router-dom';
 import {
   isWorkspaceRouteHandle,
   type WorkspaceRouteHandle,
-} from '../../app/routeHandle';
-import { useWorkspaceStore } from '../../app/stores/workspaceStore';
+  useWorkspaceStore,
+} from '../../lib/workspace';
 import {
   focusMainContent,
   focusPageTitle,

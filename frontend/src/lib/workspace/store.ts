@@ -64,29 +64,26 @@ const createInitialState = () => ({
 
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   ...createInitialState(),
-  setWorkspaceSelectionId: (workspaceSelectionId) =>
-    set({ workspaceSelectionId }),
-  setSurfaceFilters: (surface, patch) =>
-    set((state) => ({
-      filters: {
-        ...state.filters,
-        [surface]: { ...state.filters[surface], ...patch },
-      },
-    })),
-  openPanel: (active, returnFocusId) =>
-    set({ panel: { active, returnFocusId, restoreFocus: true } }),
-  closePanel: () =>
-    set((state) => ({
-      panel: { ...state.panel, active: null },
-    })),
-  dismissPanel: () =>
-    set({
-      panel: {
-        active: null,
-        returnFocusId: null,
-        restoreFocus: false,
-      },
-    }),
+  setWorkspaceSelectionId: (workspaceSelectionId) => set({ workspaceSelectionId }),
+  setSurfaceFilters: (surface, patch) => set((state) => ({
+    filters: {
+      ...state.filters,
+      [surface]: { ...state.filters[surface], ...patch },
+    },
+  })),
+  openPanel: (active, returnFocusId) => set({
+    panel: { active, returnFocusId, restoreFocus: true },
+  }),
+  closePanel: () => set((state) => ({
+    panel: { ...state.panel, active: null },
+  })),
+  dismissPanel: () => set({
+    panel: {
+      active: null,
+      returnFocusId: null,
+      restoreFocus: false,
+    },
+  }),
   setDensity: (density) => set({ density }),
   setTheme: (theme) => set({ theme }),
 }));

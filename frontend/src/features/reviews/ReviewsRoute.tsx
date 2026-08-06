@@ -4,8 +4,10 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
-import type { WorkspaceRouteHandle } from '../../app/routeHandle';
-import { useWorkspaceStore } from '../../app/stores/workspaceStore';
+import {
+  type WorkspaceRouteHandle,
+  useWorkspaceStore,
+} from '../../lib/workspace';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { reviewKeys } from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';

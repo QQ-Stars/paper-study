@@ -2,12 +2,14 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import type { WorkspaceRouteHandle } from '../../app/routeHandle';
-import { useWorkspaceStore } from '../../app/stores/workspaceStore';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { settingsKeys } from '../../lib/api/keys';
 import type { SettingsUpdate, SettingsView } from '../../lib/api/types';
 import { workspaceApi } from '../../lib/api/workspaceApi';
+import {
+  type WorkspaceRouteHandle,
+  useWorkspaceStore,
+} from '../../lib/workspace';
 import {
   buildSettingsUpdate,
   createSettingsDraft,

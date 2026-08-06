@@ -1,17 +1,14 @@
 import type {
   Candidate,
-  SearchRequest,
   Verification,
 } from '../../lib/api/types';
-
-export const ACADEMIC_SOURCES = [
-  'semanticscholar',
-  'arxiv',
-  'openalex',
-  'dblp',
-] as const;
-
-export type AcademicSource = (typeof ACADEMIC_SOURCES)[number];
+export {
+  ACADEMIC_SOURCES,
+  normalizeSearchDraft,
+  type AcademicSource,
+  type NormalizedSearchDraft,
+  type SearchDraft,
+} from '../../lib/research-search';
 export type AcquireOperation = 'search' | 'verify' | 'ingest';
 export type AcquireStatus =
   | 'idle'
@@ -21,20 +18,6 @@ export type AcquireStatus =
   | 'failure'
   | 'stopped';
 
-export interface SearchDraft {
-  query?: string;
-  sources?: string[];
-  years?: string;
-  max?: number;
-  minRelevance?: number;
-  expand?: boolean;
-  onlyA?: boolean;
-  queries?: string[];
-}
-
-export type NormalizedSearchDraft =
-  | { ok: true; request: SearchRequest }
-  | { ok: false; errors: string[] };
 
 export interface AcquireState {
   status: AcquireStatus;
@@ -59,50 +42,6 @@ export type AcquireAction =
   | { type: 'toggle-candidate'; key: string; selected: boolean }
   | { type: 'select-all'; selected: boolean }
   | { type: 'reset' };
-
-const sourceSet = new Set<string>(ACADEMIC_SOURCES);
-
-function finiteOr(value: number | undefined, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(maximum, Math.max(minimum, value));
-}
-
-function uniqueTrimmed(values: string[] | undefined): string[] {
-  const result: string[] = [];
-  const seen = new Set<string>();
-  for (const value of values ?? []) {
-    const clean = String(value).trim();
-    if (!clean || seen.has(clean)) continue;
-    seen.add(clean);
-    result.push(clean);
-  }
-  return result;
-}
-
-export function normalizeSearchDraft(draft: SearchDraft): NormalizedSearchDraft {
-  const query = String(draft.query ?? '').trim();
-  const sources = uniqueTrimmed(draft.sources).filter((source) => sourceSet.has(source));
-  const errors: string[] = [];
-  if (!query) errors.push('请输入研究方向');
-  if (sources.length === 0) errors.push('至少选择一个学术来源');
-  if (errors.length > 0) return { ok: false, errors };
-
-  const queries = uniqueTrimmed(draft.queries);
-  const request: SearchRequest = {
-    query,
-    sources,
-    years: String(draft.years ?? '').trim() || '2024-2026',
-    max: Math.trunc(clamp(finiteOr(draft.max, 10), 1, 60)),
-    minRelevance: clamp(finiteOr(draft.minRelevance, 0), 0, 1),
-    expand: Boolean(draft.expand),
-    onlyA: Boolean(draft.onlyA),
-  };
-  if (queries.length > 0) request.queries = queries;
-  return { ok: true, request };
-}
 
 export function candidateKey(candidate: Candidate): string {
   if (candidate.candidateId !== null) return `job:${candidate.candidateId}`;

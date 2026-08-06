@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resetWorkspaceStore } from '../../app/stores/workspaceStore';
+import { resetWorkspaceStore } from '../../lib/workspace';
 import { reviewKeys } from '../../lib/api/keys';
 import type { ReviewItem, ReviewSnapshot, ReviewState } from '../../lib/api/types';
 import { Component } from './ReviewsRoute';

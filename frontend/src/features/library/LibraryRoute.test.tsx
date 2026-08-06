@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resetWorkspaceStore, useWorkspaceStore } from '../../app/stores/workspaceStore';
+import { resetWorkspaceStore, useWorkspaceStore } from '../../lib/workspace';
 import { artifactKeys, paperKeys } from '../../lib/api/keys';
 import type { PaperListItem, PaperRecord } from '../../lib/api/types';
 import { Component, LibraryInspectorSlot } from './LibraryRoute';

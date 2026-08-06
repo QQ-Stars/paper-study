@@ -1,3 +1,5 @@
+import type { ComponentType } from 'react';
+
 export type WorkspaceLayout =
   | 'standard'
   | 'inspector'
@@ -25,15 +27,11 @@ export interface WorkspaceRouteHandle {
 export function isWorkspaceRouteHandle(
   value: unknown,
 ): value is WorkspaceRouteHandle {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
+  if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<WorkspaceRouteHandle>;
   return (
-    typeof candidate.title === 'string' &&
-    typeof candidate.layout === 'string' &&
-    workspaceLayouts.has(candidate.layout)
+    typeof candidate.title === 'string'
+    && typeof candidate.layout === 'string'
+    && workspaceLayouts.has(candidate.layout)
   );
 }
-import type { ComponentType } from 'react';

@@ -3,7 +3,11 @@ import { useState } from 'react';
 
 import { scheduleKeys } from '../../lib/api/keys';
 import { workspaceApi } from '../../lib/api/workspaceApi';
-import { ACADEMIC_SOURCES, normalizeSearchDraft, type AcademicSource } from '../acquire/acquireReducer';
+import {
+  ACADEMIC_SOURCES,
+  normalizeSearchDraft,
+  type AcademicSource,
+} from '../../lib/research-search';
 
 const SOURCE_LABELS: Record<AcademicSource, string> = {
   semanticscholar: 'Semantic Scholar',

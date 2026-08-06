@@ -7,7 +7,7 @@ import {
 import {
   type WorkspacePanel,
   useWorkspaceStore,
-} from '../../app/stores/workspaceStore';
+} from '../../lib/workspace';
 import {
   focusFirstWithin,
   restoreFocus,

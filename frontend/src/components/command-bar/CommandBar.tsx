@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { useWorkspaceStore } from '../../app/stores/workspaceStore';
+import { useWorkspaceStore } from '../../lib/workspace';
 
 const triggerIds = {
   command: 'workspace-command-trigger',

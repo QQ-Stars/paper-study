@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import type { EChartsOption } from 'echarts';
 
-import type { WorkspaceRouteHandle } from '../../app/routeHandle';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { citationKeys, paperKeys } from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';
@@ -18,6 +17,7 @@ import {
   buildYearTrendOption,
 } from '../../lib/charts/options';
 import { useEChart } from '../../lib/charts/useEChart';
+import type { WorkspaceRouteHandle } from '../../lib/workspace';
 import './insights.css';
 
 export const handle = {

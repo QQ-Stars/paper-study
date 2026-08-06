@@ -2,13 +2,13 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useReducer, useRef, useState } from 'react';
 
-import type { WorkspaceRouteHandle } from '../../app/routeHandle';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { isAbortError } from '../../lib/api/errors';
 import { paperKeys } from '../../lib/api/keys';
 import type { SearchRequest } from '../../lib/api/types';
 import { workspaceApi } from '../../lib/api/workspaceApi';
 import { createSafeStorage, createSearchHistory } from '../../lib/storage/safeStorage';
+import type { WorkspaceRouteHandle } from '../../lib/workspace';
 import {
   ACADEMIC_SOURCES,
   acquireReducer,

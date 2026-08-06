@@ -9,12 +9,21 @@ import {
 import { RouteErrorBoundary } from '../components/feedback/RouteErrorBoundary';
 import { WorkspaceShell } from '../components/workspace-shell/WorkspaceShell';
 import { WorkspaceNotFoundRoute } from '../components/workspace-shell/WorkspaceRouteScaffold';
-import type { WorkspaceRouteHandle } from './routeHandle';
+import type { WorkspaceRouteHandle } from '../lib/workspace';
 
 const notFoundHandle = {
   title: '页面不存在',
   layout: 'standard',
 } satisfies WorkspaceRouteHandle;
+
+function WorkspaceHydrationFallback() {
+  return (
+    <div className="workspace-bootstrap" role="status" aria-live="polite">
+      <strong>正在启动研究工作区</strong>
+      <span>正在载入当前研究任务…</span>
+    </div>
+  );
+}
 
 export function createWorkspaceRoutes(): RouteObject[] {
   return [
@@ -23,6 +32,7 @@ export function createWorkspaceRoutes(): RouteObject[] {
       path: '/',
       Component: WorkspaceShell,
       ErrorBoundary: RouteErrorBoundary,
+      HydrateFallback: WorkspaceHydrationFallback,
       children: [
         {
           index: true,
@@ -31,42 +41,42 @@ export function createWorkspaceRoutes(): RouteObject[] {
         {
           id: 'dashboard',
           path: 'dashboard',
-          lazy: () => import('../features/dashboard/DashboardRoute'),
+          lazy: () => import('../features/dashboard'),
         },
         {
           id: 'library',
           path: 'library',
-          lazy: () => import('../features/library/LibraryRoute'),
+          lazy: () => import('../features/library'),
         },
         {
           id: 'reader',
           path: 'reader/:paperId',
-          lazy: () => import('../features/reader/ReaderRoute'),
+          lazy: () => import('../features/reader'),
         },
         {
           id: 'reviews',
           path: 'reviews',
-          lazy: () => import('../features/reviews/ReviewsRoute'),
+          lazy: () => import('../features/reviews'),
         },
         {
           id: 'acquire',
           path: 'acquire',
-          lazy: () => import('../features/acquire/AcquireRoute'),
+          lazy: () => import('../features/acquire'),
         },
         {
           id: 'jobs',
           path: 'jobs/:jobId?',
-          lazy: () => import('../features/jobs/JobsRoute'),
+          lazy: () => import('../features/jobs'),
         },
         {
           id: 'insights',
           path: 'insights',
-          lazy: () => import('../features/insights/InsightsRoute'),
+          lazy: () => import('../features/insights'),
         },
         {
           id: 'settings',
           path: 'settings',
-          lazy: () => import('../features/settings/SettingsRoute'),
+          lazy: () => import('../features/settings'),
         },
         {
           id: 'not-found',
