@@ -233,6 +233,15 @@ export function Component() {
     }
   };
 
+  const selectHistory = (item: string) => {
+    expandOwnerRef.current?.abort();
+    expandOwnerRef.current = null;
+    setQuery(item);
+    setQueries([]);
+    setExpandStatus(null);
+    setValidationErrors([]);
+  };
+
   const busy = state.status === 'running';
   const statusMessage = state.status === 'stopped'
     ? state.error || '已停止接收；服务端可能仍在运行。'
@@ -343,7 +352,7 @@ export function Component() {
           <div className="acquire-history" aria-label="最近检索">
             <span>最近</span>
             {history.map((item) => (
-              <button key={item} type="button" onClick={() => setQuery(item)}>{item}</button>
+              <button key={item} type="button" onClick={() => selectHistory(item)}>{item}</button>
             ))}
           </div>
         ) : null}

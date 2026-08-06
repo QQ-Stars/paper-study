@@ -7,9 +7,20 @@ import type { PaperDeckItem } from './PaperDeck';
 export interface PaperInspectorPaper extends PaperDeckItem {
   readonly topic?: string | null;
   readonly hasNote?: boolean;
+  readonly authors?: readonly string[];
+  readonly source?: string | null;
+  readonly favorite?: boolean;
   readonly tldr?: string | null;
   readonly contribution?: string | null;
   readonly abstract?: string | null;
+}
+
+export type ArtifactAvailability = 'pending' | 'available' | 'empty' | 'error';
+
+export interface PaperArtifactAvailability {
+  readonly note: ArtifactAvailability;
+  readonly explainer: ArtifactAvailability;
+  readonly translation: ArtifactAvailability;
 }
 
 export type InspectorMode = 'rail' | 'drawer' | 'sheet';
@@ -18,6 +29,8 @@ export type InspectorCloseReason = 'button' | 'escape' | 'scrim' | 'breakpoint';
 export interface PaperInspectorProps {
   readonly paper: PaperInspectorPaper | null;
   readonly review?: DashboardReviewEvidence | null;
+  readonly researchDirection?: string;
+  readonly artifacts?: PaperArtifactAvailability;
   readonly mode: InspectorMode;
   readonly open: boolean;
   readonly embedded?: boolean;
@@ -37,9 +50,24 @@ function formatDueAt(value: string): string {
   }).format(new Date(parsed));
 }
 
+function availabilityLabel(value: ArtifactAvailability): string {
+  switch (value) {
+    case 'pending':
+      return '读取中';
+    case 'available':
+      return '已有';
+    case 'error':
+      return '不可用';
+    default:
+      return '暂无';
+  }
+}
+
 export function PaperInspector({
   paper,
   review,
+  researchDirection,
+  artifacts,
   mode,
   open,
   embedded = false,
@@ -83,6 +111,13 @@ export function PaperInspector({
     </div>
   ) : (
     <div className="paper-inspector__content">
+      {researchDirection !== undefined ? (
+        <div className="paper-inspector__direction">
+          <span>当前研究方向</span>
+          <strong>{researchDirection}</strong>
+        </div>
+      ) : null}
+
       <div className="paper-inspector__identity">
         <span className="paper-inspector__status">{paper.status || '状态未提供'}</span>
         <h3>{paper.title}</h3>
@@ -92,6 +127,9 @@ export function PaperInspector({
             .filter(Boolean)
             .join(' · ')}
         </p>
+        {paper.authors && paper.authors.length > 0 ? (
+          <p className="paper-inspector__authors">{paper.authors.join(', ')}</p>
+        ) : null}
       </div>
 
       <dl className="paper-inspector__facts">
@@ -111,7 +149,26 @@ export function PaperInspector({
           <dt>笔记</dt>
           <dd>{paper.hasNote ? '已有笔记' : '暂无笔记'}</dd>
         </div>
+        <div>
+          <dt>来源</dt>
+          <dd>{paper.source || '未提供'}</dd>
+        </div>
+        <div>
+          <dt>收藏</dt>
+          <dd>{paper.favorite ? '已收藏' : '未收藏'}</dd>
+        </div>
       </dl>
+
+      {artifacts ? (
+        <div className="paper-inspector__artifacts" aria-label="论文资料状态">
+          <h4>资料状态</h4>
+          <ul>
+            <li>笔记：{availabilityLabel(artifacts.note)}</li>
+            <li>讲解：{availabilityLabel(artifacts.explainer)}</li>
+            <li>翻译：{availabilityLabel(artifacts.translation)}</li>
+          </ul>
+        </div>
+      ) : null}
 
       <div className="paper-inspector__summary">
         <h4>摘要证据</h4>

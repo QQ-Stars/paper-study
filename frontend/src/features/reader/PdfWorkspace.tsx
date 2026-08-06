@@ -17,6 +17,7 @@ import {
   capturePageViewportAnchor,
   resolvePageViewportAnchor,
   type PageRectAnchor,
+  type PageViewportLayout,
 } from '../../lib/pdf/PageViewportAnchor';
 import {
   PdfReaderSession,
@@ -86,6 +87,59 @@ function viewportPages(viewport: HTMLElement) {
         height: rect.height || page.offsetHeight,
       };
     });
+}
+
+function mostRelevantVisiblePage(
+  layout: PageViewportLayout,
+): number | null {
+  const viewportTop = Number.isFinite(layout.scrollTop)
+    ? Math.max(0, layout.scrollTop)
+    : 0;
+  const viewportHeight = Number.isFinite(layout.viewportHeight)
+    ? Math.max(0, layout.viewportHeight)
+    : 0;
+  if (viewportHeight === 0) return null;
+  const viewportBottom = viewportTop + viewportHeight;
+  const viewportCenter = viewportTop + viewportHeight / 2;
+  let best: {
+    pageNumber: number;
+    visibleHeight: number;
+    centerDistance: number;
+  } | null = null;
+
+  for (const page of layout.pages) {
+    if (
+      !Number.isInteger(page.pageNumber) ||
+      page.pageNumber < 1 ||
+      !Number.isFinite(page.top) ||
+      !Number.isFinite(page.height) ||
+      page.height <= 0
+    ) {
+      continue;
+    }
+    const pageBottom = page.top + page.height;
+    const visibleHeight = Math.max(
+      0,
+      Math.min(viewportBottom, pageBottom) - Math.max(viewportTop, page.top),
+    );
+    if (visibleHeight === 0) continue;
+    const centerDistance = Math.abs(
+      page.top + page.height / 2 - viewportCenter,
+    );
+    if (
+      best === null ||
+      visibleHeight > best.visibleHeight ||
+      (visibleHeight === best.visibleHeight &&
+        centerDistance < best.centerDistance) ||
+      (visibleHeight === best.visibleHeight &&
+        centerDistance === best.centerDistance &&
+        page.pageNumber < best.pageNumber)
+    ) {
+      best = { pageNumber: page.pageNumber, visibleHeight, centerDistance };
+    }
+  }
+
+  return best?.pageNumber ?? null;
 }
 
 function createViewportAnchorPort(
@@ -213,6 +267,37 @@ export function PdfWorkspace({
     if (!viewport) return undefined;
     return selectionController.mount(viewport);
   }, [selectionController]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    let animationFrame: number | null = null;
+    const updateCurrentPage = () => {
+      animationFrame = null;
+      const pageNumber = mostRelevantVisiblePage({
+        scrollTop: viewport.scrollTop,
+        viewportHeight: viewport.clientHeight,
+        pages: viewportPages(viewport),
+      });
+      if (pageNumber === null) return;
+      setPageTarget((current) =>
+        current.paperId === paperId && current.pageNumber === pageNumber
+          ? current
+          : { paperId, pageNumber },
+      );
+    };
+    const handleScroll = () => {
+      if (animationFrame !== null) return;
+      animationFrame = window.requestAnimationFrame(updateCurrentPage);
+    };
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      viewport.removeEventListener('scroll', handleScroll);
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+    };
+  }, [paperId]);
 
   useEffect(() => {
     if (generation < 1) return;

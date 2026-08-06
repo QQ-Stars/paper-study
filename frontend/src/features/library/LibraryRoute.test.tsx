@@ -214,20 +214,25 @@ describe('LibraryRoute', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('favorite write failed');
   });
 
-  it('optimistically changes status and rolls back without inventing a review step', async () => {
+  it('advances only through the fixed study-status cycle and rolls back without inventing a review step', async () => {
     const user = userEvent.setup();
     const request = deferred<void>();
     apiMocks.setStatus.mockReturnValueOnce(request.promise);
     renderLibrary();
 
-    const status = await screen.findByRole('combobox', { name: 'Paper One 的学习状态' });
-    await user.selectOptions(status, '学习中');
-    expect(status).toHaveValue('学习中');
+    const status = await screen.findByRole('button', {
+      name: 'Paper One 当前学习状态 未开始，切换到 学习中',
+    });
+    expect(screen.queryByRole('combobox', { name: 'Paper One 的学习状态' })).not.toBeInTheDocument();
+    await user.click(status);
+    expect(status).toHaveAccessibleName('Paper One 当前学习状态 学习中，切换到 已理解');
     expect(apiMocks.setStatus).toHaveBeenCalledWith('one', '学习中');
 
     request.reject(new Error('status write failed'));
 
-    await waitFor(() => expect(status).toHaveValue('未开始'));
+    await waitFor(() => expect(status).toHaveAccessibleName(
+      'Paper One 当前学习状态 未开始，切换到 学习中',
+    ));
     expect(screen.getByRole('alert')).toHaveTextContent('status write failed');
   });
 
@@ -238,10 +243,9 @@ describe('LibraryRoute', () => {
     renderLibrary();
 
     await user.click(await screen.findByRole('button', { name: '收藏 Paper One' }));
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: 'Paper Two 的学习状态' }),
-      '已理解',
-    );
+    await user.click(screen.getByRole('button', {
+      name: 'Paper Two 当前学习状态 学习中，切换到 已理解',
+    }));
     await user.click(screen.getByRole('row', { name: /Paper Two/ }));
 
     expect(apiMocks.setFavorite).toHaveBeenCalledWith('one', true);

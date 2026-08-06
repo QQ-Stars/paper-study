@@ -14,6 +14,7 @@ const apiMocks = vi.hoisted(() => ({
   normalizeVenues: vi.fn(),
   recommend: vi.fn(),
   embed: vi.fn(),
+  semanticSearch: vi.fn(),
 }));
 
 vi.mock('../../lib/api/paperApi', () => ({
@@ -26,6 +27,7 @@ vi.mock('../../lib/api/insightsGateway', () => ({
     normalizeVenues: apiMocks.normalizeVenues,
     recommend: apiMocks.recommend,
     embed: apiMocks.embed,
+    semanticSearch: apiMocks.semanticSearch,
   },
 }));
 
@@ -147,6 +149,10 @@ beforeEach(() => {
     options.onEvent?.({ type: 'progress', line: '[2/2] vectors indexed' });
     return { type: 'result', ok: true, indexed: 2, total: 2 };
   });
+  apiMocks.semanticSearch.mockReset().mockImplementation(async (_query, _limit, options) => {
+    options.onEvent?.({ type: 'progress', line: '[1/1] semantic match ready' });
+    return { type: 'result', ok: true, results: [{ id: 'p1', score: 0.934 }] };
+  });
 });
 
 describe('Insights route', () => {
@@ -200,6 +206,26 @@ describe('Insights route', () => {
     expect(await screen.findByText('向量索引完成：2 / 2。')).toBeInTheDocument();
     expect(apiMocks.embed).toHaveBeenCalledWith(
       'missing',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('runs semantic search only on explicit request and presents real paper scores', async () => {
+    const user = userEvent.setup();
+    renderInsights();
+
+    await screen.findByText('年度轨迹');
+    expect(apiMocks.semanticSearch).not.toHaveBeenCalled();
+
+    await user.type(screen.getByRole('searchbox', { name: '语义查询' }), 'graph lifecycle');
+    await user.click(screen.getByRole('button', { name: '语义搜索' }));
+
+    expect(await screen.findByText('[1/1] semantic match ready')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Graph Paper' })).toBeInTheDocument();
+    expect(screen.getByText('语义得分 0.934')).toBeInTheDocument();
+    expect(apiMocks.semanticSearch).toHaveBeenCalledWith(
+      'graph lifecycle',
+      60,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });

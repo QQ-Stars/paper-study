@@ -16,9 +16,11 @@ import {
 } from '../../lib/workspace';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import {
+  artifactKeys,
   jobKeys,
   paperKeys,
   reviewKeys,
+  settingsKeys,
   titleTranslationKeys,
 } from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';
@@ -30,9 +32,13 @@ import type {
 } from '../../lib/api/types';
 import { artifactGateway } from '../../lib/api/artifactGateway';
 import { jobsGateway } from '../../lib/api/jobsGateway';
+import { settingsGateway } from '../../lib/api/settingsGateway';
+import { DashboardQueue } from './DashboardQueue';
+import { selectDashboardPapers } from './dashboardSelection';
 import { PaperDeck, type PaperDeckItem } from './PaperDeck';
 import {
   PaperInspector,
+  type ArtifactAvailability,
   type InspectorMode,
   type PaperInspectorPaper,
 } from './PaperInspector';
@@ -50,7 +56,9 @@ import './dashboard.css';
 export interface DashboardPaper
   extends PaperDeckItem,
     PaperInspectorPaper,
-    DashboardPaperEvidence {}
+    DashboardPaperEvidence {
+  readonly relevance?: number | null;
+}
 
 export interface DashboardReview extends DashboardReviewEvidence {
   readonly reviewState?: ReviewState;
@@ -97,6 +105,7 @@ export interface DashboardViewProps {
 export const handle = {
   title: '研究概览',
   layout: 'inspector-timeline',
+  queue: DashboardQueueSlot,
   inspector: DashboardInspectorSlot,
   timeline: DashboardTimelineSlot,
 } satisfies WorkspaceRouteHandle;
@@ -130,6 +139,12 @@ export function DashboardView({
   const [localInspectorOpen, setLocalInspectorOpen] = useState(false);
   const previousPreferredId = useRef(preferredPaperId);
   const lastReportedSelection = useRef<string | null | undefined>(undefined);
+  const paperIds = useMemo(
+    () => [...new Set(papers.map((paper) => paper.id))],
+    [papers],
+  );
+  const deckIsReconciled = deckState.ids.length === paperIds.length
+    && deckState.ids.every((paperId, index) => paperId === paperIds[index]);
 
   useEffect(() => {
     dispatch({
@@ -148,10 +163,11 @@ export function DashboardView({
   }, [preferredPaperId]);
 
   useEffect(() => {
+    if (status === 'pending' || !deckIsReconciled) return;
     if (lastReportedSelection.current === deckState.selectedId) return;
     lastReportedSelection.current = deckState.selectedId;
     onSelectionChange(deckState.selectedId);
-  }, [deckState.selectedId, onSelectionChange]);
+  }, [deckIsReconciled, deckState.selectedId, onSelectionChange, status]);
 
   const selectedPaper = deckState.selectedId == null
     ? null
@@ -348,6 +364,16 @@ function errorMessage(error: unknown): string {
     : '论文列表暂时不可用。';
 }
 
+function artifactAvailability(
+  value: string | undefined,
+  pending: boolean,
+  failed: boolean,
+): ArtifactAvailability {
+  if (pending) return 'pending';
+  if (failed) return 'error';
+  return value?.trim() ? 'available' : 'empty';
+}
+
 function jobLabel(job: JobSummary): string {
   const query = job.query?.trim();
   return query ? query : `任务 #${job.id}`;
@@ -433,12 +459,58 @@ export function DashboardInspectorSlot() {
   const { papers, reviews, status } = useDashboardData();
   const selectedPaperId = useWorkspaceStore((state) => state.workspaceSelectionId);
   const closePanel = useWorkspaceStore((state) => state.closePanel);
+  const selectedPaperKey = selectedPaperId ?? '';
+  const paperDetailQuery = useQuery({
+    queryKey: paperKeys.detail(selectedPaperKey),
+    queryFn: ({ signal }) => paperApi.getPaper(selectedPaperKey, signal),
+    enabled: selectedPaperId != null,
+  });
+  const noteQuery = useQuery({
+    queryKey: artifactKeys.note(selectedPaperKey),
+    queryFn: ({ signal }) => paperApi.getNote(selectedPaperKey, signal),
+    enabled: selectedPaperId != null,
+  });
+  const explainerQuery = useQuery({
+    queryKey: artifactKeys.explainer(selectedPaperKey),
+    queryFn: ({ signal }) => paperApi.getExplainer(selectedPaperKey, signal),
+    enabled: selectedPaperId != null,
+  });
+  const translationQuery = useQuery({
+    queryKey: artifactKeys.translation(selectedPaperKey),
+    queryFn: ({ signal }) => paperApi.getTranslation(selectedPaperKey, signal),
+    enabled: selectedPaperId != null,
+  });
+  const settingsQuery = useQuery({
+    queryKey: settingsKeys.view(),
+    queryFn: ({ signal }) => settingsGateway.getSettings(signal),
+  });
   const paper = selectedPaperId == null
     ? null
     : papers.find((candidate) => candidate.id === selectedPaperId) ?? null;
+  const detail = paperDetailQuery.data;
+  const contextualPaper = paper == null || detail == null
+    ? paper
+    : {
+        ...paper,
+        titleZh: paper.titleZh ?? detail.titleZh,
+        venue: paper.venue ?? detail.venue,
+        year: paper.year ?? detail.year,
+        type: paper.type ?? detail.type,
+        topic: paper.topic ?? detail.topic,
+        tldr: paper.tldr ?? detail.tldr,
+        contribution: paper.contribution ?? detail.contribution,
+        abstract: detail.abstract,
+        authors: detail.authors,
+        source: detail.source || paper.source,
+      };
   const review = paper == null
     ? null
     : reviews.find((candidate) => candidate.paperId === paper.id) ?? null;
+  const researchDirection = settingsQuery.isPending
+    ? '正在读取…'
+    : settingsQuery.isError
+      ? '暂时不可用'
+      : settingsQuery.data?.researchTheme.trim() || '尚未设置';
 
   if (status === 'pending') {
     return <div className="paper-inspector__empty" role="status">正在载入论文上下文…</div>;
@@ -446,8 +518,22 @@ export function DashboardInspectorSlot() {
 
   return (
     <PaperInspector
-      paper={paper}
+      paper={contextualPaper}
       review={review}
+      researchDirection={researchDirection}
+      artifacts={{
+        note: artifactAvailability(noteQuery.data, noteQuery.isPending, noteQuery.isError),
+        explainer: artifactAvailability(
+          explainerQuery.data,
+          explainerQuery.isPending,
+          explainerQuery.isError,
+        ),
+        translation: artifactAvailability(
+          translationQuery.data,
+          translationQuery.isPending,
+          translationQuery.isError,
+        ),
+      }}
       mode="rail"
       open
       embedded
@@ -471,6 +557,46 @@ export function DashboardTimelineSlot() {
   return <ResearchTimeline papers={papers} reviews={reviews} jobs={jobs} />;
 }
 
+export function DashboardQueueSlot() {
+  const papersQuery = useQuery({
+    queryKey: paperKeys.list(),
+    queryFn: ({ signal }) => paperApi.listPapers(signal),
+  });
+  const filters = useWorkspaceStore((state) => state.filters.dashboard);
+  const selectedPaperId = useWorkspaceStore((state) => state.workspaceSelectionId);
+  const setSurfaceFilters = useWorkspaceStore((state) => state.setSurfaceFilters);
+  const setWorkspaceSelectionId = useWorkspaceStore(
+    (state) => state.setWorkspaceSelectionId,
+  );
+  const closePanel = useWorkspaceStore((state) => state.closePanel);
+  const papers = useMemo(
+    () => papersQuery.data ?? [],
+    [papersQuery.data],
+  );
+  const filteredPapers = useMemo(
+    () => selectDashboardPapers(papers, filters),
+    [filters, papers],
+  );
+
+  return (
+    <DashboardQueue
+      papers={papers}
+      filteredPapers={filteredPapers}
+      filters={filters}
+      selectedPaperId={selectedPaperId}
+      status={papersQuery.isPending
+        ? 'pending'
+        : papersQuery.isError ? 'error' : 'success'}
+      errorMessage={errorMessage(papersQuery.error)}
+      onFiltersChange={(patch) => setSurfaceFilters('dashboard', patch)}
+      onSelect={(paperId) => {
+        setWorkspaceSelectionId(paperId);
+        closePanel();
+      }}
+    />
+  );
+}
+
 export function Component() {
   const navigate = useNavigate();
   const inspectorMode = useInspectorMode();
@@ -482,10 +608,15 @@ export function Component() {
   const activePanel = useWorkspaceStore((state) => state.panel.active);
   const openPanel = useWorkspaceStore((state) => state.openPanel);
   const closePanel = useWorkspaceStore((state) => state.closePanel);
+  const filters = useWorkspaceStore((state) => state.filters.dashboard);
+  const filteredPapers = useMemo(
+    () => selectDashboardPapers(data.papers, filters),
+    [data.papers, filters],
+  );
 
   return (
     <DashboardView
-      papers={data.papers}
+      papers={filteredPapers}
       reviews={data.reviews}
       jobs={data.jobs}
       aiEvidence={data.aiEvidence}

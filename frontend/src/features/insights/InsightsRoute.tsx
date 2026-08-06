@@ -116,6 +116,7 @@ export function Component() {
     createInsightsCommandSession,
   );
   const [selectedRecommendationId, setSelectedRecommendationId] = useState('');
+  const [semanticQuery, setSemanticQuery] = useState('');
   const papersQuery = useQuery({
     queryKey: paperKeys.list(),
     queryFn: ({ signal }) => paperApi.listPapers(signal),
@@ -203,6 +204,10 @@ export function Component() {
   }, []);
 
   const papers = useMemo(() => papersQuery.data ?? [], [papersQuery.data]);
+  const papersById = useMemo(
+    () => new Map(papers.map((paper) => [paper.id, paper])),
+    [papers],
+  );
   const recommendationPaperId = papers.some((paper) => paper.id === selectedRecommendationId)
     ? selectedRecommendationId
     : papers[0]?.id ?? '';
@@ -248,6 +253,30 @@ export function Component() {
       summary: `向量索引完成：${terminal.indexed} / ${terminal.total}。`,
     }),
   );
+
+  const semanticSearch = () => {
+    const query = semanticQuery.trim();
+    if (!query) return Promise.resolve();
+    return runCommand(
+      'semantic-search',
+      (options) => insightsGateway.semanticSearch(query, 60, options),
+      (terminal) => {
+        const results = terminal.results.filter((result) => papersById.has(result.id));
+        return {
+          command: 'semantic-search',
+          summary: `找到 ${results.length} 篇馆藏语义匹配。`,
+          results,
+        };
+      },
+    );
+  };
+
+  const semanticMatches = session.terminal?.command === 'semantic-search'
+    ? session.terminal.results.flatMap((result) => {
+        const paper = papersById.get(result.id);
+        return paper ? [{ paper, score: result.score }] : [];
+      })
+    : [];
 
   const graph = graphQuery.data;
   const yearOption = useMemo(() => buildYearTrendOption(papers), [papers]);
@@ -320,6 +349,22 @@ export function Component() {
         <button type="button" disabled={commandPending} onClick={() => void embed()}>
           {commandPending && session.command === 'embed' ? '正在更新向量…' : '更新缺失向量'}
         </button>
+        <label className="insights-route__semantic-query">
+          <span>语义查询</span>
+          <input
+            type="search"
+            value={semanticQuery}
+            disabled={commandPending}
+            onChange={(event) => setSemanticQuery(event.currentTarget.value)}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={commandPending || !semanticQuery.trim()}
+          onClick={() => void semanticSearch()}
+        >
+          {commandPending && session.command === 'semantic-search' ? '正在语义搜索…' : '语义搜索'}
+        </button>
         {commandPending ? <button type="button" onClick={stopCommand}>停止接收</button> : null}
       </div>
 
@@ -359,6 +404,27 @@ export function Component() {
               ))}
             </ol>
           ) : <p>当前论文没有返回真实推荐结果。</p>}
+        </section>
+      ) : null}
+
+      {session.terminal?.command === 'semantic-search' ? (
+        <section className="insights-route__recommendations" aria-labelledby="insights-semantic-results-title">
+          <header>
+            <p>SEMANTIC SEARCH</p>
+            <h3 id="insights-semantic-results-title">语义匹配</h3>
+          </header>
+          {semanticMatches.length > 0 ? (
+            <ol>
+              {semanticMatches.map(({ paper, score }) => (
+                <li key={paper.id}>
+                  <button type="button" onClick={() => openPaper(paper.id)}>
+                    <strong>{paper.title}</strong>
+                  </button>
+                  <span>语义得分 {score.toFixed(3)}</span>
+                </li>
+              ))}
+            </ol>
+          ) : <p>当前查询没有返回馆藏中的真实论文。</p>}
         </section>
       ) : null}
 

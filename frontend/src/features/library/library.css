@@ -236,10 +236,21 @@
   white-space: nowrap;
 }
 
-.paper-table select {
+.paper-table__status {
+  display: grid;
   min-height: 2rem;
-  padding-block: 0;
+  gap: 0.05rem;
+  padding: var(--space-1) var(--space-2);
+  border-color: var(--color-line);
+  color: var(--color-text);
   font-size: var(--font-size-1);
+  line-height: 1.15;
+  text-align: start;
+}
+
+.paper-table__status small {
+  color: var(--color-text-weak);
+  font-size: 0.6rem;
 }
 
 .paper-table__numeric,
@@ -609,6 +620,10 @@
   .library-route__add,
   .library-filters__semantic,
   .library-filters__favorite {
+    min-height: 2.75rem;
+  }
+
+  .paper-table__status {
     min-height: 2.75rem;
   }
 

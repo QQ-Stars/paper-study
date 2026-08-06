@@ -46,8 +46,9 @@ test.describe('React research workspace workflows', () => {
 
     const lifecycleRow = table.getByRole('row', { name: /Lifecycle-Safe Research Readers/ });
     await lifecycleRow.getByRole('button', { name: '取消收藏 Lifecycle-Safe Research Readers' }).click();
-    await lifecycleRow.getByRole('combobox', { name: 'Lifecycle-Safe Research Readers 的学习状态' })
-      .selectOption('已理解');
+    await lifecycleRow.getByRole('button', {
+      name: 'Lifecycle-Safe Research Readers 当前学习状态 学习中，切换到 已理解',
+    }).click();
 
     await expect.poll(() => mockApi.requestCount('/api/favorite', 'POST')).toBe(1);
     await expect.poll(() => mockApi.requestCount('/api/progress', 'POST')).toBe(1);

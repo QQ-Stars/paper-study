@@ -85,6 +85,20 @@ function nativeSelection(root: HTMLElement): Selection {
   } as unknown as Selection;
 }
 
+function clientRect(top: number, height: number): DOMRect {
+  return {
+    bottom: top + height,
+    height,
+    left: 0,
+    right: 640,
+    top,
+    width: 640,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
 it('destroys an unresolved loading task when the route paper changes', async () => {
   const firstDocument = deferred<PdfDocumentHandle>();
   const firstLoading = loadingHandle(firstDocument.promise);
@@ -127,6 +141,61 @@ it('destroys an unresolved loading task when the route paper changes', async () 
   firstDocument.resolve(documentHandle());
   view.unmount();
   await waitFor(() => expect(secondPdf.destroy).toHaveBeenCalledOnce());
+});
+
+it('keeps pagination aligned with the most visible page after native scrolling', async () => {
+  const session = new PdfReaderSession({
+    fetchBytes: vi.fn(async () => new ArrayBuffer(8)),
+    createLoadingTask: vi.fn(
+      () => loadingHandle(Promise.resolve(documentHandle(3))),
+    ),
+  });
+  let scheduledFrame: FrameRequestCallback | null = null;
+  const requestFrame = vi
+    .spyOn(window, 'requestAnimationFrame')
+    .mockImplementation((callback) => {
+      scheduledFrame = callback;
+      return 41;
+    });
+  const view = render(
+    <PdfWorkspace createSession={() => session} paperId="paper-a" />,
+  );
+  const pages = await screen.findAllByRole('article');
+  const viewport = screen.getByTestId('pdf-viewport');
+  const pageInput = screen.getByRole('spinbutton', { name: '当前页' });
+  Object.defineProperty(viewport, 'clientHeight', {
+    configurable: true,
+    value: 400,
+  });
+  viewport.scrollTop = 620;
+  vi.spyOn(viewport, 'getBoundingClientRect')
+    .mockReturnValue(clientRect(100, 400));
+  vi.spyOn(pages[0]!, 'getBoundingClientRect')
+    .mockReturnValue(clientRect(-480, 600));
+  vi.spyOn(pages[1]!, 'getBoundingClientRect')
+    .mockReturnValue(clientRect(140, 600));
+  vi.spyOn(pages[2]!, 'getBoundingClientRect')
+    .mockReturnValue(clientRect(760, 600));
+  Object.defineProperty(pages[2]!, 'scrollIntoView', {
+    configurable: true,
+    value: vi.fn(),
+  });
+
+  expect(pageInput).toHaveValue(1);
+  fireEvent.scroll(viewport);
+  act(() => {
+    const callback = scheduledFrame;
+    scheduledFrame = null;
+    callback?.(0);
+  });
+  requestFrame.mockRestore();
+
+  expect(pageInput).toHaveValue(2);
+  await userEvent.click(screen.getByRole('button', { name: '下一页' }));
+  expect(pageInput).toHaveValue(3);
+  expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+
+  view.unmount();
 });
 
 it('keeps buffered text while zoom cancels the old page owner', async () => {

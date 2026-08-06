@@ -2,7 +2,11 @@ import type { KeyboardEvent, MouseEvent } from 'react';
 
 import type { PaperListItem, StudyStatus } from '../../lib/api/types';
 
-const studyStatuses: readonly StudyStatus[] = ['未开始', '学习中', '已理解'];
+const nextStudyStatus: Readonly<Record<StudyStatus, StudyStatus>> = {
+  未开始: '学习中',
+  学习中: '已理解',
+  已理解: '未开始',
+};
 
 export interface PaperTableProps {
   readonly papers: readonly PaperListItem[];
@@ -70,6 +74,7 @@ export function PaperTable({
             const selected = paper.id === selectedId;
             const pending = pendingPaperIds.has(paper.id);
             const semanticScore = semanticScores?.get(paper.id);
+            const nextStatus = nextStudyStatus[paper.status];
             return (
               <tr
                 key={paper.id}
@@ -103,20 +108,19 @@ export function PaperTable({
                   </div>
                 </td>
                 <td>
-                  <select
-                    aria-label={`${paper.title} 的学习状态`}
-                    value={paper.status}
+                  <button
+                    type="button"
+                    className="paper-table__status"
+                    aria-label={`${paper.title} 当前学习状态 ${paper.status}，切换到 ${nextStatus}`}
                     disabled={pending}
-                    onClick={stopControlClick}
-                    onChange={(event) => onStatusChange(
-                      paper.id,
-                      event.target.value as StudyStatus,
-                    )}
+                    onClick={(event) => {
+                      stopControlClick(event);
+                      onStatusChange(paper.id, nextStatus);
+                    }}
                   >
-                    {studyStatuses.map((status) => (
-                      <option key={status} value={status}>{status}</option>
-                    ))}
-                  </select>
+                    <span>{paper.status}</span>
+                    <small aria-hidden="true">→ {nextStatus}</small>
+                  </button>
                 </td>
                 <td className="paper-table__numeric">
                   <span>{semanticScore == null ? formatPercent(paper.relevance) : `语义 ${formatPercent(semanticScore)}`}</span>

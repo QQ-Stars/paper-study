@@ -23,7 +23,7 @@ const panelCopy: Record<WorkspacePanel, { title: string; description: string }> 
   },
   queue: {
     title: '研究队列',
-    description: '当前队列会在对应功能接入后显示真实任务。',
+    description: '筛选、排序并选择当前工作区中的真实论文。',
   },
   inspector: {
     title: '论文上下文',

@@ -42,6 +42,7 @@ export function WorkspaceShell() {
   }, [matches]);
 
   const Inspector = handle.inspector;
+  const Queue = handle.queue;
   const Timeline = handle.timeline;
 
   useEffect(() => {
@@ -118,6 +119,14 @@ export function WorkspaceShell() {
           </main>
           <ResponsivePanelHost
             command={<CommandPanel />}
+            queue={Queue ? (
+              <WorkspaceSlotBoundary
+                key={`${routeId ?? 'fallback'}:queue`}
+                label="研究队列"
+              >
+                <Queue />
+              </WorkspaceSlotBoundary>
+            ) : undefined}
             inspector={Inspector ? (
               <WorkspaceSlotBoundary
                 key={`${routeId ?? 'fallback'}:inspector`}

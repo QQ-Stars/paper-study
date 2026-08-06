@@ -20,6 +20,7 @@ const workspaceLayouts: ReadonlySet<string> = new Set<WorkspaceLayout>([
 export interface WorkspaceRouteHandle {
   title: string;
   layout: WorkspaceLayout;
+  queue?: ComponentType;
   inspector?: ComponentType;
   timeline?: ComponentType;
 }

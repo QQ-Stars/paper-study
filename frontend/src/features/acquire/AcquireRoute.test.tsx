@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -145,6 +145,42 @@ beforeEach(() => {
 });
 
 describe('Acquire route', () => {
+  it('selects a recent query without retaining or restoring another query expansion', async () => {
+    const user = userEvent.setup();
+    const lateExpansion = deferred<{ queries: string[] }>();
+    let lateSignal: AbortSignal | undefined;
+    localStorage.setItem('paper-study:search-history', JSON.stringify(['saved direction']));
+    apiMocks.expand
+      .mockResolvedValueOnce({ queries: ['generated query'] })
+      .mockImplementationOnce((_query, _limit, signal) => {
+        lateSignal = signal;
+        return lateExpansion.promise;
+      });
+    renderAcquire();
+
+    const direction = screen.getByRole('textbox', { name: '研究方向' });
+    await user.type(direction, 'current direction');
+    await user.click(screen.getByRole('button', { name: '生成检索词' }));
+    const expandedQueries = await screen.findByRole('textbox', { name: '检索词（每行一条）' });
+    await user.clear(expandedQueries);
+    await user.type(expandedQueries, 'edited stale query');
+
+    await user.click(screen.getByRole('button', { name: '生成检索词' }));
+    await waitFor(() => expect(apiMocks.expand).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole('button', { name: 'saved direction' }));
+
+    expect(direction).toHaveValue('saved direction');
+    expect(screen.queryByRole('textbox', { name: '检索词（每行一条）' })).not.toBeInTheDocument();
+    expect(screen.queryByText('正在生成检索词…')).not.toBeInTheDocument();
+    expect(lateSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      lateExpansion.resolve({ queries: ['late stale query'] });
+      await lateExpansion.promise;
+    });
+    expect(screen.queryByDisplayValue('late stale query')).not.toBeInTheDocument();
+  });
+
   it('validates query/source, clamps max, streams progress, and disables existing papers', async () => {
     const user = userEvent.setup();
     renderAcquire();

@@ -1,10 +1,11 @@
-import type { Candidate } from '../../lib/api/types';
+import type { Candidate, SemanticHit } from '../../lib/api/types';
 
 export type InsightsCommand =
   | 'citation-build'
   | 'normalize-venues'
   | 'recommend'
-  | 'embed';
+  | 'embed'
+  | 'semantic-search';
 
 export type InsightsCommandPhase =
   | 'idle'
@@ -22,6 +23,11 @@ export type InsightsCommandTerminal =
       readonly command: 'recommend';
       readonly summary: string;
       readonly candidates: readonly Candidate[];
+    }
+  | {
+      readonly command: 'semantic-search';
+      readonly summary: string;
+      readonly results: readonly SemanticHit[];
     };
 
 export interface InsightsCommandSession {

@@ -1,8 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { App } from '../../app/App';
+import { createWorkspaceMemoryRouter } from '../../app/router';
 import { resetWorkspaceStore, useWorkspaceStore } from '../../lib/workspace';
 import type {
   JobSummary,
@@ -17,15 +20,24 @@ import {
 
 const apiMocks = vi.hoisted(() => ({
   listPapers: vi.fn(),
+  getPaper: vi.fn(),
+  getNote: vi.fn(),
+  getExplainer: vi.fn(),
+  getTranslation: vi.fn(),
   getReviews: vi.fn(),
   listJobs: vi.fn(),
   getTitleTranslationStatus: vi.fn(),
   getExplainerPending: vi.fn(),
+  getSettings: vi.fn(),
 }));
 
 vi.mock('../../lib/api/paperApi', () => ({
   paperApi: {
     listPapers: apiMocks.listPapers,
+    getPaper: apiMocks.getPaper,
+    getNote: apiMocks.getNote,
+    getExplainer: apiMocks.getExplainer,
+    getTranslation: apiMocks.getTranslation,
     getReviews: apiMocks.getReviews,
   },
 }));
@@ -38,6 +50,11 @@ vi.mock('../../lib/api/artifactGateway', () => ({
   artifactGateway: {
     getTitleTranslationStatus: apiMocks.getTitleTranslationStatus,
     getExplainerPending: apiMocks.getExplainerPending,
+  },
+}));
+vi.mock('../../lib/api/settingsGateway', () => ({
+  settingsGateway: {
+    getSettings: apiMocks.getSettings,
   },
 }));
 
@@ -129,10 +146,32 @@ function matchMedia(query: string): MediaQueryList {
   };
 }
 
+function mobileMatchMedia(query: string): MediaQueryList {
+  const matches = query === '(max-width: 760px)'
+    || query === '(max-width: 1099px)';
+  return {
+    matches,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(() => true),
+  };
+}
+
 beforeEach(() => {
   resetWorkspaceStore();
   useWorkspaceStore.getState().setWorkspaceSelectionId('p1');
   apiMocks.listPapers.mockReset().mockResolvedValue([paper]);
+  apiMocks.getPaper.mockReset().mockResolvedValue({
+    authors: ['Ada Lovelace', '林研'],
+    source: 'semanticscholar',
+  });
+  apiMocks.getNote.mockReset().mockResolvedValue('# research note');
+  apiMocks.getExplainer.mockReset().mockResolvedValue('# explainer');
+  apiMocks.getTranslation.mockReset().mockResolvedValue('');
   apiMocks.getReviews.mockReset().mockResolvedValue(reviews);
   apiMocks.listJobs.mockReset().mockResolvedValue(jobs);
   apiMocks.getTitleTranslationStatus.mockReset().mockResolvedValue({
@@ -144,6 +183,9 @@ beforeEach(() => {
     withPdf: 0,
     noPdf: 0,
   });
+  apiMocks.getSettings.mockReset().mockResolvedValue({
+    researchTheme: 'Lifecycle-safe document readers',
+  });
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: vi.fn(matchMedia),
@@ -151,6 +193,92 @@ beforeEach(() => {
 });
 
 describe('Dashboard route data adapter', () => {
+  it('opens a real mobile research queue whose filters and sort drive the deck without losing its selected paper', async () => {
+    const user = userEvent.setup();
+    const alphaPaper: PaperListItem = {
+      ...paper,
+      id: 'p2',
+      file: 'alpha.pdf',
+      title: 'Alpha Paper',
+      titleZh: '阿尔法论文',
+      createdAt: '2026-08-02T08:00:00.000Z',
+    };
+    const betaPaper: PaperListItem = {
+      ...paper,
+      id: 'p3',
+      file: 'beta.pdf',
+      title: 'Beta Paper',
+      titleZh: '贝塔论文',
+      status: '已理解',
+      createdAt: '2026-08-03T08:00:00.000Z',
+    };
+    const zuluPaper: PaperListItem = {
+      ...paper,
+      title: 'Zulu Paper',
+      titleZh: '祖鲁论文',
+      createdAt: '2026-08-01T08:00:00.000Z',
+    };
+    apiMocks.listPapers.mockResolvedValue([zuluPaper, alphaPaper, betaPaper]);
+    useWorkspaceStore.getState().setWorkspaceSelectionId('p2');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(mobileMatchMedia),
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const router = createWorkspaceMemoryRouter(['/dashboard']);
+
+    render(<App router={router} queryClient={queryClient} />);
+
+    const deck = await screen.findByRole('listbox', { name: '论文甲板' });
+    await waitFor(() => {
+      expect(within(deck).getByRole('option', { name: /Alpha Paper/ })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: '研究队列' }));
+
+    const drawer = screen.getByRole('dialog', { name: '研究队列' });
+    expect(drawer.closest('.workspace-overlay')).toHaveAttribute(
+      'data-presentation',
+      'drawer',
+    );
+    expect(within(drawer).getByRole('searchbox', { name: '筛选研究队列' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('combobox', { name: '论文状态' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('combobox', { name: '论文排序' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('list', { name: '筛选后的真实论文' })).toHaveTextContent(
+      'Alpha Paper',
+    );
+
+    await user.selectOptions(
+      within(drawer).getByRole('combobox', { name: '论文排序' }),
+      'title',
+    );
+    await waitFor(() => {
+      const options = within(deck).getAllByRole('option');
+      expect(options[0]).toHaveAccessibleName(/Alpha Paper/);
+      expect(within(deck).getByRole('option', { name: /Alpha Paper/ })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    await user.selectOptions(
+      within(drawer).getByRole('combobox', { name: '论文状态' }),
+      '学习中',
+    );
+    await waitFor(() => {
+      expect(within(deck).queryByRole('option', { name: /Beta Paper/ })).not.toBeInTheDocument();
+      expect(within(deck).getByRole('option', { name: /Alpha Paper/ })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+  });
+
   it('consumes typed paper, review, and job queries in the route and shell slots', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -173,6 +301,35 @@ describe('Dashboard route data adapter', () => {
     expect(apiMocks.listPapers).toHaveBeenCalled();
     expect(apiMocks.getReviews).toHaveBeenCalled();
     expect(apiMocks.listJobs).toHaveBeenCalled();
+  });
+
+  it('shows the selected paper detail, artifact availability, and current research direction in the inspector', async () => {
+    apiMocks.listPapers.mockResolvedValue([{ ...paper, favorite: true }]);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/dashboard']}>
+          <DashboardInspectorSlot />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const inspector = await screen.findByRole('region', { name: '论文上下文' });
+    expect(await within(inspector).findByText('Ada Lovelace, 林研')).toBeInTheDocument();
+    expect(within(inspector).getByText('semanticscholar')).toBeInTheDocument();
+    expect(within(inspector).getByText('已收藏')).toBeInTheDocument();
+    expect(within(inspector).getByText('Lifecycle-safe document readers')).toBeInTheDocument();
+    expect(within(inspector).getByText('笔记：已有')).toBeInTheDocument();
+    expect(within(inspector).getByText('讲解：已有')).toBeInTheDocument();
+    expect(within(inspector).getByText('翻译：暂无')).toBeInTheDocument();
+    expect(apiMocks.getPaper).toHaveBeenCalledWith('p1', expect.any(AbortSignal));
+    expect(apiMocks.getNote).toHaveBeenCalledWith('p1', expect.any(AbortSignal));
+    expect(apiMocks.getExplainer).toHaveBeenCalledWith('p1', expect.any(AbortSignal));
+    expect(apiMocks.getTranslation).toHaveBeenCalledWith('p1', expect.any(AbortSignal));
+    expect(apiMocks.getSettings).toHaveBeenCalledWith(expect.any(AbortSignal));
   });
 
   it('summarizes today, study state, overdue reviews, active intake, and recent AI queues from server facts', async () => {

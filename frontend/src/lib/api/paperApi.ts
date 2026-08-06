@@ -11,6 +11,7 @@ import {
   decodeReviewStartCommand,
 } from './decoders';
 import { DecodeError } from './errors';
+import { signalOptions } from './gatewayTransport';
 import type { StudyStatus } from './types';
 
 export interface PaperDraft {
@@ -32,10 +33,6 @@ export interface PaperDraft {
 }
 
 export type PaperPatch = Partial<PaperDraft>;
-
-function signalOptions(signal?: AbortSignal): RequestInit {
-  return signal ? { signal } : {};
-}
 
 function paperQuery(path: string, paperId: string): string {
   return `${path}?${new URLSearchParams({ id: paperId }).toString()}`;
