@@ -1,0 +1,65 @@
+@media (prefers-reduced-motion: no-preference) {
+  .skip-link,
+  .global-nav,
+  .global-nav__link,
+  button {
+    transition:
+      transform var(--duration-feedback) var(--ease-out),
+      opacity var(--duration-feedback) var(--ease-out),
+      color var(--duration-feedback) var(--ease-out),
+      border-color var(--duration-feedback) var(--ease-out),
+      background-color var(--duration-feedback) var(--ease-out);
+  }
+
+  .workspace-overlay {
+    animation: workspace-overlay-in var(--duration-panel) var(--ease-out) both;
+  }
+
+  .workspace-overlay__panel[data-motion="full"] {
+    animation: workspace-panel-in var(--duration-panel) var(--ease-out) both;
+  }
+
+  button:active {
+    transform: translateY(1px);
+  }
+}
+
+@keyframes workspace-overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes workspace-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(0.75rem);
+  }
+}
+
+@media (max-width: 760px) and (prefers-reduced-motion: no-preference) {
+  .workspace-overlay[data-presentation="sheet"]
+    .workspace-overlay__panel[data-motion="full"] {
+    animation-name: workspace-sheet-in;
+  }
+}
+
+@keyframes workspace-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
