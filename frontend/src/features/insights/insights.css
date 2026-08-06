@@ -84,7 +84,7 @@
 }
 
 .insights-route__command-error {
-  color: #ef8e8e;
+  color: var(--color-error);
   font-size: var(--font-size-2);
 }
 

@@ -144,7 +144,7 @@ button:hover {
 }
 
 .global-nav__link--active {
-  border-color: rgb(210 96 96 / 0.32);
+  border-color: var(--color-accent-line);
   background: var(--color-accent-muted);
   color: var(--color-text);
 }
@@ -339,7 +339,7 @@ button:hover {
   padding-inline: var(--space-4);
   border-color: var(--color-accent);
   background: var(--color-accent);
-  color: #151517;
+  color: var(--color-bg);
   font-weight: 650;
 }
 
@@ -350,7 +350,7 @@ button:hover {
   display: flex;
   justify-content: flex-end;
   padding: var(--space-3);
-  background: rgb(9 9 11 / 0.72);
+  background: rgb(5 7 6 / 0.74);
 }
 
 .workspace-overlay__panel {
@@ -434,7 +434,7 @@ button:hover {
 
 .workspace-command-panel__results button:hover,
 .workspace-command-panel__results button:focus-visible {
-  border-color: rgb(210 96 96 / 0.32);
+  border-color: var(--color-accent-line);
   background: var(--color-accent-muted);
   color: var(--color-text);
 }

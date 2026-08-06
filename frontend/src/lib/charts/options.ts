@@ -11,13 +11,13 @@ type InsightPaper = Pick<
 >;
 
 const colors = {
-  accent: '#d26060',
-  accentSoft: '#df7070',
-  text: '#f1f1f3',
-  muted: '#a0a0a9',
-  weak: '#7d7d86',
+  accent: '#2fe586',
+  accentSoft: '#59eda0',
+  text: '#f2f6f3',
+  muted: '#9ca8a1',
+  weak: '#667069',
   line: 'rgba(255,255,255,0.09)',
-  surface: '#19191f',
+  surface: '#141916',
 } as const;
 
 const tooltip = {
@@ -133,7 +133,7 @@ export function buildTopicTreemapOption(
 
   return {
     animationDuration: 320,
-    color: [colors.accent, colors.accentSoft, '#8f5d63', '#6f555b'],
+    color: [colors.accent, colors.accentSoft, '#278d5c', '#37664d'],
     tooltip,
     series: [{
       type: 'treemap',
@@ -160,7 +160,7 @@ export function buildVenueCompositionOption(
 
   return {
     animationDuration: 320,
-    color: [colors.accent, colors.accentSoft, '#9d6065', '#74555a', '#4f454a'],
+    color: [colors.accent, colors.accentSoft, '#278d5c', '#37664d', '#344b3e'],
     tooltip,
     series: [{
       name: '发表场所',

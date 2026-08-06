@@ -1,21 +1,25 @@
 :root {
   color-scheme: dark;
 
-  --color-bg: #09090b;
-  --color-bg-subtle: #0d0d10;
-  --color-surface: #121216;
-  --color-surface-raised: #19191f;
-  --color-surface-strong: #222229;
-  --color-accent: #d26060;
-  --color-accent-hover: #df7070;
-  --color-accent-pressed: #bc5050;
-  --color-accent-muted: rgb(210 96 96 / 0.16);
-  --color-text: #f1f1f3;
-  --color-text-muted: #a0a0a9;
-  --color-text-weak: #7d7d86;
+  --color-bg: #050706;
+  --color-bg-subtle: #090d0b;
+  --color-surface: rgb(14 18 16 / 0.82);
+  --color-surface-raised: rgb(20 25 22 / 0.88);
+  --color-surface-strong: #101411;
+  --color-accent: #2fe586;
+  --color-accent-hover: #59eda0;
+  --color-accent-pressed: #0aaa60;
+  --color-accent-muted: rgb(47 229 134 / 0.14);
+  --color-accent-line: rgb(47 229 134 / 0.32);
+  --color-accent-line-strong: rgb(47 229 134 / 0.45);
+  --color-error: #ff665c;
+  --color-warning: #e6a84a;
+  --color-text: #f2f6f3;
+  --color-text-muted: #9ca8a1;
+  --color-text-weak: #667069;
   --color-line: rgb(255 255 255 / 0.09);
   --color-line-strong: rgb(255 255 255 / 0.16);
-  --color-shadow: rgb(4 4 7 / 0.56);
+  --color-shadow: rgb(0 8 4 / 0.62);
 
   --font-sans: "Segoe UI Variable", "SF Pro Text", "Segoe UI", system-ui,
     sans-serif;

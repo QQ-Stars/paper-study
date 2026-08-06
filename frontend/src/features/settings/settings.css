@@ -110,7 +110,7 @@
 }
 
 .settings-status--error {
-  color: #ef8e8e;
+  color: var(--color-error);
 }
 
 .settings-savebar {
