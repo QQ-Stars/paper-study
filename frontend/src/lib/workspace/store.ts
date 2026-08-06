@@ -1,20 +1,38 @@
 import { create } from 'zustand';
 
+import type { StudyStatus } from '../api/types';
+
 export type WorkspaceSurface = 'dashboard' | 'library';
 export type WorkspacePanel = 'command' | 'queue' | 'inspector';
 export type WorkspaceDensity = 'compact' | 'comfortable';
 export type WorkspaceTheme = 'dark';
 
-export interface SurfaceFilters {
+export type WorkspaceStudyStatusFilter = 'all' | StudyStatus;
+export type DashboardSort = 'recent' | 'title' | 'year' | 'relevance';
+export type LibrarySourceFilter = 'all' | 'seed' | 'collected';
+export type LibrarySort = 'added' | 'relevance' | 'year' | 'citations' | 'title';
+
+export interface DashboardSurfaceFilters {
   query: string;
-  status: string;
-  sort: string;
-  venue?: string;
-  type?: string;
-  topic?: string;
-  year?: string;
-  source?: string;
-  favorite?: boolean;
+  status: WorkspaceStudyStatusFilter;
+  sort: DashboardSort;
+}
+
+export interface LibrarySurfaceFilters {
+  query: string;
+  status: WorkspaceStudyStatusFilter;
+  sort: LibrarySort;
+  venue: string;
+  type: string;
+  topic: string;
+  year: string;
+  source: LibrarySourceFilter;
+  favorite: boolean;
+}
+
+interface WorkspaceSurfaceFilterMap {
+  dashboard: DashboardSurfaceFilters;
+  library: LibrarySurfaceFilters;
 }
 
 interface WorkspacePanelState {
@@ -25,14 +43,14 @@ interface WorkspacePanelState {
 
 interface WorkspaceState {
   workspaceSelectionId: string | null;
-  filters: Record<WorkspaceSurface, SurfaceFilters>;
+  filters: WorkspaceSurfaceFilterMap;
   panel: WorkspacePanelState;
   density: WorkspaceDensity;
   theme: WorkspaceTheme;
   setWorkspaceSelectionId: (paperId: string | null) => void;
-  setSurfaceFilters: (
-    surface: WorkspaceSurface,
-    patch: Partial<SurfaceFilters>,
+  setSurfaceFilters: <Surface extends WorkspaceSurface>(
+    surface: Surface,
+    patch: Partial<WorkspaceSurfaceFilterMap[Surface]>,
   ) => void;
   openPanel: (panel: WorkspacePanel, returnFocusId: string) => void;
   closePanel: () => void;
@@ -41,7 +59,12 @@ interface WorkspaceState {
   setTheme: (theme: WorkspaceTheme) => void;
 }
 
-const createInitialState = () => ({
+type WorkspaceData = Pick<
+  WorkspaceState,
+  'workspaceSelectionId' | 'filters' | 'panel' | 'density' | 'theme'
+>;
+
+const createInitialState = (): WorkspaceData => ({
   workspaceSelectionId: null,
   filters: {
     dashboard: { query: '', status: 'all', sort: 'recent' },
@@ -58,8 +81,8 @@ const createInitialState = () => ({
     },
   },
   panel: { active: null, returnFocusId: null, restoreFocus: false },
-  density: 'compact' as const,
-  theme: 'dark' as const,
+  density: 'compact',
+  theme: 'dark',
 });
 
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({
@@ -69,7 +92,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     filters: {
       ...state.filters,
       [surface]: { ...state.filters[surface], ...patch },
-    },
+    } as WorkspaceSurfaceFilterMap,
   })),
   openPanel: (active, returnFocusId) => set({
     panel: { active, returnFocusId, restoreFocus: true },

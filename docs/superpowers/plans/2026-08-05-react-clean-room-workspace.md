@@ -27,7 +27,7 @@ Tasks 4–6 can run in parallel after Tasks 1–3 because they own disjoint feat
 ## Delivery snapshot — 2026-08-06
 
 - Implementation is isolated on `codex/react-clean-room-workspace`; the stable branch and the user's main working tree are not used for the refactor.
-- Tasks 1–12 are implemented on this branch. The final automated gate is green: Node 273/273, frontend Vitest 50 files / 247 tests, TypeScript, ESLint, production build, and Playwright 28/28.
+- Tasks 1–12 are implemented on this branch. The final automated gate is green: Node 273/273, frontend Vitest 51 files / 247 tests, TypeScript, ESLint, production build, and Playwright 28/28.
 - The final architecture tightens the original file map: route handles and the preference-only workspace store live behind `frontend/src/lib/workspace/index.ts`; every route is loaded through its feature `index.ts`; shared acquisition draft behavior lives behind `frontend/src/lib/research-search/index.ts`. Dependency-boundary tests enforce those seams.
 - The React application is clean-room isolated under `frontend/` and is served only below `/workspace/`. It does not import or request legacy application HTML, CSS, JavaScript, or vendor bundles. The old `public/` application remains available below `/legacy/` as a reversible fallback.
 - The production-entry drill passed: default `/` redirects to `/workspace/`; React deep routes refresh and survive history navigation; `/legacy/` remains functional; with `UI_ENTRY=legacy`, `/` serves the same legacy document while `/workspace/` remains reachable. The recorded Chromium smoke observed 72 requests with no legacy asset request, console/page/request failure, or CSP violation.
@@ -214,7 +214,7 @@ git commit -m "feat: add isolated react and legacy entries"
 - Create: `frontend/src/lib/api/workspaceApi.ts`
 - Create: `frontend/src/lib/streaming/contracts.ts`
 - Create: `frontend/src/lib/streaming/ndjson.ts`
-- Create: `frontend/src/lib/streaming/sessionReducer.ts`
+- Create feature-owned stream reducers alongside Acquire, Jobs, Insights, and Reader commands
 - Create: `frontend/src/lib/storage/safeStorage.ts`
 - Create: `frontend/src/lib/api/client.test.ts`
 - Create: `frontend/src/lib/streaming/ndjson.test.ts`
@@ -250,18 +250,23 @@ export const api = {
 
 Use unknown-input decoders for Paper, review groups, jobs, schedules, citation graph and settings. Normalize missing paper status to `未开始` at the DTO boundary only.
 
-- [x] **Step 4: Implement endpoint terminal contracts and session reducer**
+- [x] **Step 4: Implement endpoint terminal contracts and feature-owned session reducers**
 
 ```ts
 export const resultContract = createTerminalContract('result');
 export const doneContract = createTerminalContract('done');
 
-type StreamState<E, R> =
-  | { status: 'idle'; events: E[] }
-  | { status: 'running'; runId: number; events: E[] }
-  | { status: 'success'; runId: number; events: E[]; result: R }
-  | { status: 'cancelled' | 'failure'; runId: number; events: E[]; error?: AppError };
+type FeatureStreamState = {
+  runId: number | null;
+  phase: 'idle' | 'running' | 'success' | 'failure' | 'stopped';
+  progress: readonly string[];
+};
 ```
+
+Review amendment: the initial generic reducer was removed because it had no production
+consumer. Acquire, Jobs, Insights, Local PDF, and Reader artifacts keep their reducers
+next to the domain state they own; their run identities, completion phases, and progress
+retention rules are intentionally different.
 
 - [x] **Step 5: Implement SafeStorage and tests**
 

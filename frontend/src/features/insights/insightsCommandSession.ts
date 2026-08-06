@@ -27,6 +27,7 @@ export type InsightsCommandTerminal =
   | {
       readonly command: 'semantic-search';
       readonly summary: string;
+      readonly query: string;
       readonly results: readonly SemanticHit[];
     };
 

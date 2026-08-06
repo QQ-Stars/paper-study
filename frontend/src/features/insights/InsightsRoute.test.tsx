@@ -230,6 +230,24 @@ describe('Insights route', () => {
     );
   });
 
+  it('labels semantic results with the trimmed query that produced them', async () => {
+    const user = userEvent.setup();
+    renderInsights();
+
+    const queryInput = await screen.findByRole('searchbox', { name: '语义查询' });
+    await user.type(queryInput, '  graph lifecycle  ');
+    await user.click(screen.getByRole('button', { name: '语义搜索' }));
+    await screen.findByRole('button', { name: 'Graph Paper' });
+
+    await user.clear(queryInput);
+    await user.type(queryInput, 'replacement query');
+
+    expect(queryInput).toHaveValue('replacement query');
+    expect(screen.getByRole('heading', {
+      name: '“graph lifecycle”的语义匹配',
+    })).toBeInTheDocument();
+  });
+
   it('keeps a restarted command authoritative after stopping an older run', async () => {
     const user = userEvent.setup();
     let finishFirst: ((value: { type: 'result'; ok: true; edges: number; nodes: number }) => void) | undefined;

@@ -1,4 +1,4 @@
-import type { SurfaceFilters } from '../../lib/workspace';
+import type { DashboardSurfaceFilters } from '../../lib/workspace';
 
 export interface DashboardSelectablePaper {
   readonly title: string;
@@ -28,7 +28,7 @@ function createdTime(value: string | null | undefined): number {
 
 export function selectDashboardPapers<T extends DashboardSelectablePaper>(
   papers: readonly T[],
-  filters: SurfaceFilters,
+  filters: DashboardSurfaceFilters,
 ): T[] {
   const query = normalizedText(filters.query);
   const filtered = papers.filter((paper) => {

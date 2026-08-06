@@ -288,7 +288,7 @@ export const semanticSearchContract: StreamContract<LineProgressEvent, SemanticS
 );
 
 export type ImportPdfsTerminal =
-  | { type: 'result'; ok: true; added: number; dup: number; failed: number; error?: string }
+  | { type: 'result'; ok: true; added: number; dup: number; failed: number; total: number; error?: string }
   | FailureTerminal<'result'>;
 export const importPdfsContract: StreamContract<LineProgressEvent, ImportPdfsTerminal> = endpointContract(
   'result', lineProgress,
@@ -297,6 +297,7 @@ export const importPdfsContract: StreamContract<LineProgressEvent, ImportPdfsTer
     added: integer(field(value, 'added'), `${path}.added`),
     dup: integer(field(value, 'dup'), `${path}.dup`),
     failed: integer(field(value, 'failed'), `${path}.failed`),
+    total: integer(field(value, 'total'), `${path}.total`),
   }),
 );
 

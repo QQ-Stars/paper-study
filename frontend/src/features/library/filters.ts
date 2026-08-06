@@ -1,18 +1,12 @@
-import type { PaperListItem, StudyStatus } from '../../lib/api/types';
+import type { PaperListItem } from '../../lib/api/types';
+import type {
+  LibrarySort,
+  LibrarySurfaceFilters,
+} from '../../lib/workspace';
 
-export type LibrarySourceFilter = 'all' | 'seed' | 'collected';
-export type LibrarySort = 'added' | 'relevance' | 'year' | 'citations' | 'title';
+export type { LibrarySort, LibrarySourceFilter } from '../../lib/workspace';
 
-export interface LibraryFilters {
-  readonly query: string;
-  readonly venue: string;
-  readonly type: string;
-  readonly topic: string;
-  readonly status: 'all' | StudyStatus;
-  readonly favorite: boolean;
-  readonly year: string;
-  readonly source: LibrarySourceFilter;
-  readonly sort: LibrarySort;
+export interface LibraryFilters extends Readonly<LibrarySurfaceFilters> {
   readonly semanticScores: ReadonlyMap<string, number> | null;
 }
 

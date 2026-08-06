@@ -1,14 +1,18 @@
 import type { PaperListItem } from '../../lib/api/types';
-import type { SurfaceFilters } from '../../lib/workspace';
+import type {
+  DashboardSort,
+  DashboardSurfaceFilters,
+  WorkspaceStudyStatusFilter,
+} from '../../lib/workspace';
 
 export interface DashboardQueueProps {
   readonly papers: readonly PaperListItem[];
   readonly filteredPapers: readonly PaperListItem[];
-  readonly filters: SurfaceFilters;
+  readonly filters: DashboardSurfaceFilters;
   readonly selectedPaperId: string | null;
   readonly status: 'pending' | 'success' | 'error';
   readonly errorMessage?: string;
-  readonly onFiltersChange: (patch: Partial<SurfaceFilters>) => void;
+  readonly onFiltersChange: (patch: Partial<DashboardSurfaceFilters>) => void;
   readonly onSelect: (paperId: string) => void;
 }
 
@@ -41,7 +45,9 @@ export function DashboardQueue({
           <select
             aria-label="论文状态"
             value={filters.status}
-            onChange={(event) => onFiltersChange({ status: event.currentTarget.value })}
+            onChange={(event) => onFiltersChange({
+              status: event.currentTarget.value as WorkspaceStudyStatusFilter,
+            })}
           >
             <option value="all">全部状态</option>
             <option value="未开始">未开始</option>
@@ -54,7 +60,9 @@ export function DashboardQueue({
           <select
             aria-label="论文排序"
             value={filters.sort}
-            onChange={(event) => onFiltersChange({ sort: event.currentTarget.value })}
+            onChange={(event) => onFiltersChange({
+              sort: event.currentTarget.value as DashboardSort,
+            })}
           >
             <option value="recent">最近加入</option>
             <option value="title">题名</option>

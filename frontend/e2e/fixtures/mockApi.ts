@@ -646,8 +646,10 @@ function streamDefaults(pathname: string): readonly Record<string, unknown>[] {
       ];
     case '/api/import-pdfs':
       return [
-        { type: 'progress', line: 'PARSE::fixture-one.pdf' },
-        { type: 'result', ok: true, added: 1, dup: 1, failed: 0 },
+        { type: 'progress', line: 'TOTAL::2' },
+        { type: 'progress', line: 'PARSED::1::2::Fixture One' },
+        { type: 'progress', line: 'PARSED::2::2::Fixture Two' },
+        { type: 'result', ok: true, added: 1, dup: 1, failed: 0, total: 2 },
       ];
     case '/api/download-pdfs':
       return [

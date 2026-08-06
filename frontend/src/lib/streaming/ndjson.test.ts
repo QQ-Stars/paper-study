@@ -208,7 +208,9 @@ describe('NDJSON protocol reader', () => {
     await check(recommendContract, { type: 'result', ok: true, candidates: [], error: '' });
     await check(embedContract, { type: 'result', ok: true, indexed: 2, total: 3, error: '' });
     await check(semanticSearchContract, { type: 'result', ok: true, results: [{ id: 'p1', score: 0.9 }], error: '' });
-    await check(importPdfsContract, { type: 'result', ok: true, added: 1, dup: 0, failed: 0, error: '' });
+    await check(importPdfsContract, {
+      type: 'result', ok: true, added: 1, dup: 0, failed: 0, total: 1, error: '',
+    });
     await check(downloadPdfsContract, { type: 'result', ok: true, downloaded: 1, skipped: 0, failed: 0, total: 1, error: '' });
     await check(normalizeVenuesContract, { type: 'result', ok: true, changed: 1, mapping: { cvpr: 'CVPR' }, error: '' });
     await check(citationBuildContract, { type: 'result', ok: true, edges: 2, nodes: 3, error: '' });

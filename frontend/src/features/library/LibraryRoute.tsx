@@ -20,7 +20,6 @@ import type { PaperListItem, PaperRecord, StudyStatus } from '../../lib/api/type
 import { insightsGateway } from '../../lib/api/insightsGateway';
 import {
   applyLibraryFilters,
-  defaultLibraryFilters,
   reconcileLibrarySelection,
   type LibraryFilters,
   type LibrarySort,
@@ -31,14 +30,6 @@ import { PaperPreview } from './PaperPreview';
 import { PaperTable } from './PaperTable';
 import './library.css';
 
-const sortValues = new Set<LibrarySort>([
-  'added',
-  'relevance',
-  'year',
-  'citations',
-  'title',
-]);
-const sourceValues = new Set<LibrarySourceFilter>(['all', 'seed', 'collected']);
 const libraryMutationScope = { id: 'library-paper-write' } as const;
 const emptyPapers: readonly PaperListItem[] = [];
 
@@ -67,27 +58,8 @@ function filtersFromStore(
   filters: ReturnType<typeof useWorkspaceStore.getState>['filters']['library'],
   semanticScores: ReadonlyMap<string, number> | null,
 ): LibraryFilters {
-  const sort = sortValues.has(filters.sort as LibrarySort)
-    ? filters.sort as LibrarySort
-    : defaultLibraryFilters.sort;
-  const source = sourceValues.has(filters.source as LibrarySourceFilter)
-    ? filters.source as LibrarySourceFilter
-    : defaultLibraryFilters.source;
-  const status = filters.status === '未开始'
-    || filters.status === '学习中'
-    || filters.status === '已理解'
-    ? filters.status
-    : 'all';
   return {
-    query: filters.query,
-    status,
-    sort,
-    venue: filters.venue || 'all',
-    type: filters.type || 'all',
-    topic: filters.topic || 'all',
-    year: filters.year || 'all',
-    source,
-    favorite: Boolean(filters.favorite),
+    ...filters,
     semanticScores,
   };
 }

@@ -128,9 +128,12 @@ export function LocalPdfPanel() {
       });
       if (ownerRef.current !== owner) return;
       dispatch({
-        type: 'success',
+        type: 'import-success',
         runId: owner.runId,
-        terminal: `PARSED ${paths.length} · ADDED ${result.added} · DUP ${result.dup} · SKIP ${result.failed}`,
+        added: result.added,
+        dup: result.dup,
+        failed: result.failed,
+        total: result.total,
       });
     } catch (caught) {
       if (ownerRef.current !== owner || isAbortError(caught)) return;
@@ -232,7 +235,25 @@ export function LocalPdfPanel() {
       ) : null}
 
       <div className="local-pdf__status" aria-live="polite">
-        {session.terminal ? <strong>{session.terminal}</strong> : null}
+        {session.importSummary && session.terminal ? (
+          <strong aria-label="本地 PDF 导入汇总">
+            <span>TOTAL {session.importSummary.total}</span>
+            {' · '}
+            <span>{session.terminal}</span>
+            {session.importSummary.prepErrors.length > 0 ? (
+              <>
+                {' · '}
+                <span>PREPERR {session.importSummary.prepErrors.length}</span>
+              </>
+            ) : null}
+            {session.importSummary.classificationFailures > 0 ? (
+              <>
+                {' · '}
+                <span>CLSERR {session.importSummary.classificationFailures}</span>
+              </>
+            ) : null}
+          </strong>
+        ) : session.terminal ? <strong>{session.terminal}</strong> : null}
         {session.error ? <p role="alert">{session.error}</p> : null}
         {session.progress.length > 0 ? (
           <pre aria-label="本地 PDF 进度">{session.progress.join('\n')}</pre>

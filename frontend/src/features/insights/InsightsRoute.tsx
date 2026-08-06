@@ -265,6 +265,7 @@ export function Component() {
         return {
           command: 'semantic-search',
           summary: `找到 ${results.length} 篇馆藏语义匹配。`,
+          query,
           results,
         };
       },
@@ -411,7 +412,9 @@ export function Component() {
         <section className="insights-route__recommendations" aria-labelledby="insights-semantic-results-title">
           <header>
             <p>SEMANTIC SEARCH</p>
-            <h3 id="insights-semantic-results-title">语义匹配</h3>
+            <h3 id="insights-semantic-results-title">
+              “{session.terminal.query}”的语义匹配
+            </h3>
           </header>
           {semanticMatches.length > 0 ? (
             <ol>

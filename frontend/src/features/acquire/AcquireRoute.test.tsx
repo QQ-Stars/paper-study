@@ -133,6 +133,7 @@ beforeEach(() => {
     added: 1,
     dup: 1,
     failed: 0,
+    total: 2,
   });
   apiMocks.downloadPdfs.mockResolvedValue({
     type: 'result',
@@ -145,6 +146,46 @@ beforeEach(() => {
 });
 
 describe('Acquire route', () => {
+  it('does not restore a pending query expansion after the research direction changes', async () => {
+    const user = userEvent.setup();
+    const lateExpansion = deferred<{ queries: string[] }>();
+    let lateSignal: AbortSignal | undefined;
+    apiMocks.expand
+      .mockResolvedValueOnce({ queries: ['generated query for direction A'] })
+      .mockImplementationOnce((_query, _limit, signal) => {
+        lateSignal = signal;
+        return lateExpansion.promise;
+      });
+    renderAcquire();
+
+    await user.click(screen.getByRole('button', { name: '开始检索' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('请输入研究方向');
+
+    const direction = screen.getByRole('textbox', { name: '研究方向' });
+    await user.type(direction, 'direction A');
+    await user.click(screen.getByRole('button', { name: '生成检索词' }));
+    expect(await screen.findByDisplayValue('generated query for direction A')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '生成检索词' }));
+    await waitFor(() => expect(apiMocks.expand).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('正在生成检索词…')).toBeInTheDocument();
+
+    await user.clear(direction);
+    await user.type(direction, 'direction B');
+
+    expect(direction).toHaveValue('direction B');
+    expect(lateSignal?.aborted).toBe(true);
+    expect(screen.queryByText('正在生成检索词…')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await act(async () => {
+      lateExpansion.resolve({ queries: ['late query from direction A'] });
+      await lateExpansion.promise;
+    });
+    expect(screen.queryByDisplayValue('late query from direction A')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '检索词（每行一条）' })).not.toBeInTheDocument();
+  });
+
   it('selects a recent query without retaining or restoring another query expansion', async () => {
     const user = userEvent.setup();
     const lateExpansion = deferred<{ queries: string[] }>();
@@ -255,6 +296,14 @@ describe('Acquire route', () => {
 
   it('reports local PDF TOTAL/PARSED/ADDED/DUP/SKIP outcomes without hiding partial success', async () => {
     const user = userEvent.setup();
+    apiMocks.importPdfs.mockImplementation(async (_paths, _enrich, options) => {
+      options.onEvent?.({ type: 'progress', line: 'TOTAL::2' });
+      options.onEvent?.({ type: 'progress', line: 'PARSED::1::2::Paper One' });
+      options.onEvent?.({ type: 'progress', line: 'PARSED::2::2::Paper Two' });
+      return {
+        type: 'result', ok: true, added: 1, dup: 1, failed: 0, total: 2,
+      };
+    });
     renderAcquire();
 
     const panel = screen.getByRole('region', { name: '本地 PDF' });

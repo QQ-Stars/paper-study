@@ -233,14 +233,16 @@ export function Component() {
     }
   };
 
-  const selectHistory = (item: string) => {
+  const replaceQuery = (nextQuery: string) => {
     expandOwnerRef.current?.abort();
     expandOwnerRef.current = null;
-    setQuery(item);
+    setQuery(nextQuery);
     setQueries([]);
     setExpandStatus(null);
     setValidationErrors([]);
   };
+
+  const selectHistory = (item: string) => replaceQuery(item);
 
   const busy = state.status === 'running';
   const statusMessage = state.status === 'stopped'
@@ -272,10 +274,7 @@ export function Component() {
             <span>研究方向</span>
             <input
               value={query}
-              onChange={(event) => {
-                setQuery(event.currentTarget.value);
-                setQueries([]);
-              }}
+              onChange={(event) => replaceQuery(event.currentTarget.value)}
               placeholder="例如：lifecycle-safe document readers"
             />
           </label>
