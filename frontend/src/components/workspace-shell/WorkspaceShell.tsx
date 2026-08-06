@@ -130,14 +130,14 @@ export function WorkspaceShell() {
         </div>
 
         {Timeline ? (
-          <section className="workspace-timeline" aria-label="研究时间线">
+          <div className="workspace-timeline">
             <WorkspaceSlotBoundary
               key={`${routeId ?? 'fallback'}:timeline`}
               label="研究时间线"
             >
               <Timeline />
             </WorkspaceSlotBoundary>
-          </section>
+          </div>
         ) : null}
       </div>
 

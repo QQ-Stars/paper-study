@@ -41,6 +41,18 @@ button:hover {
   background: var(--color-surface-strong);
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 3px;
@@ -459,6 +471,24 @@ button:hover {
   padding: var(--space-5) var(--space-3);
   color: var(--color-text-muted);
   text-align: center;
+}
+
+@media (forced-colors: active) {
+  input[type="checkbox"],
+  input[type="radio"] {
+    forced-color-adjust: auto;
+    accent-color: auto;
+  }
+
+  input[type="checkbox"]:disabled,
+  input[type="radio"]:disabled {
+    opacity: 1;
+  }
+
+  input[type="checkbox"]:focus-visible,
+  input[type="radio"]:focus-visible {
+    outline-color: Highlight;
+  }
 }
 
 @media (min-width: 1100px) {

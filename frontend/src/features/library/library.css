@@ -2,6 +2,7 @@
   display: grid;
   min-width: 0;
   gap: var(--space-3);
+  container-type: inline-size;
 }
 
 .library-route__intro {
@@ -586,7 +587,7 @@
   }
 }
 
-@media (max-width: 1320px) {
+@container (max-width: 78rem) {
   .library-filters {
     grid-template-columns: minmax(14rem, 2fr) repeat(4, minmax(7rem, 1fr));
   }

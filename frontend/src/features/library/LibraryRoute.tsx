@@ -446,7 +446,7 @@ export function Component() {
       <header className="library-route__intro">
         <div>
           <p className="library-route__eyebrow">LIBRARY / EVIDENCE LEDGER</p>
-          <h2>文献库</h2>
+          <h2>文献台账</h2>
           <p>{papers.length} 篇论文 · {visiblePapers.length} 篇当前可见</p>
         </div>
         <button

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 
+import { useResponsivePanelPlacement } from '../../components/overlays/panelPlacement';
 import type { DashboardReviewEvidence } from './evidence';
 import type { PaperDeckItem } from './PaperDeck';
 
@@ -45,9 +46,12 @@ export function PaperInspector({
   onClose,
   onOpenPaper,
 }: PaperInspectorProps) {
+  const panelPlacement = useResponsivePanelPlacement();
   const previousMode = useRef(mode);
   const modal = mode !== 'rail';
   const visible = !modal || open;
+  const hostedByOverlay = embedded
+    && (panelPlacement === 'drawer' || panelPlacement === 'sheet');
 
   useEffect(() => {
     const priorMode = previousMode.current;
@@ -73,6 +77,72 @@ export function PaperInspector({
   const matchingReview = review?.paperId === paper?.id ? review : null;
   const summary = paper?.tldr || paper?.contribution || paper?.abstract;
 
+  const content = paper == null ? (
+    <div className="paper-inspector__empty" role="status">
+      选择一篇论文以查看其真实元数据与复习上下文。
+    </div>
+  ) : (
+    <div className="paper-inspector__content">
+      <div className="paper-inspector__identity">
+        <span className="paper-inspector__status">{paper.status || '状态未提供'}</span>
+        <h3>{paper.title}</h3>
+        {paper.titleZh ? <p lang="zh-CN">{paper.titleZh}</p> : null}
+        <p>
+          {[paper.venue, paper.year, paper.type, paper.topic]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+      </div>
+
+      <dl className="paper-inspector__facts">
+        <div>
+          <dt>复习</dt>
+          <dd>
+            {matchingReview?.currentStep != null && matchingReview.totalSteps != null
+              ? `第 ${matchingReview.currentStep} / ${matchingReview.totalSteps} 轮`
+              : '尚无复习轮次'}
+          </dd>
+        </div>
+        <div>
+          <dt>下次节点</dt>
+          <dd>{matchingReview?.dueAt ? formatDueAt(matchingReview.dueAt) : '尚未安排'}</dd>
+        </div>
+        <div>
+          <dt>笔记</dt>
+          <dd>{paper.hasNote ? '已有笔记' : '暂无笔记'}</dd>
+        </div>
+      </dl>
+
+      <div className="paper-inspector__summary">
+        <h4>摘要证据</h4>
+        <p>{summary || '此论文记录未提供摘要；打开阅读器查看原始内容。'}</p>
+      </div>
+
+      <button
+        type="button"
+        className="paper-inspector__open"
+        aria-label={`打开 ${paper.title}`}
+        onClick={() => {
+          const paperId = paper.id;
+          onOpenPaper(paperId);
+        }}
+      >
+        打开阅读
+      </button>
+    </div>
+  );
+
+  if (hostedByOverlay) {
+    return (
+      <div
+        className="paper-inspector paper-inspector--panel-content"
+        data-inspector-mode={mode}
+      >
+        {content}
+      </div>
+    );
+  }
+
   const inspector = (
     <aside
       className="paper-inspector"
@@ -97,60 +167,7 @@ export function PaperInspector({
         ) : null}
       </header>
 
-      {paper == null ? (
-        <div className="paper-inspector__empty" role="status">
-          选择一篇论文以查看其真实元数据与复习上下文。
-        </div>
-      ) : (
-        <div className="paper-inspector__content">
-          <div className="paper-inspector__identity">
-            <span className="paper-inspector__status">{paper.status || '状态未提供'}</span>
-            <h3>{paper.title}</h3>
-            {paper.titleZh ? <p lang="zh-CN">{paper.titleZh}</p> : null}
-            <p>
-              {[paper.venue, paper.year, paper.type, paper.topic]
-                .filter(Boolean)
-                .join(' · ')}
-            </p>
-          </div>
-
-          <dl className="paper-inspector__facts">
-            <div>
-              <dt>复习</dt>
-              <dd>
-                {matchingReview?.currentStep != null && matchingReview.totalSteps != null
-                  ? `第 ${matchingReview.currentStep} / ${matchingReview.totalSteps} 轮`
-                  : '尚无复习轮次'}
-              </dd>
-            </div>
-            <div>
-              <dt>下次节点</dt>
-              <dd>{matchingReview?.dueAt ? formatDueAt(matchingReview.dueAt) : '尚未安排'}</dd>
-            </div>
-            <div>
-              <dt>笔记</dt>
-              <dd>{paper.hasNote ? '已有笔记' : '暂无笔记'}</dd>
-            </div>
-          </dl>
-
-          <div className="paper-inspector__summary">
-            <h4>摘要证据</h4>
-            <p>{summary || '此论文记录未提供摘要；打开阅读器查看原始内容。'}</p>
-          </div>
-
-          <button
-            type="button"
-            className="paper-inspector__open"
-            aria-label={`打开 ${paper.title}`}
-            onClick={() => {
-              const paperId = paper.id;
-              onOpenPaper(paperId);
-            }}
-          >
-            打开阅读
-          </button>
-        </div>
-      )}
+      {content}
     </aside>
   );
 

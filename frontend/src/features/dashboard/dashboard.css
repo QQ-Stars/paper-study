@@ -334,6 +334,19 @@
   padding: var(--space-4);
 }
 
+.paper-inspector.paper-inspector--panel-content {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.paper-inspector--panel-content .paper-inspector__content {
+  overflow: visible;
+  padding: 0;
+}
+
 .paper-inspector__identity {
   display: grid;
   gap: var(--space-2);
@@ -518,17 +531,17 @@
   }
 
   .paper-deck {
-    min-height: 32rem;
+    min-height: 30rem;
   }
 
   .paper-deck__stage {
-    min-height: 25rem;
+    min-height: 23rem;
   }
 
   .paper-deck__card {
     inset-block-start: 1.5rem;
     width: min(16rem, calc(100% - 2rem));
-    height: 21rem;
+    height: 20rem;
     padding: var(--space-4);
   }
 

@@ -14,6 +14,7 @@ import {
   trapTabKey,
 } from '../../lib/accessibility/focus';
 import { useWorkspaceMediaQuery } from '../../lib/accessibility/media';
+import { ResponsivePanelPlacementContext } from './panelPlacement';
 
 const panelCopy: Record<WorkspacePanel, { title: string; description: string }> = {
   command: {
@@ -137,7 +138,9 @@ export function ResponsivePanelHost({
   const desktopInspector =
     !isOverlay && inspector ? (
       <aside className="workspace-context-rail" aria-label="论文上下文">
-        {inspector}
+        <ResponsivePanelPlacementContext.Provider value="rail">
+          {inspector}
+        </ResponsivePanelPlacementContext.Provider>
       </aside>
     ) : null;
 
@@ -192,7 +195,11 @@ export function ResponsivePanelHost({
               关闭
             </button>
           </header>
-          <div className="workspace-overlay__content">{content}</div>
+          <div className="workspace-overlay__content">
+            <ResponsivePanelPlacementContext.Provider value={presentation}>
+              {content}
+            </ResponsivePanelPlacementContext.Provider>
+          </div>
         </section>
       </div>
     </>

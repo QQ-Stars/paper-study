@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { StrictMode } from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { App } from '../../app/App';
@@ -19,6 +19,7 @@ import {
 } from '../feedback/LiveAnnouncer';
 import { announceWorkspace } from '../feedback/announcements';
 import { ResponsivePanelHost } from '../overlays/ResponsivePanelHost';
+import { PaperInspector } from '../../features/dashboard/PaperInspector';
 
 type MediaOverrides = {
   mobile?: boolean;
@@ -166,6 +167,61 @@ it('keeps at most one mobile modal open and restores the latest trigger on Escap
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(queueTrigger).toHaveFocus();
   expect(document.body.style.overflow).toBe('');
+});
+
+it('lets the mobile sheet own the embedded inspector title and surface', () => {
+  installMatchMedia({ mobile: true, overlay: true });
+  useWorkspaceStore.getState().openPanel('inspector', 'dashboard-inspector-trigger');
+
+  render(
+    <ResponsivePanelHost
+      inspector={(
+        <PaperInspector
+          paper={{ id: 'sheet-paper', title: 'Sheet Paper', status: '学习中' }}
+          mode="rail"
+          open
+          embedded
+          onClose={vi.fn()}
+          onOpenPaper={vi.fn()}
+        />
+      )}
+    />,
+  );
+
+  const dialog = screen.getByRole('dialog', { name: '论文上下文' });
+  expect(
+    within(dialog).getAllByRole('heading', { name: '论文上下文' }),
+  ).toHaveLength(1);
+  expect(
+    within(dialog).queryByRole('region', { name: '论文上下文' }),
+  ).not.toBeInTheDocument();
+  expect(dialog).toHaveTextContent('Sheet Paper');
+});
+
+it('keeps the embedded inspector title and surface in the desktop rail', () => {
+  render(
+    <ResponsivePanelHost
+      inspector={(
+        <PaperInspector
+          paper={{ id: 'rail-paper', title: 'Rail Paper', status: '学习中' }}
+          mode="rail"
+          open
+          embedded
+          onClose={vi.fn()}
+          onOpenPaper={vi.fn()}
+        />
+      )}
+    />,
+  );
+
+  const rail = screen.getByRole('complementary', { name: '论文上下文' });
+  expect(
+    within(rail).getByRole('region', { name: '论文上下文' }),
+  ).toBeInTheDocument();
+  expect(
+    within(rail).getByRole('heading', { name: '论文上下文' }),
+  ).toBeInTheDocument();
+  expect(rail).toHaveTextContent('Rail Paper');
 });
 
 it('keeps the command dialog available on desktop and restores its trigger', async () => {
