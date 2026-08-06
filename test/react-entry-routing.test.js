@@ -192,6 +192,20 @@ test('a dotted Reader deep link resolves to the React index, not a guessed file'
   assert.equal(result.headers['Content-Security-Policy'], REACT_CSP);
 });
 
+test('the React document CSP permits Vite-inlined KaTeX fonts without widening other asset sources', () => {
+  const result = resolve('/workspace/reader/paper-with-math');
+  const directives = new Set(
+    result.headers['Content-Security-Policy']
+      .split(';')
+      .map((directive) => directive.trim()),
+  );
+
+  assert.equal(directives.has("font-src 'self' data:"), true);
+  assert.equal(directives.has("script-src 'self'"), true);
+  assert.equal(directives.has("worker-src 'self'"), true);
+  assert.equal(directives.has("object-src 'none'"), true);
+});
+
 test('React serves real files and applies immutable caching only to Vite-hashed assets', () => {
   const hashed = resolve('/workspace/assets/index-AbC_d123.js');
   const hashLookalike = resolve('/workspace/assets/license-apache20.txt');
