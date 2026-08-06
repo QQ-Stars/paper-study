@@ -7,6 +7,7 @@ import {
 } from 'react-router-dom';
 
 import { RouteErrorBoundary } from '../components/feedback/RouteErrorBoundary';
+import { WorkspaceHydrationFallback } from '../components/feedback/WorkspaceHydrationFallback';
 import { WorkspaceShell } from '../components/workspace-shell/WorkspaceShell';
 import { WorkspaceNotFoundRoute } from '../components/workspace-shell/WorkspaceRouteScaffold';
 import type { WorkspaceRouteHandle } from '../lib/workspace';
@@ -15,15 +16,6 @@ const notFoundHandle = {
   title: '页面不存在',
   layout: 'standard',
 } satisfies WorkspaceRouteHandle;
-
-function WorkspaceHydrationFallback() {
-  return (
-    <div className="workspace-bootstrap" role="status" aria-live="polite">
-      <strong>正在启动研究工作区</strong>
-      <span>正在载入当前研究任务…</span>
-    </div>
-  );
-}
 
 export function createWorkspaceRoutes(): RouteObject[] {
   return [
