@@ -54,6 +54,67 @@
   font-size: var(--font-size-2);
 }
 
+.dashboard-summary {
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: inset 0 1px var(--color-line);
+}
+
+.dashboard-summary dl {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin: 0;
+}
+
+.dashboard-summary dl > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+  padding: var(--space-3) var(--space-4);
+}
+
+.dashboard-summary dl > div + div {
+  border-inline-start: 1px solid var(--color-line);
+}
+
+.dashboard-summary dt,
+.dashboard-summary small {
+  overflow: hidden;
+  color: var(--color-text-weak);
+  font-size: var(--font-size-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-summary dd {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-5);
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-summary dl > div:first-child dd,
+.dashboard-summary dl > div:nth-child(4) dd,
+.dashboard-summary dl > div:nth-child(5) dd {
+  color: var(--color-accent-hover);
+}
+
+@media (max-width: 1099px) {
+  .dashboard-summary dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dashboard-summary dl > div:nth-child(4) {
+    border-inline-start: 0;
+  }
+
+  .dashboard-summary dl > div:nth-child(n + 4) {
+    border-top: 1px solid var(--color-line);
+  }
+}
+
 .dashboard-route__workspace {
   display: grid;
   min-width: 0;
@@ -96,7 +157,7 @@
 
 .paper-deck {
   display: grid;
-  min-height: 35rem;
+  min-height: 29rem;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
@@ -136,17 +197,17 @@
 
 .paper-deck__stage {
   position: relative;
-  min-height: 28rem;
+  min-height: 21.5rem;
   overflow: hidden;
   isolation: isolate;
 }
 
 .paper-deck__card {
   position: absolute;
-  inset: 2.25rem 50% auto auto;
+  inset: 1.5rem 50% auto auto;
   display: grid;
   width: min(17rem, calc(100% - 4rem));
-  height: 22rem;
+  height: 19.5rem;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: var(--space-4);
   padding: var(--space-5);
@@ -319,8 +380,8 @@
 }
 
 .paper-inspector__header button {
-  min-width: 2.75rem;
-  min-height: 2.75rem;
+  min-width: 2.875rem;
+  min-height: 2.875rem;
   color: var(--color-text-muted);
 }
 
@@ -518,6 +579,23 @@
 @media (max-width: 760px) {
   .dashboard-route__intro {
     align-items: flex-start;
+    order: 0;
+  }
+
+  .dashboard-route__refresh {
+    order: 1;
+  }
+
+  .dashboard-route__workspace {
+    order: 2;
+  }
+
+  .dashboard-summary {
+    order: 3;
+  }
+
+  .research-timeline {
+    order: 4;
   }
 
   .dashboard-route__intro > div > p:last-child {

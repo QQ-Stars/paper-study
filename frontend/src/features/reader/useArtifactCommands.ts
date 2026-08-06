@@ -2,8 +2,9 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { isAbortError } from '../../lib/api/errors';
+import { paperKeys } from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { artifactGateway } from '../../lib/api/artifactGateway';
 import {
   artifactReconciliationKeys,
   commandForIdentity,
@@ -24,6 +25,10 @@ type ArtifactOperation = (
   signal: AbortSignal,
   reportProgress: (line: string) => void,
 ) => Promise<unknown>;
+type ArtifactReconciler = (
+  kind: ArtifactKind,
+  fixedPaperId: string,
+) => Promise<void>;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim()
@@ -61,9 +66,14 @@ export function useArtifactCommands(paperId: string, generation: number) {
     )));
   }, [queryClient]);
 
+  const reconcileExplainerBatch = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: paperKeys.all() });
+  }, [queryClient]);
+
   const run = useCallback(async (
     kind: ArtifactKind,
     operation: ArtifactOperation,
+    reconcileAfter: ArtifactReconciler = reconcile,
   ): Promise<ArtifactCommandOutcome> => {
     const previous = activeCommands.current[kind];
     if (previous) {
@@ -102,7 +112,7 @@ export function useArtifactCommands(paperId: string, generation: number) {
       }
     } finally {
       if (ownsRun()) delete activeCommands.current[kind];
-      await reconcile(kind, owner.paperId);
+      await reconcileAfter(kind, owner.paperId);
     }
     return outcome;
   }, [generation, paperId, reconcile]);
@@ -114,7 +124,7 @@ export function useArtifactCommands(paperId: string, generation: number) {
 
   const generateExplainer = useCallback((deep = false) => run(
     'explainer',
-    (signal, reportProgress) => workspaceApi.explainPaper(paperId, deep, {
+    (signal, reportProgress) => artifactGateway.explainPaper(paperId, deep, {
       signal,
       onEvent(event) {
         if (event.type === 'progress') reportProgress(event.line);
@@ -122,9 +132,20 @@ export function useArtifactCommands(paperId: string, generation: number) {
     }),
   ), [paperId, run]);
 
+  const generateExplainerBatch = useCallback((limit = 0) => run(
+    'explainer',
+    (signal, reportProgress) => artifactGateway.explainBatch(limit, {
+      signal,
+      onEvent(event) {
+        if (event.type === 'progress') reportProgress(event.line);
+      },
+    }),
+    reconcileExplainerBatch,
+  ), [reconcileExplainerBatch, run]);
+
   const generateTranslation = useCallback(() => run(
     'translation',
-    (signal, reportProgress) => workspaceApi.translatePaper(paperId, {
+    (signal, reportProgress) => artifactGateway.translatePaper(paperId, {
       signal,
       onEvent(event) {
         if (event.type === 'progress') reportProgress(event.line);
@@ -147,6 +168,7 @@ export function useArtifactCommands(paperId: string, generation: number) {
       translation: commandForIdentity(session.translation, paperId, generation),
     },
     generateExplainer,
+    generateExplainerBatch,
     generateTranslation,
     saveNote,
     stop,

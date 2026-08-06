@@ -6,12 +6,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { jobKeys } from '../../lib/api/keys';
 import type { JobSummary } from '../../lib/api/types';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { jobsGateway } from '../../lib/api/jobsGateway';
 import type { WorkspaceRouteHandle } from '../../lib/workspace';
 import {
   ACADEMIC_SOURCES,
+  SOURCE_LABELS,
   normalizeSearchDraft,
-  type AcademicSource,
 } from '../../lib/research-search';
 import { JobDetail } from './JobDetail';
 import { SchedulesPanel } from './SchedulesPanel';
@@ -21,13 +21,6 @@ export const handle = {
   title: '任务',
   layout: 'inspector-drawer',
 } satisfies WorkspaceRouteHandle;
-
-const SOURCE_LABELS: Record<AcademicSource, string> = {
-  semanticscholar: 'Semantic Scholar',
-  arxiv: 'arXiv',
-  openalex: 'OpenAlex',
-  dblp: 'DBLP',
-};
 
 export function jobPollingIntervalFor(jobs: JobSummary[] | undefined): 2500 | false {
   return jobs?.some((job) => job.status === 'pending' || job.status === 'running')
@@ -61,7 +54,7 @@ export function Component() {
 
   const jobsQuery = useQuery({
     queryKey: jobKeys.list(),
-    queryFn: ({ signal }) => workspaceApi.listJobs(signal),
+    queryFn: ({ signal }) => jobsGateway.listJobs(signal),
     refetchInterval: (queryState) => jobPollingIntervalFor(queryState.state.data),
   });
 
@@ -89,7 +82,7 @@ export function Component() {
     setCreating(true);
     setCreateError(null);
     try {
-      const id = await workspaceApi.createJob({
+      const id = await jobsGateway.createJob({
         query: normalized.request.query,
         sources: normalized.request.sources,
         years: normalized.request.years,

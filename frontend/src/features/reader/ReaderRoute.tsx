@@ -7,7 +7,7 @@ import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary
 import { paperKeys, pdfKeys } from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';
 import type { PaperRecord } from '../../lib/api/types';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { pdfGateway } from '../../lib/api/pdfGateway';
 import {
   type WorkspaceRouteHandle,
   useWorkspaceStore,
@@ -136,7 +136,7 @@ export function Component() {
   const pdfStatusQuery = useQuery({
     queryKey: pdfKeys.status(fixedPaperId),
     enabled: Boolean(fixedPaperId),
-    queryFn: ({ signal }) => workspaceApi.getPdfStatus(fixedPaperId, signal),
+    queryFn: ({ signal }) => pdfGateway.getPdfStatus(fixedPaperId, signal),
   });
 
   useEffect(() => {

@@ -1,7 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { paperKeys } from '../../lib/api/keys';
@@ -26,7 +32,23 @@ const apiMocks = vi.hoisted(() => ({
   deleteSchedule: vi.fn(),
 }));
 
-vi.mock('../../lib/api/workspaceApi', () => ({ workspaceApi: apiMocks }));
+vi.mock('../../lib/api/jobsGateway', () => ({
+  jobsGateway: {
+    listJobs: apiMocks.listJobs,
+    getJob: apiMocks.getJob,
+    createJob: apiMocks.createJob,
+    deleteJob: apiMocks.deleteJob,
+    confirmJob: apiMocks.confirmJob,
+  },
+}));
+vi.mock('../../lib/api/schedulesGateway', () => ({
+  schedulesGateway: {
+    listSchedules: apiMocks.listSchedules,
+    createSchedule: apiMocks.createSchedule,
+    toggleSchedule: apiMocks.toggleSchedule,
+    deleteSchedule: apiMocks.deleteSchedule,
+  },
+}));
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -127,7 +149,13 @@ function schedule(id: number, overrides: Partial<Schedule> = {}): Schedule {
 }
 
 function LocationProbe() {
-  return <output data-testid="location">{useLocation().pathname}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="location">{useLocation().pathname}</output>
+      <button type="button" onClick={() => navigate('/jobs/3')}>切换到任务 3</button>
+    </>
+  );
 }
 
 function renderJobs(path = '/jobs') {
@@ -303,6 +331,22 @@ describe('Jobs route', () => {
     expect(invalidate).not.toHaveBeenCalledWith(expect.objectContaining({
       queryKey: paperKeys.all(),
     }));
+  });
+
+  it('does not carry a confirmation session into a different job detail', async () => {
+    const user = userEvent.setup();
+    apiMocks.listJobs.mockResolvedValue([job(2), job(3)]);
+    apiMocks.getJob.mockImplementation((id: number) => Promise.resolve(detail(id)));
+    renderJobs('/jobs/2');
+
+    const jobTwo = await screen.findByRole('region', { name: '任务 2 详情' });
+    await within(jobTwo).findByText('Candidate 11');
+    await user.click(within(jobTwo).getByRole('button', { name: '确认选中候选' }));
+    expect(await within(jobTwo).findByText('服务器确认新增 1 篇。')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '切换到任务 3' }));
+    const jobThree = await screen.findByRole('region', { name: '任务 3 详情' });
+    expect(within(jobThree).queryByText('服务器确认新增 1 篇。')).not.toBeInTheDocument();
   });
 
   it('recovers from a detail read failure through an explicit retry', async () => {

@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { settingsKeys } from '../../lib/api/keys';
 import type { SettingsUpdate, SettingsView } from '../../lib/api/types';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { settingsGateway } from '../../lib/api/settingsGateway';
 import {
   type WorkspaceRouteHandle,
   useWorkspaceStore,
@@ -60,14 +60,14 @@ function SettingsForm({ settings }: { readonly settings: SettingsView }) {
   const [draft, setDraft] = useState<SettingsDraft>(() => createSettingsDraft(settings));
   const [secrets, setSecrets] = useState<SecretDraft>(emptySecrets);
   const save = useMutation({
-    mutationFn: (update: SettingsUpdate) => workspaceApi.saveSettings(update),
+    mutationFn: (update: SettingsUpdate) => settingsGateway.saveSettings(update),
     onSuccess: async () => {
       setSecrets(emptySecrets());
       await queryClient.invalidateQueries({ queryKey: settingsKeys.view() });
     },
   });
   const test = useMutation({
-    mutationFn: () => workspaceApi.testLlm(),
+    mutationFn: () => settingsGateway.testLlm(),
   });
 
   const updateDraft = (field: keyof SettingsDraft, value: string) => {
@@ -205,7 +205,7 @@ function SettingsForm({ settings }: { readonly settings: SettingsView }) {
 export function Component() {
   const query = useQuery({
     queryKey: settingsKeys.view(),
-    queryFn: ({ signal }) => workspaceApi.getSettings(signal),
+    queryFn: ({ signal }) => settingsGateway.getSettings(signal),
   });
 
   if (query.isPending) {

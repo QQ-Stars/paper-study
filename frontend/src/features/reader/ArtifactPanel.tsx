@@ -116,6 +116,7 @@ function ArtifactBody({
 interface GeneratedArtifactProps extends ArtifactBodyProps {
   command: ArtifactCommandState;
   onGenerate(): void;
+  onGenerateBatch?(): void;
   onStop(): void;
 }
 
@@ -123,6 +124,7 @@ function GeneratedArtifact({
   kind,
   command,
   onGenerate,
+  onGenerateBatch,
   onStop,
   ...bodyProps
 }: GeneratedArtifactProps) {
@@ -134,6 +136,11 @@ function GeneratedArtifact({
         <button type="button" disabled={running} onClick={onGenerate}>
           生成{label}
         </button>
+        {onGenerateBatch ? (
+          <button type="button" disabled={running} onClick={onGenerateBatch}>
+            批量生成缺失讲解
+          </button>
+        ) : null}
         {running ? (
           <button type="button" className="artifact-panel__stop" onClick={onStop}>
             停止接收{label}
@@ -269,6 +276,7 @@ export function ArtifactPanel({
   const {
     commands,
     generateExplainer,
+    generateExplainerBatch,
     generateTranslation,
     saveNote,
     stop,
@@ -349,6 +357,7 @@ export function ArtifactPanel({
             generation={generation}
             kind="explainer"
             onGenerate={() => { void generateExplainer(false); }}
+            onGenerateBatch={() => { void generateExplainerBatch(); }}
             onStop={() => stop('explainer')}
             pending={explainerQuery.isPending}
             source={explainerQuery.data}

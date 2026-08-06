@@ -6,16 +6,16 @@ import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary
 import { isAbortError } from '../../lib/api/errors';
 import { paperKeys } from '../../lib/api/keys';
 import type { SearchRequest } from '../../lib/api/types';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { acquisitionGateway } from '../../lib/api/acquisitionGateway';
 import { createSafeStorage, createSearchHistory } from '../../lib/storage/safeStorage';
 import type { WorkspaceRouteHandle } from '../../lib/workspace';
 import {
   ACADEMIC_SOURCES,
+  SOURCE_LABELS,
   acquireReducer,
   candidateKey,
   createAcquireState,
   normalizeSearchDraft,
-  type AcademicSource,
   type AcquireOperation,
 } from './acquireReducer';
 import { CandidateList } from './CandidateList';
@@ -26,13 +26,6 @@ export const handle = {
   title: '采集',
   layout: 'progress',
 } satisfies WorkspaceRouteHandle;
-
-const SOURCE_LABELS: Record<AcademicSource, string> = {
-  semanticscholar: 'Semantic Scholar',
-  arxiv: 'arXiv',
-  openalex: 'OpenAlex',
-  dblp: 'DBLP',
-};
 
 interface RunOwner {
   runId: number;
@@ -110,7 +103,7 @@ export function Component() {
     setValidationErrors([]);
     const owner = beginRun('search');
     try {
-      const result = await workspaceApi.search(fixedRequest, {
+      const result = await acquisitionGateway.search(fixedRequest, {
         signal: owner.controller.signal,
         onEvent: (event) => onProgress(owner, event),
       });
@@ -165,7 +158,7 @@ export function Component() {
     const fixedCandidates = [...state.candidates];
     const owner = beginRun('verify');
     try {
-      const result = await workspaceApi.verifyVenue(
+      const result = await acquisitionGateway.verifyVenue(
         fixedCandidates,
         ['dblp', 'semanticscholar'],
         {
@@ -196,7 +189,7 @@ export function Component() {
     setValidationErrors([]);
     const owner = beginRun('ingest');
     try {
-      const result = await workspaceApi.ingestSelected(
+      const result = await acquisitionGateway.ingestSelected(
         { candidates: fixedCandidates, downloadPdf: true },
         {
           signal: owner.controller.signal,
@@ -224,7 +217,7 @@ export function Component() {
     expandOwnerRef.current = controller;
     setExpandStatus('正在生成检索词…');
     try {
-      const result = await workspaceApi.expand(fixedQuery, 6, controller.signal);
+      const result = await acquisitionGateway.expand(fixedQuery, 6, controller.signal);
       if (expandOwnerRef.current !== controller) return;
       const expanded = result.queries
         .map((item) => item.trim())

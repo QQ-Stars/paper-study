@@ -1,4 +1,4 @@
-import { workspaceApi } from '../api/workspaceApi';
+import { artifactGateway } from '../api/artifactGateway';
 import { isAbortError } from '../api/errors';
 
 export interface SelectionTranslationContext {
@@ -47,7 +47,7 @@ interface ActiveTranslation {
 
 const defaultDependencies: SelectionTranslatorDependencies = {
   translate: async (text, signal) => {
-    const result = await workspaceApi.translateText(text, signal);
+    const result = await artifactGateway.translateText(text, signal);
     return result.text;
   },
 };

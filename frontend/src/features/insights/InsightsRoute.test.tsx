@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { CitationGraph, PaperListItem } from '../../lib/api/types';
+import type { Candidate, CitationGraph, PaperListItem } from '../../lib/api/types';
 import { Component } from './InsightsRoute';
 
 const apiMocks = vi.hoisted(() => ({
@@ -12,16 +12,20 @@ const apiMocks = vi.hoisted(() => ({
   getCitationGraph: vi.fn(),
   buildCitationGraph: vi.fn(),
   normalizeVenues: vi.fn(),
+  recommend: vi.fn(),
+  embed: vi.fn(),
 }));
 
 vi.mock('../../lib/api/paperApi', () => ({
   paperApi: { listPapers: apiMocks.listPapers },
 }));
-vi.mock('../../lib/api/workspaceApi', () => ({
-  workspaceApi: {
+vi.mock('../../lib/api/insightsGateway', () => ({
+  insightsGateway: {
     getCitationGraph: apiMocks.getCitationGraph,
     buildCitationGraph: apiMocks.buildCitationGraph,
     normalizeVenues: apiMocks.normalizeVenues,
+    recommend: apiMocks.recommend,
+    embed: apiMocks.embed,
   },
 }));
 
@@ -71,6 +75,36 @@ const graph: CitationGraph = {
   edgeCount: 0,
 };
 
+const recommendation: Candidate = {
+  source: 'semanticscholar',
+  sourceId: 'recommended-1',
+  title: 'Lifecycle-safe Graph Systems',
+  authors: ['Ada Researcher'],
+  venue: 'CHI',
+  year: '2025',
+  abstract: null,
+  tldr: 'A lifecycle-safe graph workspace.',
+  fields: ['Human-Computer Interaction'],
+  citations: 8,
+  url: 'https://example.test/recommended-1',
+  pdfUrl: null,
+  arxivId: null,
+  doi: null,
+  s2Id: 'recommended-1',
+  ccf: 'A',
+  type: '研究',
+  topic: '图谱',
+  task: null,
+  models: [],
+  datasets: [],
+  contribution: null,
+  llmTldr: null,
+  tags: [],
+  relevance: 0.87,
+  inLibrary: false,
+  candidateId: null,
+};
+
 function LocationProbe() {
   return <output data-testid="location">{useLocation().pathname}</output>;
 }
@@ -105,6 +139,14 @@ beforeEach(() => {
     changed: 0,
     mapping: {},
   });
+  apiMocks.recommend.mockReset().mockImplementation(async (_paperId, _limit, options) => {
+    options.onEvent?.({ type: 'progress', line: '[1/1] matching papers' });
+    return { type: 'result', ok: true, candidates: [recommendation] };
+  });
+  apiMocks.embed.mockReset().mockImplementation(async (_scope, options) => {
+    options.onEvent?.({ type: 'progress', line: '[2/2] vectors indexed' });
+    return { type: 'result', ok: true, indexed: 2, total: 2 };
+  });
 });
 
 describe('Insights route', () => {
@@ -131,6 +173,98 @@ describe('Insights route', () => {
     expect(apiMocks.buildCitationGraph).toHaveBeenCalledOnce();
     expect(await screen.findByText('[DONE] graph ready')).toBeInTheDocument();
     await waitFor(() => expect(apiMocks.getCitationGraph.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it('lets the user explicitly request recommendations from a real paper', async () => {
+    const user = userEvent.setup();
+    renderInsights();
+
+    await user.click(await screen.findByRole('button', { name: '推荐相似论文' }));
+
+    expect(await screen.findByText('[1/1] matching papers')).toBeInTheDocument();
+    expect(await screen.findByText('Lifecycle-safe Graph Systems')).toBeInTheDocument();
+    expect(apiMocks.recommend).toHaveBeenCalledWith(
+      'p1',
+      14,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('lets the user explicitly update missing embeddings', async () => {
+    const user = userEvent.setup();
+    renderInsights();
+
+    await user.click(await screen.findByRole('button', { name: '更新缺失向量' }));
+
+    expect(await screen.findByText('[2/2] vectors indexed')).toBeInTheDocument();
+    expect(await screen.findByText('向量索引完成：2 / 2。')).toBeInTheDocument();
+    expect(apiMocks.embed).toHaveBeenCalledWith(
+      'missing',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('keeps a restarted command authoritative after stopping an older run', async () => {
+    const user = userEvent.setup();
+    let finishFirst: ((value: { type: 'result'; ok: true; edges: number; nodes: number }) => void) | undefined;
+    let firstOptions: { signal: AbortSignal; onEvent?: (event: unknown) => void } | undefined;
+    apiMocks.buildCitationGraph
+      .mockReset()
+      .mockImplementationOnce((options) => {
+        firstOptions = options;
+        return new Promise((resolve) => {
+          finishFirst = resolve;
+        });
+      })
+      .mockImplementationOnce(async (options) => {
+        options.onEvent?.({ type: 'progress', line: 'new run is authoritative' });
+        return { type: 'result', ok: true, edges: 2, nodes: 3 };
+      });
+    renderInsights();
+
+    await user.click(await screen.findByRole('button', { name: '重建引用图' }));
+    await user.click(await screen.findByRole('button', { name: '停止接收' }));
+    expect(firstOptions?.signal.aborted).toBe(true);
+    await user.click(screen.getByRole('button', { name: '重建引用图' }));
+
+    expect(await screen.findByText('new run is authoritative')).toBeInTheDocument();
+    expect(await screen.findByText('引用图已更新：3 个节点，2 条边。')).toBeInTheDocument();
+
+    await act(async () => {
+      firstOptions?.onEvent?.({ type: 'progress', line: 'stale run leaked' });
+      finishFirst?.({ type: 'result', ok: true, edges: 99, nodes: 99 });
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('stale run leaked')).not.toBeInTheDocument();
+    expect(screen.queryByText('引用图已更新：99 个节点，99 条边。')).not.toBeInTheDocument();
+    expect(screen.getByText('引用图已更新：3 个节点，2 条边。')).toBeInTheDocument();
+  });
+
+  it('aborts the active command when the route unmounts', async () => {
+    const user = userEvent.setup();
+    let activeSignal: AbortSignal | undefined;
+    apiMocks.embed.mockReset().mockImplementation((_scope, options) => {
+      activeSignal = options.signal;
+      return new Promise(() => undefined);
+    });
+    const view = renderInsights();
+
+    await user.click(await screen.findByRole('button', { name: '更新缺失向量' }));
+    expect(activeSignal?.aborted).toBe(false);
+    view.unmount();
+
+    expect(activeSignal?.aborted).toBe(true);
+  });
+
+  it('reports command failures without replacing query-backed insight data', async () => {
+    const user = userEvent.setup();
+    apiMocks.embed.mockReset().mockRejectedValue(new Error('向量服务暂不可用'));
+    renderInsights();
+
+    await user.click(await screen.findByRole('button', { name: '更新缺失向量' }));
+
+    expect(await screen.findByText('向量服务暂不可用')).toBeInTheDocument();
+    expect(screen.getByText('年度轨迹')).toBeInTheDocument();
   });
 
   it('shows explanatory chart empty states instead of synthetic values', async () => {

@@ -1,25 +1,30 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import {
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 
 import { isAbortError } from '../../lib/api/errors';
 import { paperKeys } from '../../lib/api/keys';
 import type { PdfScanFile } from '../../lib/api/types';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { pdfGateway } from '../../lib/api/pdfGateway';
 import type {
   DownloadPdfsTerminal,
   ImportPdfsTerminal,
   LineProgressEvent,
 } from '../../lib/streaming/contracts';
+import {
+  createLocalPdfSessionState,
+  localPdfSessionReducer,
+  type LocalPdfOperation,
+} from './localPdfReducer';
 
-type LocalPdfStatus =
-  | 'idle'
-  | 'scanning'
-  | 'ready'
-  | 'importing'
-  | 'downloading'
-  | 'success'
-  | 'failure'
-  | 'stopped';
+interface LocalPdfRunOwner {
+  readonly runId: number;
+  readonly controller: AbortController;
+}
 
 function messageFor(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -36,125 +41,129 @@ export function LocalPdfPanel() {
   const [directory, setDirectory] = useState('');
   const [files, setFiles] = useState<PdfScanFile[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
-  const [status, setStatus] = useState<LocalPdfStatus>('idle');
-  const [progress, setProgress] = useState<string[]>([]);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const ownerRef = useRef<AbortController | null>(null);
+  const [session, dispatch] = useReducer(
+    localPdfSessionReducer,
+    undefined,
+    createLocalPdfSessionState,
+  );
+  const runSequenceRef = useRef(0);
+  const ownerRef = useRef<LocalPdfRunOwner | null>(null);
 
   useEffect(() => () => {
-    ownerRef.current?.abort();
+    ownerRef.current?.controller.abort();
     ownerRef.current = null;
   }, []);
 
-  const begin = (nextStatus: LocalPdfStatus): AbortController => {
-    ownerRef.current?.abort();
+  const begin = (operation: LocalPdfOperation): LocalPdfRunOwner => {
+    ownerRef.current?.controller.abort();
+    const runId = ++runSequenceRef.current;
     const controller = new AbortController();
-    ownerRef.current = controller;
-    setStatus(nextStatus);
-    setProgress([]);
-    setSummary(null);
-    setError(null);
-    return controller;
+    const owner = { runId, controller };
+    ownerRef.current = owner;
+    dispatch({ type: 'start', runId, operation });
+    return owner;
   };
 
-  const finishOwner = (controller: AbortController) => {
-    if (ownerRef.current === controller) ownerRef.current = null;
+  const finishOwner = (owner: LocalPdfRunOwner) => {
+    if (ownerRef.current === owner) ownerRef.current = null;
   };
 
   const stop = () => {
     const owner = ownerRef.current;
     if (!owner) return;
     ownerRef.current = null;
-    owner.abort();
-    setStatus('stopped');
-    setSummary('已停止接收；服务端可能仍在运行。');
+    owner.controller.abort();
+    dispatch({
+      type: 'stop',
+      runId: owner.runId,
+      terminal: '已停止接收；服务端可能仍在运行。',
+    });
   };
 
   const scan = async () => {
     const path = directory.trim();
     if (!path) {
-      setError('请输入 PDF 文件夹');
+      dispatch({ type: 'validation-failure', error: '请输入 PDF 文件夹' });
       return;
     }
-    const controller = begin('scanning');
+    const owner = begin('scan');
     try {
-      const result = await workspaceApi.scanPdfs(path, controller.signal);
-      if (ownerRef.current !== controller) return;
+      const result = await pdfGateway.scanPdfs(path, owner.controller.signal);
+      if (ownerRef.current !== owner) return;
       setFiles(result.files);
       setSelectedPaths(result.files.map((file) => file.path));
-      setStatus('ready');
-      setSummary(`TOTAL ${result.count}`);
+      dispatch({ type: 'ready', runId: owner.runId, terminal: `TOTAL ${result.count}` });
     } catch (caught) {
-      if (ownerRef.current !== controller || isAbortError(caught)) return;
-      setStatus('failure');
-      setError(messageFor(caught));
+      if (ownerRef.current !== owner || isAbortError(caught)) return;
+      dispatch({ type: 'failure', runId: owner.runId, error: messageFor(caught) });
     } finally {
-      finishOwner(controller);
+      finishOwner(owner);
     }
   };
 
   const appendProgress = (
-    controller: AbortController,
+    owner: LocalPdfRunOwner,
     event: LineProgressEvent | ImportPdfsTerminal | DownloadPdfsTerminal,
   ) => {
     if (
-      ownerRef.current === controller
+      ownerRef.current === owner
       && event.type === 'progress'
       && event.line.trim()
     ) {
-      setProgress((current) => [...current, event.line]);
+      dispatch({ type: 'progress', runId: owner.runId, line: event.line });
     }
   };
 
   const importSelected = async () => {
     const paths = [...selectedPaths];
     if (paths.length === 0) {
-      setError('请选择至少一个 PDF');
+      dispatch({ type: 'validation-failure', error: '请选择至少一个 PDF' });
       return;
     }
-    const controller = begin('importing');
+    const owner = begin('import');
     try {
-      const result = await workspaceApi.importPdfs(paths, true, {
-        signal: controller.signal,
-        onEvent: (event) => appendProgress(controller, event),
+      const result = await pdfGateway.importPdfs(paths, true, {
+        signal: owner.controller.signal,
+        onEvent: (event) => appendProgress(owner, event),
       });
-      if (ownerRef.current !== controller) return;
-      setStatus('success');
-      setSummary(`PARSED ${paths.length} · ADDED ${result.added} · DUP ${result.dup} · SKIP ${result.failed}`);
+      if (ownerRef.current !== owner) return;
+      dispatch({
+        type: 'success',
+        runId: owner.runId,
+        terminal: `PARSED ${paths.length} · ADDED ${result.added} · DUP ${result.dup} · SKIP ${result.failed}`,
+      });
     } catch (caught) {
-      if (ownerRef.current !== controller || isAbortError(caught)) return;
-      setStatus('failure');
-      setError(messageFor(caught));
+      if (ownerRef.current !== owner || isAbortError(caught)) return;
+      dispatch({ type: 'failure', runId: owner.runId, error: messageFor(caught) });
     } finally {
       await queryClient.invalidateQueries({ queryKey: paperKeys.all() });
-      finishOwner(controller);
+      finishOwner(owner);
     }
   };
 
   const downloadMissing = async () => {
-    const controller = begin('downloading');
+    const owner = begin('download');
     try {
-      const result = await workspaceApi.downloadPdfs({}, {
-        signal: controller.signal,
-        onEvent: (event) => appendProgress(controller, event),
+      const result = await pdfGateway.downloadPdfs({}, {
+        signal: owner.controller.signal,
+        onEvent: (event) => appendProgress(owner, event),
       });
-      if (ownerRef.current !== controller) return;
-      setStatus('success');
-      setSummary(
-        `TOTAL ${result.total} · DOWNLOADED ${result.downloaded} · SKIP ${result.skipped} · FAILED ${result.failed}`,
-      );
+      if (ownerRef.current !== owner) return;
+      dispatch({
+        type: 'success',
+        runId: owner.runId,
+        terminal: `TOTAL ${result.total} · DOWNLOADED ${result.downloaded} · SKIP ${result.skipped} · FAILED ${result.failed}`,
+      });
     } catch (caught) {
-      if (ownerRef.current !== controller || isAbortError(caught)) return;
-      setStatus('failure');
-      setError(messageFor(caught));
+      if (ownerRef.current !== owner || isAbortError(caught)) return;
+      dispatch({ type: 'failure', runId: owner.runId, error: messageFor(caught) });
     } finally {
       await queryClient.invalidateQueries({ queryKey: paperKeys.all() });
-      finishOwner(controller);
+      finishOwner(owner);
     }
   };
 
-  const busy = status === 'scanning' || status === 'importing' || status === 'downloading';
+  const busy = session.phase === 'running';
   const selected = new Set(selectedPaths);
 
   return (
@@ -223,9 +232,11 @@ export function LocalPdfPanel() {
       ) : null}
 
       <div className="local-pdf__status" aria-live="polite">
-        {summary ? <strong>{summary}</strong> : null}
-        {error ? <p role="alert">{error}</p> : null}
-        {progress.length > 0 ? <pre aria-label="本地 PDF 进度">{progress.join('\n')}</pre> : null}
+        {session.terminal ? <strong>{session.terminal}</strong> : null}
+        {session.error ? <p role="alert">{session.error}</p> : null}
+        {session.progress.length > 0 ? (
+          <pre aria-label="本地 PDF 进度">{session.progress.join('\n')}</pre>
+        ) : null}
       </div>
     </section>
   );

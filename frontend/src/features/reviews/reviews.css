@@ -49,6 +49,68 @@
   gap: var(--space-3);
 }
 
+.reviews-route__start {
+  display: grid;
+  grid-template-columns: minmax(15rem, 1fr) minmax(16rem, 1.2fr) auto;
+  align-items: end;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: inset 0 1px var(--color-line);
+}
+
+.reviews-route__start > div > p {
+  color: var(--color-accent-hover);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-1);
+  font-weight: 650;
+  letter-spacing: 0.11em;
+}
+
+.reviews-route__start h2 {
+  margin-top: var(--space-1);
+  color: var(--color-text);
+  font-size: var(--font-size-5);
+}
+
+.reviews-route__start > div > span,
+.reviews-route__start label > span,
+.reviews-route__start-empty {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-2);
+}
+
+.reviews-route__start label {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.reviews-route__start select,
+.reviews-route__start > button {
+  min-height: 2.75rem;
+}
+
+.reviews-route__start > button {
+  padding-inline: var(--space-4);
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.reviews-route__start-error,
+.reviews-route__start-empty {
+  grid-column: 1 / -1;
+}
+
+.reviews-route__start-error {
+  color: var(--color-critical);
+}
+
+.reviews-route__start-error button {
+  margin-inline-start: var(--space-2);
+}
+
 .review-group {
   min-width: 0;
   overflow: hidden;
@@ -252,6 +314,10 @@
   }
 
   .review-item {
+    grid-template-columns: 1fr;
+  }
+
+  .reviews-route__start {
     grid-template-columns: 1fr;
   }
 

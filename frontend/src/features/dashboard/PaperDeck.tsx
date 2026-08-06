@@ -141,10 +141,8 @@ export function PaperDeck({
                 aria-posinset={sourceIndex + 1}
                 aria-setsize={state.total}
                 tabIndex={selected ? 0 : -1}
-                onClick={(event) => {
-                  event.currentTarget.focus();
-                  onSelect(paperId);
-                }}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onSelect(paperId)}
                 onDoubleClick={() => onOpen(paperId)}
                 onKeyDown={(event) => handleKeyDown(event, paperId)}
               >

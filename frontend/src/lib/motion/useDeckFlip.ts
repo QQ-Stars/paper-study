@@ -55,7 +55,7 @@ export function useDeckFlip({
           fade: true,
           scale: true,
           simple: true,
-          onComplete: () => gsap.set(cards, finalInlinePresentation),
+          clearProps: finalInlinePresentation.clearProps,
         });
       }
       previousLayout.current = committedLayout;

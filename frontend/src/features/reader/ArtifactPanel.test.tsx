@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { artifactKeys, paperKeys } from '../../lib/api/keys';
+import type { ExplainBatchTerminal } from '../../lib/streaming/contracts';
 import { ArtifactPanel } from './ArtifactPanel';
 
 const apiMocks = vi.hoisted(() => ({
@@ -12,6 +13,7 @@ const apiMocks = vi.hoisted(() => ({
   getTranslation: vi.fn(),
   saveNote: vi.fn(),
   explainPaper: vi.fn(),
+  explainBatch: vi.fn(),
   translatePaper: vi.fn(),
 }));
 
@@ -24,13 +26,10 @@ vi.mock('../../lib/api/paperApi', () => ({
   },
 }));
 
-vi.mock('../../lib/api/workspaceApi', () => ({
-  streamSideEffectPolicies: {
-    explain: { reconcileOn: 'settled', facts: ['explainer', 'papers'] },
-    translate: { reconcileOn: 'settled', facts: ['translation', 'papers'] },
-  },
-  workspaceApi: {
+vi.mock('../../lib/api/artifactGateway', () => ({
+  artifactGateway: {
     explainPaper: apiMocks.explainPaper,
+    explainBatch: apiMocks.explainBatch,
     translatePaper: apiMocks.translatePaper,
   },
 }));
@@ -88,12 +87,49 @@ beforeEach(() => {
   apiMocks.explainPaper.mockReset().mockResolvedValue({
     type: 'result', ok: true, markdown: '# Explanation',
   });
+  apiMocks.explainBatch.mockReset().mockResolvedValue({
+    type: 'result',
+    ok: true,
+    summary: { total: 2, done: 2, failed: [], skippedNoPdf: [] },
+  });
   apiMocks.translatePaper.mockReset().mockResolvedValue({
     type: 'result', ok: true, markdown: '# Translation',
   });
 });
 
 describe('ArtifactPanel', () => {
+  it('offers separate single and batch explainer commands with streamed progress', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<ExplainBatchTerminal>();
+    apiMocks.getExplainer
+      .mockResolvedValueOnce('')
+      .mockResolvedValue('# Batch Explanation');
+    apiMocks.explainBatch.mockImplementation((limit, options) => {
+      expect(limit).toBe(0);
+      options.onEvent?.({ type: 'progress', line: '批量讲解 1 / 2' });
+      return pending.promise;
+    });
+    renderPanel();
+
+    await user.click(await screen.findByRole('tab', { name: '讲解' }));
+    expect(screen.getByRole('button', { name: '生成讲解' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '批量生成缺失讲解' }));
+
+    expect(await screen.findByText('批量讲解 1 / 2')).toBeInTheDocument();
+    expect(apiMocks.explainBatch).toHaveBeenCalledOnce();
+    await act(async () => {
+      pending.resolve({
+        type: 'result',
+        ok: true,
+        summary: { total: 2, done: 2, failed: [], skippedNoPdf: [] },
+      });
+      await pending.promise;
+    });
+    expect(await screen.findByText('讲解已完成，正在同步服务端内容。')).toBeInTheDocument();
+    await waitFor(() => expect(apiMocks.getExplainer.mock.calls.length).toBeGreaterThan(1));
+    expect(await screen.findByText('# Batch Explanation')).toBeInTheDocument();
+  });
+
   it('moves tab focus and selection with arrow keys', async () => {
     const user = userEvent.setup();
     renderPanel();

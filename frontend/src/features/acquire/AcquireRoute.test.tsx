@@ -18,8 +18,20 @@ const apiMocks = vi.hoisted(() => ({
   downloadPdfs: vi.fn(),
 }));
 
-vi.mock('../../lib/api/workspaceApi', () => ({
-  workspaceApi: apiMocks,
+vi.mock('../../lib/api/acquisitionGateway', () => ({
+  acquisitionGateway: {
+    expand: apiMocks.expand,
+    search: apiMocks.search,
+    verifyVenue: apiMocks.verifyVenue,
+    ingestSelected: apiMocks.ingestSelected,
+  },
+}));
+vi.mock('../../lib/api/pdfGateway', () => ({
+  pdfGateway: {
+    scanPdfs: apiMocks.scanPdfs,
+    importPdfs: apiMocks.importPdfs,
+    downloadPdfs: apiMocks.downloadPdfs,
+  },
 }));
 
 function candidate(
@@ -219,6 +231,11 @@ describe('Acquire route', () => {
 
     await user.click(within(panel).getByRole('button', { name: '补齐馆藏 PDF' }));
     expect(await within(panel).findByText('TOTAL 3 · DOWNLOADED 2 · SKIP 1 · FAILED 0')).toBeInTheDocument();
+
+    await user.clear(within(panel).getByRole('textbox', { name: 'PDF 文件夹' }));
+    await user.click(within(panel).getByRole('button', { name: '扫描文件夹' }));
+    expect(within(panel).getByRole('alert')).toHaveTextContent('请输入 PDF 文件夹');
+    expect(within(panel).queryByText('TOTAL 3 · DOWNLOADED 2 · SKIP 1 · FAILED 0')).not.toBeInTheDocument();
   });
 
   it('aborts the live stream on route unmount without publishing a failure', async () => {

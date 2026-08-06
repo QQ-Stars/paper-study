@@ -22,8 +22,8 @@ vi.mock('../../lib/api/paperApi', () => ({
   paperApi: { getPaper: apiMocks.getPaper },
 }));
 
-vi.mock('../../lib/api/workspaceApi', () => ({
-  workspaceApi: { getPdfStatus: apiMocks.getPdfStatus },
+vi.mock('../../lib/api/pdfGateway', () => ({
+  pdfGateway: { getPdfStatus: apiMocks.getPdfStatus },
 }));
 
 vi.mock('./PdfWorkspace', () => ({

@@ -129,6 +129,10 @@ describe('useDeckFlip', () => {
     view.rerender(<Deck layoutKey="two" />);
 
     expect(motion.flipFrom).toHaveBeenCalledOnce();
+    expect(motion.flipFrom.mock.calls[0][1]).toEqual(expect.objectContaining({
+      clearProps: 'transform,opacity,visibility',
+    }));
+    expect(motion.flipFrom.mock.calls[0][1]).not.toHaveProperty('onComplete');
     expect(motion.matchMediaRevert).toHaveBeenCalled();
   });
 

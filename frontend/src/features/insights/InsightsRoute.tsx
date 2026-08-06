@@ -1,14 +1,15 @@
 /* eslint-disable react-refresh/only-export-components -- React Router lazy modules export route metadata with their component. */
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import type { EChartsOption } from 'echarts';
 
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
+import { isAbortError } from '../../lib/api/errors';
 import { citationKeys, paperKeys } from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';
 import type { CitationNode } from '../../lib/api/types';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { insightsGateway } from '../../lib/api/insightsGateway';
 import {
   buildCitationGraphOption,
   buildTopCitationsOption,
@@ -18,6 +19,12 @@ import {
 } from '../../lib/charts/options';
 import { useEChart } from '../../lib/charts/useEChart';
 import type { WorkspaceRouteHandle } from '../../lib/workspace';
+import {
+  createInsightsCommandSession,
+  insightsCommandReducer,
+  type InsightsCommand,
+  type InsightsCommandTerminal,
+} from './insightsCommandSession';
 import './insights.css';
 
 export const handle = {
@@ -39,6 +46,17 @@ function eventPaperId(params: unknown): string | null {
   if (!data || typeof data !== 'object') return null;
   const id = Reflect.get(data, 'id');
   return typeof id === 'string' && id.trim() ? id : null;
+}
+
+interface CommandOwner {
+  readonly runId: number;
+  readonly command: InsightsCommand;
+  readonly controller: AbortController;
+}
+
+interface CommandOptions {
+  readonly signal: AbortSignal;
+  readonly onEvent: (event: unknown) => void;
 }
 
 function ChartPanel({
@@ -90,68 +108,154 @@ function ChartPanel({
 export function Component() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const abortRef = useRef<AbortController | null>(null);
-  const commandRunRef = useRef(0);
-  const [progress, setProgress] = useState<string[]>([]);
+  const ownerRef = useRef<CommandOwner | null>(null);
+  const runSequence = useRef(0);
+  const [session, dispatch] = useReducer(
+    insightsCommandReducer,
+    undefined,
+    createInsightsCommandSession,
+  );
+  const [selectedRecommendationId, setSelectedRecommendationId] = useState('');
   const papersQuery = useQuery({
     queryKey: paperKeys.list(),
     queryFn: ({ signal }) => paperApi.listPapers(signal),
   });
   const graphQuery = useQuery({
     queryKey: citationKeys.graph(),
-    queryFn: ({ signal }) => workspaceApi.getCitationGraph(signal),
+    queryFn: ({ signal }) => insightsGateway.getCitationGraph(signal),
   });
 
-  const beginCommand = () => {
-    abortRef.current?.abort();
-    const runId = ++commandRunRef.current;
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setProgress([]);
-    return {
-      signal: controller.signal,
-      onEvent: (event: unknown) => {
-        if (commandRunRef.current !== runId) return;
-        if (
-          event
-          && typeof event === 'object'
-          && Reflect.get(event, 'type') === 'progress'
-          && typeof Reflect.get(event, 'line') === 'string'
-        ) {
-          const line = String(Reflect.get(event, 'line'));
-          setProgress((current) => [...current.slice(-7), line]);
-        }
-      },
+  const beginCommand = (command: InsightsCommand): CommandOwner => {
+    ownerRef.current?.controller.abort();
+    const owner = {
+      runId: ++runSequence.current,
+      command,
+      controller: new AbortController(),
     };
+    ownerRef.current = owner;
+    dispatch({ type: 'started', runId: owner.runId, command });
+    return owner;
   };
 
-  const buildGraph = useMutation({
-    mutationFn: () => workspaceApi.buildCitationGraph(beginCommand()),
-    onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: citationKeys.graph() });
-    },
-  });
-  const normalizeVenues = useMutation({
-    mutationFn: () => workspaceApi.normalizeVenues(beginCommand()),
-    onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: paperKeys.all() });
+  const commandOptions = (owner: CommandOwner): CommandOptions => ({
+    signal: owner.controller.signal,
+    onEvent: (event: unknown) => {
+      if (ownerRef.current !== owner) return;
+      if (
+        event
+        && typeof event === 'object'
+        && Reflect.get(event, 'type') === 'progress'
+        && typeof Reflect.get(event, 'line') === 'string'
+      ) {
+        dispatch({
+          type: 'progressed',
+          runId: owner.runId,
+          line: String(Reflect.get(event, 'line')),
+        });
+      }
     },
   });
 
+  const runCommand = async <T,>(
+    command: InsightsCommand,
+    request: (options: CommandOptions) => Promise<T>,
+    terminalFor: (result: T) => InsightsCommandTerminal,
+    reconcile?: () => Promise<unknown>,
+  ) => {
+    const owner = beginCommand(command);
+    try {
+      const result = await request(commandOptions(owner));
+      if (ownerRef.current !== owner) return;
+      dispatch({
+        type: 'completed',
+        runId: owner.runId,
+        terminal: terminalFor(result),
+      });
+    } catch (error) {
+      if (ownerRef.current !== owner) return;
+      if (isAbortError(error)) {
+        dispatch({ type: 'stopped', runId: owner.runId });
+      } else {
+        dispatch({ type: 'failed', runId: owner.runId, error: errorMessage(error) });
+      }
+    } finally {
+      try {
+        await reconcile?.();
+      } finally {
+        if (ownerRef.current === owner) ownerRef.current = null;
+      }
+    }
+  };
+
+  const stopCommand = () => {
+    const owner = ownerRef.current;
+    if (!owner) return;
+    ownerRef.current = null;
+    owner.controller.abort();
+    dispatch({ type: 'stopped', runId: owner.runId });
+  };
+
   useEffect(() => () => {
-    commandRunRef.current += 1;
-    abortRef.current?.abort();
+    runSequence.current += 1;
+    const owner = ownerRef.current;
+    ownerRef.current = null;
+    owner?.controller.abort();
   }, []);
 
   const papers = useMemo(() => papersQuery.data ?? [], [papersQuery.data]);
+  const recommendationPaperId = papers.some((paper) => paper.id === selectedRecommendationId)
+    ? selectedRecommendationId
+    : papers[0]?.id ?? '';
+
+  const buildGraph = () => runCommand(
+    'citation-build',
+    (options) => insightsGateway.buildCitationGraph(options),
+    (terminal) => ({
+      command: 'citation-build',
+      summary: `引用图已更新：${terminal.nodes} 个节点，${terminal.edges} 条边。`,
+    }),
+    () => queryClient.invalidateQueries({ queryKey: citationKeys.graph() }),
+  );
+
+  const normalizeVenues = () => runCommand(
+    'normalize-venues',
+    (options) => insightsGateway.normalizeVenues(options),
+    (terminal) => ({
+      command: 'normalize-venues',
+      summary: `已规范 ${terminal.changed} 条发表场所记录。`,
+    }),
+    () => queryClient.invalidateQueries({ queryKey: paperKeys.all() }),
+  );
+
+  const recommend = () => {
+    if (!recommendationPaperId) return Promise.resolve();
+    return runCommand(
+      'recommend',
+      (options) => insightsGateway.recommend(recommendationPaperId, 14, options),
+      (terminal) => ({
+        command: 'recommend',
+        summary: `找到 ${terminal.candidates.length} 篇真实推荐。`,
+        candidates: terminal.candidates,
+      }),
+    );
+  };
+
+  const embed = () => runCommand(
+    'embed',
+    (options) => insightsGateway.embed('missing', options),
+    (terminal) => ({
+      command: 'embed',
+      summary: `向量索引完成：${terminal.indexed} / ${terminal.total}。`,
+    }),
+  );
+
   const graph = graphQuery.data;
   const yearOption = useMemo(() => buildYearTrendOption(papers), [papers]);
   const topicOption = useMemo(() => buildTopicTreemapOption(papers), [papers]);
   const venueOption = useMemo(() => buildVenueCompositionOption(papers), [papers]);
   const citationOption = useMemo(() => buildTopCitationsOption(papers), [papers]);
   const graphOption = useMemo(() => buildCitationGraphOption(graph), [graph]);
-  const commandPending = buildGraph.isPending || normalizeVenues.isPending;
-  const commandError = buildGraph.error ?? normalizeVenues.error;
+  const commandPending = session.phase === 'running';
   const openPaper = (paperId: string) => {
     void navigate(`/reader/${encodeURIComponent(paperId)}`);
   };
@@ -190,19 +294,72 @@ export function Component() {
       </header>
 
       <div className="insights-route__commands">
-        <button type="button" disabled={commandPending} onClick={() => buildGraph.mutate()}>
-          {buildGraph.isPending ? '正在构建引用图…' : '重建引用图'}
+        <button type="button" disabled={commandPending} onClick={() => void buildGraph()}>
+          {commandPending && session.command === 'citation-build' ? '正在构建引用图…' : '重建引用图'}
         </button>
-        <button type="button" disabled={commandPending} onClick={() => normalizeVenues.mutate()}>
-          {normalizeVenues.isPending ? '正在规范场所…' : '规范发表场所'}
+        <button type="button" disabled={commandPending} onClick={() => void normalizeVenues()}>
+          {commandPending && session.command === 'normalize-venues' ? '正在规范场所…' : '规范发表场所'}
         </button>
-        {commandError ? <output className="insights-route__command-error">{errorMessage(commandError)}</output> : null}
+        <label className="insights-route__recommendation-seed">
+          <span>推荐种子论文</span>
+          <select
+            value={recommendationPaperId}
+            disabled={commandPending || papers.length === 0}
+            onChange={(event) => setSelectedRecommendationId(event.currentTarget.value)}
+          >
+            {papers.map((paper) => <option key={paper.id} value={paper.id}>{paper.title}</option>)}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={commandPending || !recommendationPaperId}
+          onClick={() => void recommend()}
+        >
+          {commandPending && session.command === 'recommend' ? '正在推荐…' : '推荐相似论文'}
+        </button>
+        <button type="button" disabled={commandPending} onClick={() => void embed()}>
+          {commandPending && session.command === 'embed' ? '正在更新向量…' : '更新缺失向量'}
+        </button>
+        {commandPending ? <button type="button" onClick={stopCommand}>停止接收</button> : null}
       </div>
 
-      {progress.length > 0 ? (
+      {session.phase === 'failure' && session.error ? (
+        <output className="insights-route__command-error">{session.error}</output>
+      ) : null}
+      {session.phase === 'stopped' ? (
+        <output className="insights-route__command-status">已停止接收；服务端可能仍在运行。</output>
+      ) : null}
+      {session.phase === 'success' && session.terminal ? (
+        <output className="insights-route__command-status">{session.terminal.summary}</output>
+      ) : null}
+
+      {session.progress.length > 0 ? (
         <ol className="insights-route__progress" aria-label="洞察命令进度" aria-live="polite">
-          {progress.map((line, index) => <li key={`${index}:${line}`}>{line}</li>)}
+          {session.progress.map((line, index) => <li key={`${index}:${line}`}>{line}</li>)}
         </ol>
+      ) : null}
+
+      {session.terminal?.command === 'recommend' ? (
+        <section className="insights-route__recommendations" aria-labelledby="insights-recommendations-title">
+          <header>
+            <p>RECOMMENDATIONS</p>
+            <h3 id="insights-recommendations-title">相似论文</h3>
+          </header>
+          {session.terminal.candidates.length > 0 ? (
+            <ol>
+              {session.terminal.candidates.map((candidate) => (
+                <li key={`${candidate.source}:${candidate.sourceId}`}>
+                  <strong>{candidate.title}</strong>
+                  <span>{[
+                    candidate.venue,
+                    candidate.year,
+                    candidate.relevance == null ? null : `相关度 ${candidate.relevance.toFixed(2)}`,
+                  ].filter(Boolean).join(' · ')}</span>
+                </li>
+              ))}
+            </ol>
+          ) : <p>当前论文没有返回真实推荐结果。</p>}
+        </section>
       ) : null}
 
       <div className="insights-grid">

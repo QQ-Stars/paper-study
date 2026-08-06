@@ -33,8 +33,8 @@ vi.mock('../../lib/api/paperApi', () => ({
   },
 }));
 
-vi.mock('../../lib/api/workspaceApi', () => ({
-  workspaceApi: { semanticSearch: apiMocks.semanticSearch },
+vi.mock('../../lib/api/insightsGateway', () => ({
+  insightsGateway: { semanticSearch: apiMocks.semanticSearch },
 }));
 
 function paper(

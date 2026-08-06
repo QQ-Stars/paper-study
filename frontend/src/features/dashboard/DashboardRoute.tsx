@@ -15,14 +15,21 @@ import {
   useWorkspaceStore,
 } from '../../lib/workspace';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
-import { jobKeys, paperKeys, reviewKeys } from '../../lib/api/keys';
+import {
+  jobKeys,
+  paperKeys,
+  reviewKeys,
+  titleTranslationKeys,
+} from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';
 import type {
   JobSummary,
   ReviewItem,
   ReviewSnapshot,
+  ReviewState,
 } from '../../lib/api/types';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { artifactGateway } from '../../lib/api/artifactGateway';
+import { jobsGateway } from '../../lib/api/jobsGateway';
 import { PaperDeck, type PaperDeckItem } from './PaperDeck';
 import {
   PaperInspector,
@@ -45,12 +52,35 @@ export interface DashboardPaper
     PaperInspectorPaper,
     DashboardPaperEvidence {}
 
+export interface DashboardReview extends DashboardReviewEvidence {
+  readonly reviewState?: ReviewState;
+}
+
+export interface DashboardAiEvidence {
+  readonly status: 'pending' | 'ready' | 'error';
+  readonly titleTranslationPending: number;
+  readonly titleTranslationRunning: boolean;
+  readonly explainerPending: number;
+}
+
+const EMPTY_AI_EVIDENCE: DashboardAiEvidence = {
+  status: 'ready',
+  titleTranslationPending: 0,
+  titleTranslationRunning: false,
+  explainerPending: 0,
+};
+
+const dashboardAiKeys = {
+  explainerPending: () => ['dashboard', 'ai', 'explainer-pending'] as const,
+};
+
 export type DashboardLoadStatus = 'pending' | 'success' | 'error';
 
 export interface DashboardViewProps {
   readonly papers: readonly DashboardPaper[];
-  readonly reviews: readonly DashboardReviewEvidence[];
+  readonly reviews: readonly DashboardReview[];
   readonly jobs: readonly DashboardJobEvidence[];
+  readonly aiEvidence?: DashboardAiEvidence;
   readonly preferredPaperId?: string | null;
   readonly status?: DashboardLoadStatus;
   readonly errorMessage?: string;
@@ -77,6 +107,7 @@ export function DashboardView({
   papers,
   reviews,
   jobs,
+  aiEvidence = EMPTY_AI_EVIDENCE,
   preferredPaperId = null,
   status = 'success',
   errorMessage = '研究概览暂时不可用。',
@@ -164,6 +195,20 @@ export function DashboardView({
     setInspectorOpen(false);
     onOpenPaper(requestedPaperId);
   };
+  const todayPapers = reviews.filter((review) => review.reviewState === 'dueToday').length;
+  const learningPapers = papers.filter((paper) => paper.status === '学习中').length;
+  const completedPapers = papers.filter((paper) => paper.status === '已理解').length;
+  const overdueReviews = reviews.filter((review) => review.reviewState === 'overdue').length;
+  const activeAcquisitions = jobs.filter(
+    (job) => job.status === 'pending' || job.status === 'running' || job.status === 'review',
+  ).length;
+  const recentAiTasks = aiEvidence.titleTranslationPending + aiEvidence.explainerPending;
+  const aiValue = aiEvidence.status === 'pending'
+    ? '…'
+    : aiEvidence.status === 'error' ? '—' : String(recentAiTasks);
+  const titleTaskLabel = aiEvidence.titleTranslationRunning
+    ? `${aiEvidence.titleTranslationPending}（运行中）`
+    : String(aiEvidence.titleTranslationPending);
 
   return (
     <section className="dashboard-route" aria-label="研究概览">
@@ -185,6 +230,45 @@ export function DashboardView({
           </button>
         ) : null}
       </header>
+
+      <section className="dashboard-summary" aria-label="今日研究摘要">
+        <dl>
+          <div>
+            <dt>今日论文</dt>
+            <dd>{todayPapers}</dd>
+            <small>今日复习节点</small>
+          </div>
+          <div>
+            <dt>学习中</dt>
+            <dd>{learningPapers}</dd>
+            <small>当前阅读状态</small>
+          </div>
+          <div>
+            <dt>已完成论文</dt>
+            <dd>{completedPapers}</dd>
+            <small>状态为已理解</small>
+          </div>
+          <div>
+            <dt>逾期复习</dt>
+            <dd>{overdueReviews}</dd>
+            <small>需要优先恢复</small>
+          </div>
+          <div>
+            <dt>活跃采集</dt>
+            <dd>{activeAcquisitions}</dd>
+            <small>待命 / 运行 / 待确认</small>
+          </div>
+          <div>
+            <dt>最近 AI 任务</dt>
+            <dd>{aiValue}</dd>
+            <small>
+              {aiEvidence.status === 'error'
+                ? 'AI 队列状态暂不可用'
+                : `题名 ${titleTaskLabel} · 讲解 ${aiEvidence.explainerPending}`}
+            </small>
+          </div>
+        </dl>
+      </section>
 
       {status === 'pending' ? (
         <p className="dashboard-route__refresh" role="status">正在刷新研究事实…</p>
@@ -280,10 +364,18 @@ function useDashboardData() {
   });
   const jobsQuery = useQuery({
     queryKey: jobKeys.list(),
-    queryFn: ({ signal }) => workspaceApi.listJobs(signal),
+    queryFn: ({ signal }) => jobsGateway.listJobs(signal),
+  });
+  const titleTranslationQuery = useQuery({
+    queryKey: titleTranslationKeys.status(),
+    queryFn: ({ signal }) => artifactGateway.getTitleTranslationStatus(signal),
+  });
+  const explainerPendingQuery = useQuery({
+    queryKey: dashboardAiKeys.explainerPending(),
+    queryFn: ({ signal }) => artifactGateway.getExplainerPending(signal),
   });
 
-  const reviews = useMemo<DashboardReviewEvidence[]>(() => (
+  const reviews = useMemo<DashboardReview[]>(() => (
     flattenReviewItems(reviewsQuery.data).map((review) => ({
       paperId: review.paperId,
       paperTitle: review.title,
@@ -292,6 +384,7 @@ function useDashboardData() {
       completedAt: review.completedAt,
       currentStep: review.currentStep,
       totalSteps: review.totalSteps,
+      reviewState: review.reviewState,
     }))
   ), [reviewsQuery.data]);
 
@@ -309,6 +402,16 @@ function useDashboardData() {
     papers: (papersQuery.data ?? []) as readonly DashboardPaper[],
     reviews,
     jobs,
+    aiEvidence: {
+      status: titleTranslationQuery.isPending || explainerPendingQuery.isPending
+        ? 'pending' as const
+        : titleTranslationQuery.isError && explainerPendingQuery.isError
+          ? 'error' as const
+          : 'ready' as const,
+      titleTranslationPending: titleTranslationQuery.data?.pending ?? 0,
+      titleTranslationRunning: titleTranslationQuery.data?.running ?? false,
+      explainerPending: explainerPendingQuery.data?.pending ?? 0,
+    },
     status: papersQuery.isPending
       ? 'pending' as const
       : papersQuery.isError
@@ -385,6 +488,7 @@ export function Component() {
       papers={data.papers}
       reviews={data.reviews}
       jobs={data.jobs}
+      aiEvidence={data.aiEvidence}
       preferredPaperId={preferredPaperId}
       status={data.status}
       errorMessage={data.errorMessage}

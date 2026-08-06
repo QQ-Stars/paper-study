@@ -9,12 +9,12 @@ import {
   useWorkspaceStore,
 } from '../../lib/workspace';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
-import { reviewKeys } from '../../lib/api/keys';
+import { paperKeys, reviewKeys } from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';
 import { ReviewGroup } from './ReviewGroup';
 import './reviews.css';
 
-const reviewMutationScope = { id: 'review-completion' } as const;
+const reviewMutationScope = { id: 'review-write' } as const;
 
 interface ReviewAudit {
   readonly phase: 'idle' | 'pending' | 'success' | 'error';
@@ -41,10 +41,35 @@ export function Component() {
   const [pendingPaperIds, setPendingPaperIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [startPaperId, setStartPaperId] = useState('');
   const [audit, setAudit] = useState<ReviewAudit>({ phase: 'idle', message: '' });
   const query = useQuery({
     queryKey: reviewKeys.list(),
     queryFn: ({ signal }) => paperApi.getReviews(signal),
+  });
+  const papersQuery = useQuery({
+    queryKey: paperKeys.list(),
+    queryFn: ({ signal }) => paperApi.listPapers(signal),
+  });
+  const start = useMutation({
+    mutationKey: ['reviews', 'start'],
+    scope: reviewMutationScope,
+    mutationFn: ({ paperId }: { paperId: string }) => paperApi.startReview(paperId),
+    onMutate: async ({ paperId }) => {
+      setAudit({ phase: 'pending', message: `正在开始 ${paperId} 的复习计划` });
+      await queryClient.cancelQueries({ queryKey: reviewKeys.list(), exact: true });
+    },
+    onSuccess: async (_plan, { paperId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: reviewKeys.list(), exact: true }),
+        queryClient.invalidateQueries({ queryKey: paperKeys.all() }),
+      ]);
+      setStartPaperId('');
+      setAudit({ phase: 'success', message: `已开始 ${paperId} 的复习计划` });
+    },
+    onError: (error) => {
+      setAudit({ phase: 'error', message: `开始复习计划失败：${errorText(error)}` });
+    },
   });
   const complete = useMutation({
     mutationKey: ['reviews', 'complete'],
@@ -95,6 +120,15 @@ export function Component() {
 
   const reviews = query.data;
   const dueCount = reviews.counts.overdue + reviews.counts.dueToday;
+  const plannedPaperIds = new Set([
+    ...reviews.overdue,
+    ...reviews.dueToday,
+    ...reviews.upcoming,
+    ...reviews.completed,
+  ].map((item) => item.paperId));
+  const eligiblePapers = (papersQuery.data ?? []).filter(
+    (paper) => !plannedPaperIds.has(paper.id),
+  );
 
   return (
     <section className="reviews-route" aria-label="复习队列">
@@ -121,6 +155,46 @@ export function Component() {
           {audit.message}
         </p>
       ) : null}
+
+      <section className="reviews-route__start" aria-labelledby="reviews-start-title">
+        <div>
+          <p>NEW PLAN</p>
+          <h2 id="reviews-start-title">开始复习计划</h2>
+          <span>选择尚未进入四组权威快照的论文，由服务端创建固定七轮计划。</span>
+        </div>
+        <label>
+          <span>未安排论文</span>
+          <select
+            aria-label="选择未安排复习的论文"
+            value={startPaperId}
+            disabled={papersQuery.isPending || start.isPending}
+            onChange={(event) => setStartPaperId(event.currentTarget.value)}
+          >
+            <option value="">请选择论文</option>
+            {eligiblePapers.map((paper) => (
+              <option key={paper.id} value={paper.id}>
+                {paper.titleZh || paper.title} · {paper.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={!startPaperId || papersQuery.isPending || start.isPending || complete.isPending}
+          onClick={() => start.mutate({ paperId: startPaperId })}
+        >
+          {start.isPending ? '开始中…' : '开始计划'}
+        </button>
+        {papersQuery.isError ? (
+          <p className="reviews-route__start-error" role="alert">
+            无法读取可安排论文：{errorText(papersQuery.error)}
+            <button type="button" onClick={() => void papersQuery.refetch()}>重试</button>
+          </p>
+        ) : null}
+        {!papersQuery.isPending && !papersQuery.isError && eligiblePapers.length === 0 ? (
+          <p className="reviews-route__start-empty">当前所有论文都已安排复习计划。</p>
+        ) : null}
+      </section>
 
       <div className="reviews-route__groups">
         <ReviewGroup

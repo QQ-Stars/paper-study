@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,6 +19,8 @@ const apiMocks = vi.hoisted(() => ({
   listPapers: vi.fn(),
   getReviews: vi.fn(),
   listJobs: vi.fn(),
+  getTitleTranslationStatus: vi.fn(),
+  getExplainerPending: vi.fn(),
 }));
 
 vi.mock('../../lib/api/paperApi', () => ({
@@ -27,8 +29,16 @@ vi.mock('../../lib/api/paperApi', () => ({
     getReviews: apiMocks.getReviews,
   },
 }));
-vi.mock('../../lib/api/workspaceApi', () => ({
-  workspaceApi: { listJobs: apiMocks.listJobs },
+vi.mock('../../lib/api/jobsGateway', () => ({
+  jobsGateway: {
+    listJobs: apiMocks.listJobs,
+  },
+}));
+vi.mock('../../lib/api/artifactGateway', () => ({
+  artifactGateway: {
+    getTitleTranslationStatus: apiMocks.getTitleTranslationStatus,
+    getExplainerPending: apiMocks.getExplainerPending,
+  },
 }));
 
 const paper: PaperListItem = {
@@ -125,6 +135,15 @@ beforeEach(() => {
   apiMocks.listPapers.mockReset().mockResolvedValue([paper]);
   apiMocks.getReviews.mockReset().mockResolvedValue(reviews);
   apiMocks.listJobs.mockReset().mockResolvedValue(jobs);
+  apiMocks.getTitleTranslationStatus.mockReset().mockResolvedValue({
+    pending: 0,
+    running: false,
+  });
+  apiMocks.getExplainerPending.mockReset().mockResolvedValue({
+    pending: 0,
+    withPdf: 0,
+    noPdf: 0,
+  });
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: vi.fn(matchMedia),
@@ -154,5 +173,66 @@ describe('Dashboard route data adapter', () => {
     expect(apiMocks.listPapers).toHaveBeenCalled();
     expect(apiMocks.getReviews).toHaveBeenCalled();
     expect(apiMocks.listJobs).toHaveBeenCalled();
+  });
+
+  it('summarizes today, study state, overdue reviews, active intake, and recent AI queues from server facts', async () => {
+    const completedPaper: PaperListItem = {
+      ...paper,
+      id: 'p2',
+      file: 'completed.pdf',
+      title: 'Completed Paper',
+      titleZh: '已完成论文',
+      status: '已理解',
+    };
+    const dueToday = {
+      ...reviews.upcoming[0]!,
+      paperId: 'p1',
+      reviewState: 'dueToday' as const,
+      nextDueAt: reviews.today,
+    };
+    const overdue = {
+      ...reviews.upcoming[0]!,
+      paperId: 'p2',
+      title: completedPaper.title,
+      reviewState: 'overdue' as const,
+      nextDueAt: '2026-08-04',
+    };
+    apiMocks.listPapers.mockResolvedValue([paper, completedPaper]);
+    apiMocks.getReviews.mockResolvedValue({
+      ...reviews,
+      counts: { overdue: 1, dueToday: 1, upcoming: 0, completed: 0 },
+      overdue: [overdue],
+      dueToday: [dueToday],
+      upcoming: [],
+    });
+    apiMocks.listJobs.mockResolvedValue([
+      jobs[0]!,
+      { ...jobs[0]!, id: 10, status: 'review' as const },
+      { ...jobs[0]!, id: 11, status: 'done' as const },
+    ]);
+    apiMocks.getTitleTranslationStatus.mockResolvedValue({ pending: 2, running: true });
+    apiMocks.getExplainerPending.mockResolvedValue({ pending: 3, withPdf: 2, noPdf: 1 });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/dashboard']}>
+          <Component />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const summary = await screen.findByRole('region', { name: '今日研究摘要' });
+    expect(within(summary).getByText('今日论文').parentElement).toHaveTextContent('1');
+    expect(within(summary).getByText('学习中').parentElement).toHaveTextContent('1');
+    expect(within(summary).getByText('已完成论文').parentElement).toHaveTextContent('1');
+    expect(within(summary).getByText('逾期复习').parentElement).toHaveTextContent('1');
+    expect(within(summary).getByText('活跃采集').parentElement).toHaveTextContent('2');
+    expect(within(summary).getByText('最近 AI 任务').parentElement).toHaveTextContent('5');
+    expect(within(summary).getByText('题名 2（运行中） · 讲解 3')).toBeInTheDocument();
+    expect(apiMocks.getTitleTranslationStatus).toHaveBeenCalled();
+    expect(apiMocks.getExplainerPending).toHaveBeenCalled();
   });
 });

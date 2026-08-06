@@ -2,19 +2,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { scheduleKeys } from '../../lib/api/keys';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { schedulesGateway } from '../../lib/api/schedulesGateway';
 import {
   ACADEMIC_SOURCES,
+  SOURCE_LABELS,
   normalizeSearchDraft,
-  type AcademicSource,
 } from '../../lib/research-search';
-
-const SOURCE_LABELS: Record<AcademicSource, string> = {
-  semanticscholar: 'Semantic Scholar',
-  arxiv: 'arXiv',
-  openalex: 'OpenAlex',
-  dblp: 'DBLP',
-};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -24,7 +17,7 @@ export function SchedulesPanel() {
   const queryClient = useQueryClient();
   const schedulesQuery = useQuery({
     queryKey: scheduleKeys.list(),
-    queryFn: ({ signal }) => workspaceApi.listSchedules(signal),
+    queryFn: ({ signal }) => schedulesGateway.listSchedules(signal),
   });
   const [query, setQuery] = useState('');
   const [sources, setSources] = useState<string[]>(['semanticscholar', 'arxiv']);
@@ -56,7 +49,7 @@ export function SchedulesPanel() {
     setError(null);
     setStatus(null);
     try {
-      const id = await workspaceApi.createSchedule({
+      const id = await schedulesGateway.createSchedule({
         query: normalized.request.query,
         sources: normalized.request.sources,
         years: normalized.request.years,
@@ -80,7 +73,7 @@ export function SchedulesPanel() {
     setError(null);
     setStatus(null);
     try {
-      await workspaceApi.toggleSchedule(id, enabled);
+      await schedulesGateway.toggleSchedule(id, enabled);
       await refresh();
       setStatus(`计划 ${id} 状态已由服务器确认。`);
     } catch (caught) {
@@ -96,7 +89,7 @@ export function SchedulesPanel() {
     setError(null);
     setStatus(null);
     try {
-      await workspaceApi.deleteSchedule(id);
+      await schedulesGateway.deleteSchedule(id);
       await refresh();
       setStatus(`计划 ${id} 已删除。`);
     } catch (caught) {

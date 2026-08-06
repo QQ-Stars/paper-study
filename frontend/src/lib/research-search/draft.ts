@@ -9,6 +9,13 @@ export const ACADEMIC_SOURCES = [
 
 export type AcademicSource = (typeof ACADEMIC_SOURCES)[number];
 
+export const SOURCE_LABELS = {
+  semanticscholar: 'Semantic Scholar',
+  arxiv: 'arXiv',
+  openalex: 'OpenAlex',
+  dblp: 'DBLP',
+} as const satisfies Record<AcademicSource, string>;
+
 export interface SearchDraft {
   query?: string;
   sources?: string[];

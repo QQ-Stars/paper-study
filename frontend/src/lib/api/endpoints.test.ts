@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { BusinessError } from './errors';
 import { createApiClient } from './client';
+import { createAcquisitionGateway } from './acquisitionGateway';
 import { createPaperApi } from './paperApi';
-import { createWorkspaceApi } from './workspaceApi';
+import { createSettingsGateway } from './settingsGateway';
 
 describe('typed endpoint commands', () => {
   it('uses origin-relative URLs and captures the supplied paper id in JSON mutations', async () => {
@@ -32,9 +33,9 @@ describe('typed endpoint commands', () => {
     const fetchImpl = vi.fn(async () => new Response('{"ok":false,"output":"missing key"}', {
       status: 200, headers: { 'Content-Type': 'application/json' },
     }));
-    const workspace = createWorkspaceApi(createApiClient(fetchImpl));
+    const settings = createSettingsGateway(createApiClient(fetchImpl));
 
-    await expect(workspace.testLlm()).rejects.toEqual(expect.objectContaining({
+    await expect(settings.testLlm()).rejects.toEqual(expect.objectContaining({
       kind: 'business', message: 'missing key',
     }));
     expect(fetchImpl).toHaveBeenCalledWith('/api/test-llm', expect.objectContaining({ method: 'POST' }));
@@ -49,9 +50,9 @@ describe('typed endpoint commands', () => {
         controller.close();
       },
     }), { status: 200 }));
-    const workspace = createWorkspaceApi(createApiClient(fetchImpl));
+    const acquisition = createAcquisitionGateway(createApiClient(fetchImpl));
 
-    await expect(workspace.search({ query: 'vision', sources: ['dblp'] })).rejects.toBeInstanceOf(BusinessError);
+    await expect(acquisition.search({ query: 'vision', sources: ['dblp'] })).rejects.toBeInstanceOf(BusinessError);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

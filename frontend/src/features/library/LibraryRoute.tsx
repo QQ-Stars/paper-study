@@ -17,7 +17,7 @@ import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary
 import { artifactKeys, paperKeys, pdfKeys, reviewKeys } from '../../lib/api/keys';
 import { paperApi, type PaperDraft } from '../../lib/api/paperApi';
 import type { PaperListItem, PaperRecord, StudyStatus } from '../../lib/api/types';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { insightsGateway } from '../../lib/api/insightsGateway';
 import {
   applyLibraryFilters,
   defaultLibraryFilters,
@@ -387,7 +387,7 @@ export function Component() {
   const semanticSearch = useMutation({
     mutationKey: ['papers', 'semantic-search'],
     mutationFn: ({ query: requestedQuery }: { query: string; generation: number }) => (
-      workspaceApi.semanticSearch(requestedQuery, 60)
+      insightsGateway.semanticSearch(requestedQuery, 60)
     ),
     onMutate: () => setSemanticError(''),
     onSuccess: (result, { generation }) => {

@@ -79,12 +79,37 @@
   padding-inline: var(--space-3);
 }
 
+.insights-route__recommendation-seed {
+  display: grid;
+  min-width: min(18rem, 100%);
+  gap: var(--space-1);
+}
+
+.insights-route__recommendation-seed span {
+  color: var(--color-text-weak);
+  font-size: var(--font-size-1);
+}
+
+.insights-route__recommendation-seed select {
+  min-height: 2.75rem;
+  padding-inline: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
 .insights-route__commands button:first-child {
   border-color: var(--color-accent);
 }
 
 .insights-route__command-error {
   color: var(--color-error);
+  font-size: var(--font-size-2);
+}
+
+.insights-route__command-status {
+  color: var(--color-accent-hover);
   font-size: var(--font-size-2);
 }
 
@@ -100,6 +125,48 @@
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: var(--font-size-1);
+}
+
+.insights-route__recommendations {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-accent-line);
+  border-radius: var(--radius-stage);
+  background: var(--color-surface);
+}
+
+.insights-route__recommendations header {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.insights-route__recommendations header p {
+  color: var(--color-accent-hover);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-1);
+  letter-spacing: 0.11em;
+}
+
+.insights-route__recommendations ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+  gap: var(--space-2);
+}
+
+.insights-route__recommendations li {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--color-bg-subtle);
+}
+
+.insights-route__recommendations li span,
+.insights-route__recommendations > p {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-2);
 }
 
 .insights-grid {
@@ -212,6 +279,15 @@
   .insights-route__metrics > div {
     min-width: 0;
     flex: 1;
+  }
+
+  .insights-route__commands,
+  .insights-route__recommendation-seed {
+    width: 100%;
+  }
+
+  .insights-route__commands button {
+    flex: 1 1 10rem;
   }
 
   .insights-grid {

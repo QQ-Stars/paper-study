@@ -6,20 +6,61 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetWorkspaceStore } from '../../lib/workspace';
 import { reviewKeys } from '../../lib/api/keys';
-import type { ReviewItem, ReviewSnapshot, ReviewState } from '../../lib/api/types';
+import type {
+  PaperListItem,
+  ReviewItem,
+  ReviewSnapshot,
+  ReviewState,
+} from '../../lib/api/types';
 import { Component } from './ReviewsRoute';
 
 const apiMocks = vi.hoisted(() => ({
+  listPapers: vi.fn(),
   getReviews: vi.fn(),
+  startReview: vi.fn(),
   completeReview: vi.fn(),
 }));
 
 vi.mock('../../lib/api/paperApi', () => ({
   paperApi: {
+    listPapers: apiMocks.listPapers,
     getReviews: apiMocks.getReviews,
+    startReview: apiMocks.startReview,
     completeReview: apiMocks.completeReview,
   },
 }));
+
+function paperItem(id: string, title: string): PaperListItem {
+  return {
+    id,
+    file: `${id}.pdf`,
+    title,
+    titleZh: null,
+    venue: 'CSCW',
+    year: '2026',
+    type: '研究',
+    topic: '界面',
+    pdfUrl: null,
+    pdfPath: null,
+    url: null,
+    tldr: null,
+    contribution: null,
+    citations: 0,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    source: 'seed',
+    arxivId: null,
+    doi: null,
+    s2Id: null,
+    openalexId: null,
+    relevance: null,
+    order: null,
+    ccf: null,
+    status: '学习中',
+    hasNote: false,
+    favorite: false,
+    hasPdf: true,
+  };
+}
 
 function reviewItem(
   paperId: string,
@@ -91,7 +132,9 @@ function deferred<T>() {
 
 beforeEach(() => {
   resetWorkspaceStore();
+  apiMocks.listPapers.mockReset().mockResolvedValue([]);
   apiMocks.getReviews.mockReset();
+  apiMocks.startReview.mockReset();
   apiMocks.completeReview.mockReset();
   apiMocks.getReviews.mockResolvedValue(snapshot());
 });
@@ -113,6 +156,30 @@ describe('ReviewsRoute', () => {
     expect(within(today).getByRole('button', { name: '完成本轮' })).toBeEnabled();
     expect(within(upcoming).queryByRole('button', { name: '完成本轮' })).not.toBeInTheDocument();
     expect(within(completed).queryByRole('button', { name: '完成本轮' })).not.toBeInTheDocument();
+  });
+
+  it('lets the user start a plan for an eligible paper and refreshes the authoritative snapshot', async () => {
+    const user = userEvent.setup();
+    const eligible = paperItem('new-plan', 'Paper Without A Plan');
+    apiMocks.listPapers.mockResolvedValue([eligible]);
+    apiMocks.startReview.mockResolvedValue({
+      paperId: eligible.id,
+      startedAt: '2026-08-06',
+      currentStep: 0,
+      completedSteps: 0,
+      nextDueAt: '2026-08-06',
+      completedAt: null,
+      updatedAt: '2026-08-06',
+    });
+    renderReviews();
+
+    const picker = await screen.findByRole('combobox', { name: '选择未安排复习的论文' });
+    await user.selectOptions(picker, eligible.id);
+    await user.click(screen.getByRole('button', { name: '开始计划' }));
+
+    await waitFor(() => expect(apiMocks.startReview).toHaveBeenCalledWith(eligible.id));
+    expect(await screen.findByRole('status')).toHaveTextContent(`已开始 ${eligible.id} 的复习计划`);
+    await waitFor(() => expect(apiMocks.getReviews.mock.calls.length).toBeGreaterThan(1));
   });
 
   it('atomically keeps the completion response when a stale pre-mutation load resolves later', async () => {

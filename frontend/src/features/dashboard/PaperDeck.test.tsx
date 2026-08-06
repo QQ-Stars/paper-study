@@ -56,24 +56,33 @@ describe('PaperDeck', () => {
     );
   });
 
-  it('uses a single click only to select and opens with Enter or double-click', async () => {
+  it('uses a pointer click only to select without stealing focus, then opens with Enter or double-click', async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
 
     render(
-      <Harness
-        papers={['1', '2', '3'].map(makePaper)}
-        preferredId="1"
-        onOpen={onOpen}
-      />,
+      <>
+        <label>
+          搜索论文
+          <input />
+        </label>
+        <Harness
+          papers={['1', '2', '3'].map(makePaper)}
+          preferredId="1"
+          onOpen={onOpen}
+        />
+      </>,
     );
 
+    const search = screen.getByRole('textbox', { name: '搜索论文' });
     const second = screen.getByRole('option', { name: /Paper 2/ });
+    search.focus();
     await user.click(second);
     expect(second).toHaveAttribute('aria-selected', 'true');
-    expect(second).toHaveFocus();
+    expect(search).toHaveFocus();
     expect(onOpen).not.toHaveBeenCalled();
 
+    second.focus();
     await user.keyboard('{Enter}');
     expect(onOpen).toHaveBeenLastCalledWith('2');
 

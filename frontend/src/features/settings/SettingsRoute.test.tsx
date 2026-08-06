@@ -14,8 +14,8 @@ const apiMocks = vi.hoisted(() => ({
   testLlm: vi.fn(),
 }));
 
-vi.mock('../../lib/api/workspaceApi', () => ({
-  workspaceApi: apiMocks,
+vi.mock('../../lib/api/settingsGateway', () => ({
+  settingsGateway: apiMocks,
 }));
 
 const settings: SettingsView = {

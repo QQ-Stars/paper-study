@@ -4,6 +4,7 @@ import type {
 } from '../../lib/api/types';
 export {
   ACADEMIC_SOURCES,
+  SOURCE_LABELS,
   normalizeSearchDraft,
   type AcademicSource,
   type NormalizedSearchDraft,

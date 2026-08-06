@@ -1,15 +1,31 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { isAbortError } from '../../lib/api/errors';
 import { jobKeys, paperKeys } from '../../lib/api/keys';
 import type { Candidate } from '../../lib/api/types';
-import { workspaceApi } from '../../lib/api/workspaceApi';
+import { jobsGateway } from '../../lib/api/jobsGateway';
+import {
+  createJobConfirmationState,
+  jobConfirmationReducer,
+} from './jobConfirmationReducer';
 import { jobDetailPollingIntervalFor } from './jobPolling';
 
 interface JobDetailProps {
   jobId: number;
+}
+
+interface ConfirmationOwner {
+  readonly jobId: number;
+  readonly runId: number;
+  readonly controller: AbortController;
 }
 
 function candidateKey(candidate: Candidate, index: number): string {
@@ -45,15 +61,21 @@ export function JobDetail({ jobId }: JobDetailProps) {
   const navigate = useNavigate();
   const [candidatePanel, setCandidatePanel] = useState<{ jobId: number; open: boolean } | null>(null);
   const [selection, setSelection] = useState<{ jobId: number; keys: string[] } | null>(null);
-  const [confirming, setConfirming] = useState(false);
-  const [progress, setProgress] = useState<string[]>([]);
-  const [result, setResult] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const confirmOwnerRef = useRef<AbortController | null>(null);
+  const [confirmation, dispatchConfirmation] = useReducer(
+    jobConfirmationReducer,
+    jobId,
+    createJobConfirmationState,
+  );
+  const [commandFailure, setCommandFailure] = useState<{
+    readonly jobId: number;
+    readonly error: string;
+  } | null>(null);
+  const confirmRunSequenceRef = useRef(0);
+  const confirmOwnerRef = useRef<ConfirmationOwner | null>(null);
 
   const detailQuery = useQuery({
     queryKey: jobKeys.detail(jobId),
-    queryFn: ({ signal }) => workspaceApi.getJob(jobId, signal),
+    queryFn: ({ signal }) => jobsGateway.getJob(jobId, signal),
     refetchInterval: (query) => {
       const detail = query.state.data;
       const candidatesExpanded = candidatePanel?.jobId === jobId
@@ -63,10 +85,21 @@ export function JobDetail({ jobId }: JobDetailProps) {
     },
   });
 
-  useEffect(() => () => {
-    confirmOwnerRef.current?.abort();
-    confirmOwnerRef.current = null;
-  }, []);
+  useEffect(() => {
+    dispatchConfirmation({ type: 'reset', jobId });
+    return () => {
+      confirmOwnerRef.current?.controller.abort();
+      confirmOwnerRef.current = null;
+    };
+  }, [jobId]);
+
+  const visibleConfirmation = confirmation.jobId === jobId
+    ? confirmation
+    : createJobConfirmationState(jobId);
+  const commandError = commandFailure?.jobId === jobId
+    ? commandFailure.error
+    : null;
+  const confirming = visibleConfirmation.phase === 'running';
 
   const candidateEntries = useMemo(
     () => (detailQuery.data?.candidates ?? []).map((candidate, index) => ({
@@ -89,38 +122,52 @@ export function JobDetail({ jobId }: JobDetailProps) {
       .filter(({ key, candidate }) => selected.has(key) && !candidate.inLibrary)
       .map(({ candidate }) => candidate);
     if (fixedCandidates.length === 0) {
-      setError('请先选择要确认的候选');
+      dispatchConfirmation({
+        type: 'validation-failure',
+        jobId,
+        error: '请先选择要确认的候选',
+      });
       return;
     }
-    confirmOwnerRef.current?.abort();
+    confirmOwnerRef.current?.controller.abort();
+    const runId = ++confirmRunSequenceRef.current;
     const controller = new AbortController();
-    confirmOwnerRef.current = controller;
-    setConfirming(true);
-    setProgress([]);
-    setResult(null);
-    setError(null);
+    const owner = { jobId, runId, controller };
+    confirmOwnerRef.current = owner;
+    dispatchConfirmation({ type: 'start', jobId, runId });
+    setCommandFailure(null);
     let added = 0;
     try {
-      const terminal = await workspaceApi.confirmJob(
+      const terminal = await jobsGateway.confirmJob(
         jobId,
         { candidates: fixedCandidates, downloadPdf: true },
         {
           signal: controller.signal,
           onEvent: (event) => {
             const line = progressLine(event);
-            if (confirmOwnerRef.current === controller && line) {
-              setProgress((current) => [...current, line]);
+            if (confirmOwnerRef.current === owner && line) {
+              dispatchConfirmation({ type: 'progress', jobId, runId, line });
             }
           },
         },
       );
-      if (confirmOwnerRef.current !== controller) return;
+      if (confirmOwnerRef.current !== owner) return;
       added = terminal.added;
-      setResult(`服务器确认新增 ${added} 篇。`);
+      dispatchConfirmation({
+        type: 'success',
+        jobId,
+        runId,
+        terminal: `服务器确认新增 ${added} 篇。`,
+      });
     } catch (caught) {
       added = addedFromFailure(caught);
-      if (confirmOwnerRef.current !== controller || isAbortError(caught)) return;
-      setError(errorMessage(caught));
+      if (confirmOwnerRef.current !== owner || isAbortError(caught)) return;
+      dispatchConfirmation({
+        type: 'failure',
+        jobId,
+        runId,
+        error: errorMessage(caught),
+      });
     } finally {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: jobKeys.list() }),
@@ -129,9 +176,8 @@ export function JobDetail({ jobId }: JobDetailProps) {
       if (added > 0) {
         await queryClient.invalidateQueries({ queryKey: paperKeys.all() });
       }
-      if (confirmOwnerRef.current === controller) {
+      if (confirmOwnerRef.current === owner) {
         confirmOwnerRef.current = null;
-        setConfirming(false);
       }
     }
   };
@@ -140,9 +186,13 @@ export function JobDetail({ jobId }: JobDetailProps) {
     const controller = confirmOwnerRef.current;
     if (!controller) return;
     confirmOwnerRef.current = null;
-    controller.abort();
-    setConfirming(false);
-    setResult('已停止接收；服务端可能仍在运行。');
+    controller.controller.abort();
+    dispatchConfirmation({
+      type: 'stop',
+      jobId: controller.jobId,
+      runId: controller.runId,
+      terminal: '已停止接收；服务端可能仍在运行。',
+    });
     void Promise.all([
       queryClient.invalidateQueries({ queryKey: jobKeys.list() }),
       queryClient.invalidateQueries({ queryKey: jobKeys.detail(jobId) }),
@@ -151,13 +201,13 @@ export function JobDetail({ jobId }: JobDetailProps) {
 
   const deleteJob = async () => {
     if (!globalThis.confirm(`删除任务 ${jobId} 及其待确认候选？`)) return;
-    setError(null);
+    setCommandFailure(null);
     try {
-      await workspaceApi.deleteJob(jobId);
+      await jobsGateway.deleteJob(jobId);
       await queryClient.invalidateQueries({ queryKey: jobKeys.list() });
       navigate('/jobs');
     } catch (caught) {
-      setError(errorMessage(caught));
+      setCommandFailure({ jobId, error: errorMessage(caught) });
     }
   };
 
@@ -268,9 +318,16 @@ export function JobDetail({ jobId }: JobDetailProps) {
         </div>
       ) : null}
 
-      {result ? <p className="job-detail__result" role="status">{result}</p> : null}
-      {error ? <p className="job-detail__error" role="alert">{error}</p> : null}
-      {progress.length > 0 ? <pre aria-label="任务确认进度">{progress.join('\n')}</pre> : null}
+      {visibleConfirmation.terminal ? (
+        <p className="job-detail__result" role="status">{visibleConfirmation.terminal}</p>
+      ) : null}
+      {visibleConfirmation.error ? (
+        <p className="job-detail__error" role="alert">{visibleConfirmation.error}</p>
+      ) : null}
+      {commandError ? <p className="job-detail__error" role="alert">{commandError}</p> : null}
+      {visibleConfirmation.progress.length > 0 ? (
+        <pre aria-label="任务确认进度">{visibleConfirmation.progress.join('\n')}</pre>
+      ) : null}
       {detail.job.log ? <pre aria-label="任务日志">{detail.job.log}</pre> : null}
     </section>
   );

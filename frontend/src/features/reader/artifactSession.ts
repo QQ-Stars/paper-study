@@ -1,5 +1,5 @@
 import { artifactKeys, paperKeys } from '../../lib/api/keys';
-import { streamSideEffectPolicies } from '../../lib/api/workspaceApi';
+import { streamSideEffectPolicies } from '../../lib/api/streamPolicies';
 
 export type ArtifactKind = 'note' | 'explainer' | 'translation';
 
