@@ -254,25 +254,59 @@
 }
 
 @media (max-width: 1099px) {
+  .workspace-shell[data-layout="reader-wide"] {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace-shell[data-layout="reader-wide"] .workspace-shell__body,
+  .workspace-shell[data-layout="reader-wide"] .workspace-shell__content,
+  .workspace-shell[data-layout="reader-wide"] #workspace-main,
+  .workspace-shell[data-layout="reader-wide"] .reader-route {
+    min-height: 0;
+  }
+
+  .workspace-shell[data-layout="reader-wide"] .workspace-shell__body,
+  .workspace-shell[data-layout="reader-wide"] #workspace-main,
+  .workspace-shell[data-layout="reader-wide"] .reader-route {
+    height: 100%;
+  }
+
+  .workspace-shell[data-layout="reader-wide"] .workspace-shell__content,
+  .workspace-shell[data-layout="reader-wide"] #workspace-main,
+  .workspace-shell[data-layout="reader-wide"] .reader-route {
+    overflow: hidden;
+  }
+
   .reader-route__workspace {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.08fr) minmax(0, 0.92fr);
+    height: 100%;
+    overflow: hidden;
   }
 
   .reader-route__stage {
-    height: min(70dvh, 46rem);
-    min-height: 34rem;
+    height: auto;
+    min-height: 0;
   }
 
   .reader-route__rail {
-    overflow: visible;
+    height: auto;
+    overflow: hidden;
   }
 
   .reader-route__rail .artifact-panel {
-    height: auto;
+    height: 100%;
+    min-height: 0;
   }
 }
 
 @media (max-width: 760px) {
+  .workspace-shell[data-layout="reader-wide"] .workspace-shell__body {
+    height: calc(100dvh - var(--mobile-nav-height));
+  }
+
   .reader-route {
     gap: var(--space-3);
   }
@@ -303,8 +337,8 @@
   }
 
   .reader-route__stage {
-    height: 64dvh;
-    min-height: 28rem;
+    height: auto;
+    min-height: 0;
     border-radius: var(--radius-panel);
   }
 

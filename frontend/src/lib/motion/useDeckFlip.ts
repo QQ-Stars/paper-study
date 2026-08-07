@@ -1,6 +1,6 @@
 import { useRef, type RefObject } from 'react';
 
-import { gsap, useGSAP } from './gsap';
+import { Flip, gsap, useGSAP } from './gsap';
 
 export interface UseDeckFlipOptions {
   readonly scope: RefObject<HTMLElement | null>;
@@ -13,11 +13,20 @@ const finalInlinePresentation = {
 } as const;
 
 interface DeckPresentationState {
+  previousLayout: Flip.FlipState | null;
   lastSetup: {
     readonly enabled: boolean;
     readonly layoutKey: string;
   } | null;
   hasPresented: boolean;
+}
+
+function clearInlinePresentation(cards: readonly HTMLElement[]): void {
+  cards.forEach((card) => {
+    card.style.removeProperty('transform');
+    card.style.removeProperty('opacity');
+    card.style.removeProperty('visibility');
+  });
 }
 
 export function useDeckFlip({
@@ -28,6 +37,7 @@ export function useDeckFlip({
   const presentation = useRef<DeckPresentationState>({
     hasPresented: false,
     lastSetup: null,
+    previousLayout: null,
   });
 
   useGSAP(() => {
@@ -38,39 +48,62 @@ export function useDeckFlip({
     // Let that committed replay replace the entrance reverted by its probe.
     let canPlayEntrance = !presentation.current.hasPresented || repeatsCurrentSetup;
 
+    const resetCommittedLayout = () => {
+      presentation.current.previousLayout = null;
+    };
+
     const present = (reduceMotion: boolean) => {
       const cards = Array.from(
         scope.current?.querySelectorAll<HTMLElement>('[data-deck-card]') ?? [],
       );
-      if (cards.length === 0) return;
+      if (cards.length === 0) {
+        resetCommittedLayout();
+        return;
+      }
+
+      // matchMedia owns a nested GSAP context. Explicitly stop any tween left
+      // by a rapidly superseded layout before measuring the new CSS slots.
+      Flip.killFlipsOf(cards, false);
+      gsap.killTweensOf(cards);
+      clearInlinePresentation(cards);
 
       if (!enabled || reduceMotion) {
+        resetCommittedLayout();
         return;
       }
 
-      if (!canPlayEntrance) {
-        // The deck slots already encode their complete geometry in CSS transforms.
-        // Replaying that geometry through FLIP makes wrap-around cards cross the
-        // selected slot, so subsequent selections commit directly to their slots.
-        gsap.set(cards, {
+      const committedLayout = Flip.getState(cards, { props: 'opacity' });
+      const previousLayout = presentation.current.previousLayout;
+
+      if (canPlayEntrance || previousLayout === null) {
+        canPlayEntrance = false;
+        presentation.current.hasPresented = true;
+        gsap.timeline({ defaults: { ease: 'power2.out' } }).fromTo(
+          cards,
+          { autoAlpha: 0, y: 10 },
+          {
+            autoAlpha: 1,
+            y: 0,
+            duration: 0.24,
+            stagger: 0.035,
+            clearProps: finalInlinePresentation.clearProps,
+          },
+        );
+      } else {
+        Flip.from(previousLayout, {
+          targets: cards,
+          duration: 0.32,
+          ease: 'power3.out',
+          fade: true,
+          scale: true,
+          simple: true,
           clearProps: finalInlinePresentation.clearProps,
+          onComplete: () => clearInlinePresentation(cards),
+          onInterrupt: () => clearInlinePresentation(cards),
         });
-        return;
       }
 
-      canPlayEntrance = false;
-      presentation.current.hasPresented = true;
-      gsap.timeline({ defaults: { ease: 'power2.out' } }).fromTo(
-        cards,
-        { autoAlpha: 0, y: 10 },
-        {
-          autoAlpha: 1,
-          y: 0,
-          duration: 0.24,
-          stagger: 0.035,
-          clearProps: finalInlinePresentation.clearProps,
-        },
-      );
+      presentation.current.previousLayout = committedLayout;
     };
     if (
       typeof window === 'undefined'

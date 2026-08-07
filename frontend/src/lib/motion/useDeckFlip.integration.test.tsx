@@ -48,7 +48,7 @@ afterEach(() => {
   });
 });
 
-it('keeps one entrance presentation live after the StrictMode probe', () => {
+it('keeps the StrictMode entrance live and reverts interrupted FLIP styles on unmount', () => {
   const view = render(
     <StrictMode>
       <RealDeck layoutKey="initial" />
@@ -67,17 +67,8 @@ it('keeps one entrance presentation live after the StrictMode probe', () => {
   );
 
   const updatedCard = view.getByRole('button', { name: 'updated' });
+  expect(() => view.unmount()).not.toThrow();
   expect(updatedCard.style.opacity).toBe('');
   expect(updatedCard.style.transform).toBe('');
-
-  view.rerender(
-    <StrictMode>
-      <RealDeck layoutKey="initial" />
-    </StrictMode>,
-  );
-
-  const reversedCard = view.getByRole('button', { name: 'initial' });
-  expect(reversedCard.style.opacity).toBe('');
-  expect(reversedCard.style.transform).toBe('');
-  expect(() => view.unmount()).not.toThrow();
+  expect(updatedCard.style.visibility).toBe('');
 });

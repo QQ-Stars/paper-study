@@ -382,6 +382,6 @@
   }
 
   .artifact-panel__content {
-    overflow: visible;
+    overflow-y: auto;
   }
 }

@@ -2,19 +2,19 @@ import { Fragment, useEffect, useState, type ReactNode } from 'react';
 
 import {
   plainTextDocument,
-  type SafeDocument,
   type SafeNode,
 } from './ast';
 import { TrustedMathHtml } from './TrustedMathHtml';
 import {
   createMarkdownWorkerClient,
+  type MarkdownRenderResult,
   type MarkdownWorkerClient,
 } from './workerClient';
 
 interface ResolvedDocument {
   source: string;
   generation: number;
-  document: SafeDocument;
+  result: MarkdownRenderResult;
 }
 
 function renderNodes(
@@ -146,38 +146,54 @@ export function MarkdownContent({
   workerClientFactory = createMarkdownWorkerClient,
 }: MarkdownContentProps) {
   const [resolved, setResolved] = useState<ResolvedDocument | null>(null);
-  const isCurrent = resolved?.source === source && resolved.generation === generation;
-  const document = isCurrent ? resolved.document : plainTextDocument(source);
+  const currentResult = resolved?.source === source && resolved.generation === generation
+    ? resolved.result
+    : null;
+  const markdownState = currentResult === null
+    ? 'pending'
+    : currentResult.status === 'parsed'
+      ? 'resolved'
+      : 'plain-text';
 
   useEffect(() => {
-    let client: MarkdownWorkerClient;
+    const fallbackResult: MarkdownRenderResult = {
+      status: 'fallback',
+      document: plainTextDocument(source),
+    };
+    let client: MarkdownWorkerClient | null = null;
+    let resultPromise: Promise<MarkdownRenderResult>;
     try {
       client = workerClientFactory();
+      resultPromise = client.render(source, { generation });
     } catch {
-      return undefined;
+      resultPromise = Promise.resolve(fallbackResult);
     }
 
     let mounted = true;
-    void client.render(source, { generation }).then((nextDocument) => {
-      if (!mounted) return;
-      setResolved({ source, generation, document: nextDocument });
-    }).catch(() => {
-      if (!mounted) return;
-      setResolved({ source, generation, document: plainTextDocument(source) });
-    });
+    void resultPromise
+      .catch(() => fallbackResult)
+      .then((result) => {
+        if (!mounted) return;
+        setResolved({ source, generation, result });
+      });
 
     return () => {
       mounted = false;
-      client.dispose();
+      client?.dispose();
     };
   }, [generation, source, workerClientFactory]);
 
   return (
     <div
+      aria-busy={currentResult === null ? 'true' : undefined}
+      aria-live={currentResult === null ? 'polite' : undefined}
       className={className}
-      data-markdown-state={isCurrent ? 'resolved' : 'plain-text'}
+      data-markdown-state={markdownState}
+      role={currentResult === null ? 'status' : undefined}
     >
-      {renderNodes(document.nodes, 'markdown', headingLevelOffset)}
+      {currentResult === null
+        ? '正在排版内容…'
+        : renderNodes(currentResult.document.nodes, 'markdown', headingLevelOffset)}
     </div>
   );
 }

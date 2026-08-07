@@ -48,6 +48,16 @@ const documentFor = (value: string): SafeDocument => ({
   nodes: [{ type: 'paragraph', children: [{ type: 'text', value }] }],
 });
 
+const parsedResultFor = (value: string) => ({
+  status: 'parsed' as const,
+  document: documentFor(value),
+});
+
+const fallbackResultFor = (source: string) => ({
+  status: 'fallback' as const,
+  document: plainTextDocument(source),
+});
+
 afterEach(() => {
   vi.useRealTimers();
   ControlledWorker.live = 0;
@@ -73,7 +83,7 @@ describe('createMarkdownWorkerClient', () => {
       document: documentFor('rendered'),
     });
 
-    await expect(pending).resolves.toEqual(documentFor('rendered'));
+    await expect(pending).resolves.toEqual(parsedResultFor('rendered'));
     expect(worker.terminated).toBe(true);
     expect(worker.onmessage).toBeNull();
     expect(worker.onerror).toBeNull();
@@ -91,7 +101,7 @@ describe('createMarkdownWorkerClient', () => {
       if (failure === 'error') worker.emitError();
       else worker.emitMessageError();
 
-      await expect(pending).resolves.toEqual(plainTextDocument('<script>alert(1)</script>'));
+      await expect(pending).resolves.toEqual(fallbackResultFor('<script>alert(1)</script>'));
       expect(worker.terminated).toBe(true);
       expect(ControlledWorker.live).toBe(0);
     },
@@ -105,7 +115,7 @@ describe('createMarkdownWorkerClient', () => {
 
     await vi.advanceTimersByTimeAsync(25);
 
-    await expect(pending).resolves.toEqual(plainTextDocument('*pathological*'));
+    await expect(pending).resolves.toEqual(fallbackResultFor('*pathological*'));
     expect(worker.terminated).toBe(true);
     expect(ControlledWorker.live).toBe(0);
   });
@@ -142,8 +152,8 @@ describe('createMarkdownWorkerClient', () => {
       document: documentFor('current result'),
     });
 
-    await expect(oldPending).resolves.toEqual(plainTextDocument('old source'));
-    await expect(newPending).resolves.toEqual(documentFor('current result'));
+    await expect(oldPending).resolves.toEqual(fallbackResultFor('old source'));
+    await expect(newPending).resolves.toEqual(parsedResultFor('current result'));
     expect(oldWorker.terminated).toBe(true);
     expect(newWorker.terminated).toBe(true);
     expect(ControlledWorker.live).toBe(0);
@@ -165,7 +175,7 @@ describe('createMarkdownWorkerClient', () => {
       },
     } as MessageEvent<unknown>);
 
-    await expect(pending).resolves.toEqual(plainTextDocument('unmounted source'));
+    await expect(pending).resolves.toEqual(fallbackResultFor('unmounted source'));
     expect(worker.terminated).toBe(true);
     expect(ControlledWorker.live).toBe(0);
   });

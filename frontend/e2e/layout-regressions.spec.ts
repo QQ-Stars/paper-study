@@ -1,7 +1,7 @@
 import { expect, test } from './fixtures/mockApi';
 
 test.describe('Workspace layout regressions', () => {
-  test('keeps deck slots stable when rapid moves interrupt the entrance', async ({
+  test('runs real deck FLIP motion and converges after rapid selection changes', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -142,33 +142,21 @@ test.describe('Workspace layout regressions', () => {
     expect(run.selectionIds[3]).toBe(run.selectionIds[1]);
     const samples = run.frames;
     expect(samples.length).toBeGreaterThan(5);
-    const violations = samples.flatMap((sample) => {
+    expect(samples.some((sample) => sample.cards.some(
+      (card) => card.inlineTransform !== '',
+    ))).toBe(true);
+
+    const settledSamples = samples.slice(-3);
+    expect(settledSamples).toHaveLength(3);
+    for (const sample of settledSamples) {
       const selected = sample.cards.find((card) => card.selected);
-      const slotOrderIsStable = sample.cards.every((card, index, cards) => (
-        index === 0 || card.center - cards[index - 1]!.center > 1
-      ));
-      const selectedIsCentered = selected != null
-        && Math.abs(selected.center - sample.stageCenter) <= 2;
-      const cardsUseCssSlots = sample.cards.every(
-        (card) => card.inlineTransform === '',
-      );
-
-      return slotOrderIsStable && selectedIsCentered && cardsUseCssSlots
-        ? []
-        : [{
-            elapsedMs: Math.round(sample.elapsedMs),
-            selectedCenterDelta: selected == null
-              ? null
-              : Math.round((selected.center - sample.stageCenter) * 10) / 10,
-            slots: sample.cards.map((card) => ({
-              center: Math.round(card.center),
-              offset: card.layoutOffset,
-              paperId: card.paperId,
-            })),
-          }];
-    });
-
-    expect(violations).toEqual([]);
+      expect(selected).toBeDefined();
+      expect(Math.abs(selected!.center - sample.stageCenter)).toBeLessThanOrEqual(2);
+      expect(sample.cards.every((card, index, cards) => (
+        index === 0 || card.center > cards[index - 1]!.center + 1
+      ))).toBe(true);
+      expect(sample.cards.every((card) => card.inlineTransform === '')).toBe(true);
+    }
   });
 
   test('fits the complete library ledger without an internal horizontal scroller', async ({
@@ -337,6 +325,90 @@ test.describe('Workspace layout regressions', () => {
       expect(Math.abs(geometry.stageBottom - geometry.railBottom)).toBeLessThanOrEqual(1);
       expect(geometry.pdfOverflowY).toBe('auto');
       expect(geometry.workbenchOverflowY).toBe('auto');
+    }
+  });
+
+  test('keeps the narrow Reader as two independently scrollable panes above mobile navigation', async ({
+    page,
+  }) => {
+    for (const width of [760, 390]) {
+      const viewport = { width, height: 900 };
+      await page.setViewportSize(viewport);
+      await page.goto('/workspace/reader/paper-lifecycle');
+      await expect(page.getByRole('article', { name: '第 1 页' })).toHaveAttribute(
+        'data-status',
+        'ready',
+      );
+
+      const workbench = page.getByRole('region', { name: '论文阅读工作台' });
+      await expect(workbench.getByRole('tab', { name: '上下文' })).toBeVisible();
+
+      const geometry = await page.locator('.reader-route').evaluate((route) => {
+        const box = (selector: string) => route
+          .querySelector<HTMLElement>(selector)
+          ?.getBoundingClientRect();
+        const stage = box('.reader-route__stage');
+        const rail = box('.reader-route__rail');
+        const navigation = document.querySelector<HTMLElement>('.global-nav')
+          ?.getBoundingClientRect();
+        const pdfViewport = route.querySelector<HTMLElement>('.pdf-workspace__viewport');
+        const workbenchContent = route.querySelector<HTMLElement>('.artifact-panel__content');
+
+        return {
+          documentOverflowX: document.documentElement.scrollWidth
+            - document.documentElement.clientWidth,
+          documentOverflowY: document.documentElement.scrollHeight
+            - document.documentElement.clientHeight,
+          navigationTop: navigation?.top ?? window.innerHeight,
+          pdfOverflowY: pdfViewport == null ? '' : getComputedStyle(pdfViewport).overflowY,
+          railBottom: rail?.bottom ?? Number.POSITIVE_INFINITY,
+          railHeight: rail?.height ?? 0,
+          railTop: rail?.top ?? Number.POSITIVE_INFINITY,
+          stageBottom: stage?.bottom ?? Number.POSITIVE_INFINITY,
+          stageHeight: stage?.height ?? 0,
+          stageTop: stage?.top ?? Number.POSITIVE_INFINITY,
+          workbenchOverflowY: workbenchContent == null
+            ? ''
+            : getComputedStyle(workbenchContent).overflowY,
+        };
+      });
+
+      expect(Math.max(0, geometry.documentOverflowX), `${width}px outer horizontal scroll`).toBe(0);
+      expect(Math.max(0, geometry.documentOverflowY), `${width}px outer vertical scroll`).toBe(0);
+      expect(geometry.stageTop).toBeGreaterThanOrEqual(0);
+      expect(geometry.stageHeight).toBeGreaterThanOrEqual(180);
+      expect(geometry.stageBottom).toBeLessThanOrEqual(geometry.railTop + 1);
+      expect(geometry.railHeight).toBeGreaterThanOrEqual(180);
+      expect(geometry.railBottom).toBeLessThanOrEqual(geometry.navigationTop + 1);
+      expect(geometry.pdfOverflowY).toBe('auto');
+      expect(geometry.workbenchOverflowY).toBe('auto');
+
+      await workbench.getByRole('tab', { name: '讲解' }).click();
+      await expect(workbench.locator('.artifact-panel__markdown')).toHaveAttribute(
+        'data-markdown-state',
+        'resolved',
+      );
+      const scrolling = await page.locator('.reader-route').evaluate((route) => {
+        const pdfViewport = route.querySelector<HTMLElement>('.pdf-workspace__viewport');
+        const workbenchContent = route.querySelector<HTMLElement>('.artifact-panel__content');
+        if (pdfViewport == null || workbenchContent == null) return null;
+        pdfViewport.scrollTop = 80;
+        workbenchContent.scrollTop = 80;
+        return {
+          documentTop: document.scrollingElement?.scrollTop ?? 0,
+          pdfScrollable: pdfViewport.scrollHeight - pdfViewport.clientHeight,
+          pdfTop: pdfViewport.scrollTop,
+          workbenchScrollable: workbenchContent.scrollHeight - workbenchContent.clientHeight,
+          workbenchTop: workbenchContent.scrollTop,
+        };
+      });
+
+      expect(scrolling).not.toBeNull();
+      expect(scrolling?.pdfScrollable).toBeGreaterThan(80);
+      expect(scrolling?.pdfTop).toBeGreaterThan(0);
+      expect(scrolling?.workbenchScrollable).toBeGreaterThan(0);
+      expect(scrolling?.workbenchTop).toBeGreaterThan(0);
+      expect(scrolling?.documentTop).toBe(0);
     }
   });
 

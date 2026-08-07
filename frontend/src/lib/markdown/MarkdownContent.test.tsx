@@ -44,11 +44,18 @@ class ControlledWorker implements MarkdownWorkerLike {
       },
     } as MessageEvent<unknown>);
   }
+
+  emitError(): void {
+    this.onerror?.(new Event('error'));
+  }
 }
 
 function parsingClient(): MarkdownWorkerClient {
   return {
-    render: async (source) => parseMarkdown(source),
+    render: async (source) => ({
+      status: 'parsed',
+      document: parseMarkdown(source),
+    }),
     cancel: () => undefined,
     dispose: () => undefined,
   };
@@ -165,7 +172,8 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('.katex')).not.toBeNull();
   });
 
-  it('shows the source as inert text while rendering is pending', () => {
+  it('shows an accessible formatting state without flashing raw Markdown while pending', () => {
+    ControlledWorker.live = 0;
     const workers: ControlledWorker[] = [];
     const workerClientFactory = () => createMarkdownWorkerClient({
       workerFactory: () => {
@@ -177,16 +185,51 @@ describe('MarkdownContent', () => {
 
     const { container, unmount } = render(
       <MarkdownContent
-        source="<strong>pending</strong>"
+        source={'## Pending\n\n**body**\n\n> quote'}
         generation={2}
         workerClientFactory={workerClientFactory}
       />,
     );
 
-    expect(container.textContent).toBe('<strong>pending</strong>');
+    expect(screen.getByRole('status')).toHaveTextContent('正在排版内容…');
+    expect(container.firstElementChild).toHaveAttribute('data-markdown-state', 'pending');
+    expect(container.textContent).not.toContain('## Pending');
+    expect(container.textContent).not.toContain('**body**');
+    expect(container.textContent).not.toContain('> quote');
     expect(container.querySelector('strong')).toBeNull();
     expect(workers).toHaveLength(1);
     unmount();
+    expect(ControlledWorker.live).toBe(0);
+  });
+
+  it('marks a Worker failure as pre-wrapped inert plain text', async () => {
+    ControlledWorker.live = 0;
+    const source = '## Fallback title\n\n**fallback body**';
+    const workers: ControlledWorker[] = [];
+    const workerClientFactory = () => createMarkdownWorkerClient({
+      workerFactory: () => {
+        const worker = new ControlledWorker();
+        workers.push(worker);
+        return worker;
+      },
+    });
+    const { container } = render(
+      <MarkdownContent
+        source={source}
+        generation={2}
+        workerClientFactory={workerClientFactory}
+      />,
+    );
+
+    workers[0]?.emitError();
+
+    await waitFor(() => {
+      expect(container.firstElementChild).toHaveAttribute('data-markdown-state', 'plain-text');
+    });
+    expect(container.textContent).toBe(source);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(container.querySelector('h2')).toBeNull();
+    expect(container.querySelector('strong')).toBeNull();
     expect(ControlledWorker.live).toBe(0);
   });
 

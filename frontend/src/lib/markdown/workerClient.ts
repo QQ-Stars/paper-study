@@ -27,8 +27,12 @@ export interface MarkdownRenderOptions {
   signal?: AbortSignal;
 }
 
+export type MarkdownRenderResult =
+  | { status: 'parsed'; document: SafeDocument }
+  | { status: 'fallback'; document: SafeDocument };
+
 export interface MarkdownWorkerClient {
-  render(source: string, options: MarkdownRenderOptions): Promise<SafeDocument>;
+  render(source: string, options: MarkdownRenderOptions): Promise<MarkdownRenderResult>;
   cancel(): void;
   dispose(): void;
 }
@@ -47,7 +51,11 @@ interface ActiveRequest {
   abortHandler?: () => void;
   timer?: ReturnType<typeof setTimeout>;
   settled: boolean;
-  finish(document: SafeDocument): void;
+  finish(result: MarkdownRenderResult): void;
+}
+
+function fallbackResult(source: string): MarkdownRenderResult {
+  return { status: 'fallback', document: plainTextDocument(source) };
 }
 
 function defaultWorkerFactory(): MarkdownWorkerLike {
@@ -81,29 +89,29 @@ export function createMarkdownWorkerClient(
 
   const cancelActive = () => {
     const request = active;
-    if (request) request.finish(plainTextDocument(request.source));
+    if (request) request.finish(fallbackResult(request.source));
   };
 
   const render = (
     sourceValue: string,
     renderOptions: MarkdownRenderOptions,
-  ): Promise<SafeDocument> => {
+  ): Promise<MarkdownRenderResult> => {
     const source = String(sourceValue);
     cancelActive();
 
     const generation = renderOptions.generation;
     if (!Number.isInteger(generation) || renderOptions.signal?.aborted) {
-      return Promise.resolve(plainTextDocument(source));
+      return Promise.resolve(fallbackResult(source));
     }
 
     let worker: MarkdownWorkerLike;
     try {
       worker = workerFactory();
     } catch {
-      return Promise.resolve(plainTextDocument(source));
+      return Promise.resolve(fallbackResult(source));
     }
 
-    return new Promise<SafeDocument>((resolve) => {
+    return new Promise<MarkdownRenderResult>((resolve) => {
       const request: ActiveRequest = {
         id: nextId++,
         generation,
@@ -114,7 +122,7 @@ export function createMarkdownWorkerClient(
         finish: () => undefined,
       };
 
-      request.finish = (document) => {
+      request.finish = (result) => {
         if (request.settled) return;
         request.settled = true;
         if (active === request) active = null;
@@ -128,7 +136,7 @@ export function createMarkdownWorkerClient(
         try {
           request.worker.terminate();
         } finally {
-          resolve(document);
+          resolve(result);
         }
       };
 
@@ -136,30 +144,33 @@ export function createMarkdownWorkerClient(
         if (request.settled || active !== request) return;
         const identity = messageIdentity(event.data);
         if (identity === null) {
-          request.finish(plainTextDocument(source));
+          request.finish(fallbackResult(source));
           return;
         }
         if (identity.id !== request.id || identity.generation !== request.generation) return;
         if (typeof event.data !== 'object' || event.data === null) {
-          request.finish(plainTextDocument(source));
+          request.finish(fallbackResult(source));
           return;
         }
         if (Reflect.get(event.data, 'error') === true) {
-          request.finish(plainTextDocument(source));
+          request.finish(fallbackResult(source));
           return;
         }
         try {
-          request.finish(decodeSafeDocument(Reflect.get(event.data, 'document')));
+          request.finish({
+            status: 'parsed',
+            document: decodeSafeDocument(Reflect.get(event.data, 'document')),
+          });
         } catch {
-          request.finish(plainTextDocument(source));
+          request.finish(fallbackResult(source));
         }
       };
-      request.worker.onerror = () => request.finish(plainTextDocument(source));
-      request.worker.onmessageerror = () => request.finish(plainTextDocument(source));
-      request.abortHandler = () => request.finish(plainTextDocument(source));
+      request.worker.onerror = () => request.finish(fallbackResult(source));
+      request.worker.onmessageerror = () => request.finish(fallbackResult(source));
+      request.abortHandler = () => request.finish(fallbackResult(source));
       request.signal?.addEventListener('abort', request.abortHandler, { once: true });
       request.timer = setTimeout(
-        () => request.finish(plainTextDocument(source)),
+        () => request.finish(fallbackResult(source)),
         timeoutMs,
       );
       active = request;
@@ -172,7 +183,7 @@ export function createMarkdownWorkerClient(
       try {
         request.worker.postMessage(message);
       } catch {
-        request.finish(plainTextDocument(source));
+        request.finish(fallbackResult(source));
       }
     });
   };
