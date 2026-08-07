@@ -118,6 +118,60 @@ it('uses one viewport for canvas and text and releases both page tasks', async (
   expect(page.cleanup).toHaveBeenCalledOnce();
 });
 
+it('treats 100% zoom as fit-to-pane when the PDF page is wider than its container', async () => {
+  const page = {
+    cleanup: vi.fn(),
+    getViewport: vi.fn(({ scale }: { scale: number }) => ({
+      width: 612 * scale,
+      height: 792 * scale,
+      scale,
+      userUnit: 1,
+    })),
+    render: vi.fn(() => ({ cancel: vi.fn(), promise: Promise.resolve() })),
+    streamTextContent: vi.fn(() => new ReadableStream()),
+  };
+  const destroy = vi.fn(async () => undefined);
+  getDocument.mockReturnValue({
+    promise: Promise.resolve({
+      numPages: 1,
+      getPage: vi.fn(async () => page),
+      loadingTask: { destroy },
+    }),
+    destroy,
+  });
+  const document = await (
+    await createPdfJsLoadingTask(new ArrayBuffer(4))
+  ).promise;
+  const viewport = globalThis.document.createElement('div');
+  const pages = globalThis.document.createElement('div');
+  const target = globalThis.document.createElement('article');
+  Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 360 });
+  pages.style.paddingLeft = '12px';
+  pages.style.paddingRight = '12px';
+  viewport.append(pages);
+  pages.append(target);
+  const surface = {
+    pageNumber: 1,
+    target,
+    canvas: globalThis.document.createElement('canvas'),
+    textLayer: globalThis.document.createElement('div'),
+  };
+
+  const render = await document.renderPage(
+    surface,
+    1,
+    new AbortController().signal,
+  );
+  await render.completed;
+
+  const fittedScale = 336 / 612;
+  expect(page.getViewport).toHaveBeenNthCalledWith(1, { scale: 1 });
+  expect(page.getViewport).toHaveBeenNthCalledWith(2, {
+    scale: expect.closeTo(fittedScale, 5),
+  });
+  expect(render.width).toBeCloseTo(336, 5);
+});
+
 it('lets a destroyed loading owner absorb a late document without double destroy', async () => {
   const proxy = deferred<{
     numPages: number;

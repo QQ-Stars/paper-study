@@ -19,8 +19,6 @@ interface UseGsapConfig {
 const motion = vi.hoisted(() => ({
   reduceMotion: false,
   configs: [] as UseGsapConfig[],
-  getState: vi.fn(),
-  flipFrom: vi.fn(),
   set: vi.fn(),
   timelineFromTo: vi.fn(),
   matchMediaAdd: vi.fn(),
@@ -31,10 +29,6 @@ const motion = vi.hoisted(() => ({
 const originalMatchMedia = window.matchMedia;
 
 vi.mock('./gsap', () => ({
-  Flip: {
-    getState: motion.getState,
-    from: motion.flipFrom,
-  },
   gsap: {
     set: motion.set,
     timeline: vi.fn(() => ({
@@ -91,9 +85,6 @@ beforeEach(() => {
   });
   motion.reduceMotion = false;
   motion.configs.length = 0;
-  motion.getState.mockReset();
-  motion.getState.mockImplementation(() => ({ id: Symbol('state') }));
-  motion.flipFrom.mockReset();
   motion.set.mockReset();
   motion.timelineFromTo.mockReset();
   motion.timelineFromTo.mockReturnThis();
@@ -112,7 +103,7 @@ afterEach(() => {
 });
 
 describe('useDeckFlip', () => {
-  it('uses a scoped, revert-on-update GSAP lifecycle and FLIP after committed layout changes', () => {
+  it('animates the entrance once and commits later slot changes without a geometry tween', () => {
     const view = render(<Deck layoutKey="one" />);
 
     expect(motion.configs[0]).toEqual(expect.objectContaining({
@@ -124,16 +115,20 @@ describe('useDeckFlip', () => {
       allowMotion: '(prefers-reduced-motion: no-preference)',
     });
     expect(motion.timelineFromTo).toHaveBeenCalledOnce();
-    expect(motion.flipFrom).not.toHaveBeenCalled();
 
     view.rerender(<Deck layoutKey="two" />);
 
-    expect(motion.flipFrom).toHaveBeenCalledOnce();
-    expect(motion.flipFrom.mock.calls[0][1]).toEqual(expect.objectContaining({
+    expect(motion.timelineFromTo).toHaveBeenCalledOnce();
+    expect(motion.set).toHaveBeenCalledOnce();
+    expect(motion.set.mock.calls[0][1]).toEqual(expect.objectContaining({
       clearProps: 'transform,opacity,visibility',
     }));
-    expect(motion.flipFrom.mock.calls[0][1]).not.toHaveProperty('onComplete');
     expect(motion.matchMediaRevert).toHaveBeenCalled();
+
+    view.rerender(<Deck layoutKey="three" />);
+
+    expect(motion.timelineFromTo).toHaveBeenCalledOnce();
+    expect(motion.set).toHaveBeenCalledTimes(2);
   });
 
   it('commits the static final presentation when reduced motion is requested', () => {
@@ -143,8 +138,6 @@ describe('useDeckFlip', () => {
 
     expect(motion.set).not.toHaveBeenCalled();
     expect(motion.timelineFromTo).not.toHaveBeenCalled();
-    expect(motion.flipFrom).not.toHaveBeenCalled();
-    expect(motion.getState).not.toHaveBeenCalled();
     expect(motion.matchMediaAdd).not.toHaveBeenCalled();
   });
 
@@ -159,6 +152,5 @@ describe('useDeckFlip', () => {
     expect(motion.matchMediaAdd).not.toHaveBeenCalled();
     expect(motion.set).not.toHaveBeenCalled();
     expect(motion.timelineFromTo).not.toHaveBeenCalled();
-    expect(motion.getState).not.toHaveBeenCalled();
   });
 });

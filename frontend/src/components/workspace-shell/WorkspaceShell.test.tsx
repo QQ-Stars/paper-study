@@ -121,6 +121,11 @@ it('navigates with aria-current and focuses the destination title', async () => 
     level: 1,
     name: '文献库',
   });
+  expect(within(screen.getByLabelText('工作区命令')).getByRole('heading', {
+    level: 1,
+    name: '文献库',
+  })).toBe(title);
+  expect(document.querySelector('.workspace-page-header')).not.toBeInTheDocument();
   await waitFor(() => expect(title).toHaveFocus());
   expect(screen.getByRole('link', { name: '文献库' })).toHaveAttribute(
     'aria-current',
@@ -128,6 +133,21 @@ it('navigates with aria-current and focuses the destination title', async () => 
   );
   expect(reviewsLink).not.toHaveAttribute('aria-current');
   expect(document.title).toBe('文献库 | Paper Study');
+});
+
+it('focuses the Reader-owned state title when navigation starts loading it', async () => {
+  const { router } = renderWorkspace('/reviews');
+  await screen.findByRole('heading', { level: 1, name: '复习' });
+
+  await act(async () => {
+    await router.navigate('/reader/focus-target');
+  });
+
+  await waitFor(() => {
+    const title = document.getElementById('workspace-page-title');
+    expect(title).toHaveAttribute('tabindex', '-1');
+    expect(title).toHaveFocus();
+  });
 });
 
 it('moves keyboard users from the Skip Link to the main workspace', async () => {

@@ -78,10 +78,42 @@ describe('parseMarkdown', () => {
           ],
         },
         { type: 'math', value: '\\frac{1}{2}', display: true },
-        { type: 'paragraph', children: [{ type: 'text', value: '$code$' }] },
+        { type: 'paragraph', children: [{ type: 'inlineCode', value: '$code$' }] },
         { type: 'paragraph', children: [{ type: 'text', value: '<span>$html$</span>' }] },
         { type: 'paragraph', children: [{ type: 'text', value: '$image$' }] },
         { type: 'paragraph', children: [{ type: 'text', value: 'Unclosed $formula remains text.' }] },
+      ],
+    });
+  });
+
+  it('keeps paired raw HTML contents literal without flattening adjacent Markdown', () => {
+    const document = parseMarkdown([
+      '<span>$inside$</span> and **strong** with $outside$.',
+      '',
+      '<span data-value="$attribute">$ordinary$',
+    ].join('\n'));
+
+    expect(document).toEqual({
+      version: 1,
+      nodes: [
+        {
+          type: 'paragraph',
+          children: [
+            { type: 'text', value: '<span>$inside$</span>' },
+            { type: 'text', value: ' and ' },
+            { type: 'strong', children: [{ type: 'text', value: 'strong' }] },
+            { type: 'text', value: ' with ' },
+            { type: 'math', value: 'outside', display: false },
+            { type: 'text', value: '.' },
+          ],
+        },
+        {
+          type: 'paragraph',
+          children: [
+            { type: 'text', value: '<span data-value="$attribute">' },
+            { type: 'math', value: 'ordinary', display: false },
+          ],
+        },
       ],
     });
   });
@@ -93,7 +125,17 @@ describe('parseMarkdown', () => {
   });
 
   it('accepts only bounded structured-clone documents with safe link destinations', () => {
-    const source = '[paper](https://example.com/paper) and $x$';
+    const source = [
+      '# **Paper**',
+      '',
+      '> Structured explanation with [paper](https://example.com/paper) and $x$.',
+      '',
+      '- [x] Parsed safely',
+      '',
+      '| Metric | Value |',
+      '| --- | ---: |',
+      '| ECE | `0.05` |',
+    ].join('\n');
     const cloned = structuredClone(parseMarkdown(source));
 
     expect(decodeSafeDocument(cloned)).toEqual(cloned);

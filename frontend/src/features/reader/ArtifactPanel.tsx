@@ -1,4 +1,9 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { artifactKeys } from '../../lib/api/keys';
@@ -15,11 +20,15 @@ import {
 } from './useArtifactCommands';
 import './artifact-panel.css';
 
-const tabs: readonly { kind: ArtifactKind; label: string }[] = [
+type ArtifactPanelTab = 'context' | ArtifactKind;
+
+const artifactTabs: readonly { kind: ArtifactKind; label: string }[] = [
   { kind: 'note', label: '笔记' },
   { kind: 'explainer', label: '讲解' },
   { kind: 'translation', label: '翻译' },
 ];
+
+const contextTab = { kind: 'context', label: '上下文' } as const;
 
 const successMessages: Record<ArtifactKind, string> = {
   note: '笔记已保存，正在同步服务端内容。',
@@ -108,6 +117,7 @@ function ArtifactBody({
         <MarkdownContent
           className="artifact-panel__markdown"
           generation={generation}
+          headingLevelOffset={2}
           source={content}
         />
       );
@@ -116,7 +126,6 @@ function ArtifactBody({
 interface GeneratedArtifactProps extends ArtifactBodyProps {
   command: ArtifactCommandState;
   onGenerate(): void;
-  onGenerateBatch?(): void;
   onStop(): void;
 }
 
@@ -124,7 +133,6 @@ function GeneratedArtifact({
   kind,
   command,
   onGenerate,
-  onGenerateBatch,
   onStop,
   ...bodyProps
 }: GeneratedArtifactProps) {
@@ -136,11 +144,6 @@ function GeneratedArtifact({
         <button type="button" disabled={running} onClick={onGenerate}>
           生成{label}
         </button>
-        {onGenerateBatch ? (
-          <button type="button" disabled={running} onClick={onGenerateBatch}>
-            批量生成缺失讲解
-          </button>
-        ) : null}
         {running ? (
           <button type="button" className="artifact-panel__stop" onClick={onStop}>
             停止接收{label}
@@ -241,6 +244,7 @@ function NoteArtifact({
             <MarkdownContent
               className="artifact-panel__markdown"
               generation={generation}
+              headingLevelOffset={2}
               source={preview}
             />
           )}
@@ -251,15 +255,22 @@ function NoteArtifact({
 export interface ArtifactPanelProps {
   paperId: string;
   generation: number;
+  context?: ReactNode;
   className?: string;
 }
 
 export function ArtifactPanel({
   paperId,
   generation,
+  context,
   className,
 }: ArtifactPanelProps) {
-  const [activeTab, setActiveTab] = useState<ArtifactKind>('note');
+  const tabs: readonly { kind: ArtifactPanelTab; label: string }[] = context
+    ? [contextTab, ...artifactTabs]
+    : artifactTabs;
+  const [activeTab, setActiveTab] = useState<ArtifactPanelTab>(
+    context ? 'context' : 'note',
+  );
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const noteQuery = useQuery({
     queryKey: artifactKeys.note(paperId),
@@ -276,7 +287,6 @@ export function ArtifactPanel({
   const {
     commands,
     generateExplainer,
-    generateExplainerBatch,
     generateTranslation,
     saveNote,
     stop,
@@ -294,16 +304,20 @@ export function ArtifactPanel({
   };
 
   return (
-    <section className={['artifact-panel', className].filter(Boolean).join(' ')} aria-label="研究产物">
+    <section
+      aria-label="论文阅读工作台"
+      className={['artifact-panel', className].filter(Boolean).join(' ')}
+      data-has-context={Boolean(context)}
+    >
       <header className="artifact-panel__header">
         <div>
-          <p>ARTIFACTS</p>
-          <h2>阅读产物</h2>
+          <p>WORKBENCH</p>
+          <h2>阅读工作台</h2>
         </div>
         <span>{paperId}</span>
       </header>
 
-      <div className="artifact-panel__tabs" role="tablist" aria-label="阅读产物类型">
+      <div className="artifact-panel__tabs" role="tablist" aria-label="阅读工作台视图">
         {tabs.map((tab, index) => (
           <button
             aria-controls={`artifact-panel-${tab.kind}`}
@@ -329,7 +343,9 @@ export function ArtifactPanel({
         className="artifact-panel__content"
         id={`artifact-panel-${activeTab}`}
         role="tabpanel"
+        tabIndex={0}
       >
+        {activeTab === 'context' ? context : null}
         {activeTab === 'note' ? (
           noteQuery.isPending
             ? <p className="artifact-panel__empty" role="status">正在读取笔记…</p>
@@ -357,7 +373,6 @@ export function ArtifactPanel({
             generation={generation}
             kind="explainer"
             onGenerate={() => { void generateExplainer(false); }}
-            onGenerateBatch={() => { void generateExplainerBatch(); }}
             onStop={() => stop('explainer')}
             pending={explainerQuery.isPending}
             source={explainerQuery.data}

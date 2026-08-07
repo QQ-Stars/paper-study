@@ -48,14 +48,17 @@ afterEach(() => {
   });
 });
 
-it('reverts real GSAP media contexts across StrictMode updates and unmount', () => {
+it('keeps one entrance presentation live after the StrictMode probe', () => {
   const view = render(
     <StrictMode>
       <RealDeck layoutKey="initial" />
     </StrictMode>,
   );
 
-  expect(view.getByRole('button', { name: 'initial' })).toBeInTheDocument();
+  const initialCard = view.getByText('initial');
+  expect(initialCard).toBeInTheDocument();
+  expect(initialCard.style.opacity).not.toBe('');
+  expect(initialCard.style.transform).not.toBe('');
 
   view.rerender(
     <StrictMode>
@@ -63,6 +66,18 @@ it('reverts real GSAP media contexts across StrictMode updates and unmount', () 
     </StrictMode>,
   );
 
-  expect(view.getByRole('button', { name: 'updated' })).toBeInTheDocument();
+  const updatedCard = view.getByRole('button', { name: 'updated' });
+  expect(updatedCard.style.opacity).toBe('');
+  expect(updatedCard.style.transform).toBe('');
+
+  view.rerender(
+    <StrictMode>
+      <RealDeck layoutKey="initial" />
+    </StrictMode>,
+  );
+
+  const reversedCard = view.getByRole('button', { name: 'initial' });
+  expect(reversedCard.style.opacity).toBe('');
+  expect(reversedCard.style.transform).toBe('');
   expect(() => view.unmount()).not.toThrow();
 });

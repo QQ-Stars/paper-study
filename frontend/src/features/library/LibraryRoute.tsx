@@ -25,6 +25,7 @@ import {
   type LibrarySort,
   type LibrarySourceFilter,
 } from './filters';
+import { ExplainerBatchManager } from './ExplainerBatchManager';
 import { PaperDeleteConfirmation, PaperEditor } from './PaperEditor';
 import { PaperPreview } from './PaperPreview';
 import { PaperTable } from './PaperTable';
@@ -432,6 +433,8 @@ export function Component() {
           添加论文
         </button>
       </header>
+
+      <ExplainerBatchManager />
 
       <div className="library-filters" aria-label="文献筛选">
         <label className="library-filters__search">

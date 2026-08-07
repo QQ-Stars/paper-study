@@ -22,7 +22,7 @@ test.describe('React research workspace workflows', () => {
     await page.keyboard.press('Enter');
 
     await expect(page).toHaveURL(/\/workspace\/reader\/paper-workers$/);
-    await expect(page.getByRole('heading', { level: 1, name: '阅读' })).toBeVisible();
+    await expect(page.locator('#workspace-page-title')).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(/\/workspace\/dashboard$/);
     await expect(deck).toBeVisible();

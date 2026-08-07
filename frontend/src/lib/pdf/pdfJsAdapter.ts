@@ -45,6 +45,33 @@ function cancelSafely(cancel: () => void): void {
   }
 }
 
+function availablePageWidth(surface: PdfPageSurface): number | null {
+  if (!(surface.target instanceof HTMLElement)) return null;
+  const pages = surface.target.parentElement;
+  const viewport = pages?.parentElement;
+  if (!(pages instanceof HTMLElement) || !(viewport instanceof HTMLElement)) {
+    return null;
+  }
+  const style = pages.ownerDocument.defaultView?.getComputedStyle(pages);
+  const padding = style
+    ? Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight)
+    : 0;
+  const width = viewport.clientWidth - (Number.isFinite(padding) ? padding : 0);
+  return Number.isFinite(width) && width > 0 ? width : null;
+}
+
+function renderScale(
+  page: PDFPageProxy,
+  surface: PdfPageSurface,
+  zoom: number,
+): number {
+  const availableWidth = availablePageWidth(surface);
+  if (availableWidth === null) return zoom;
+  const baseViewport = page.getViewport({ scale: 1 });
+  if (!Number.isFinite(baseViewport.width) || baseViewport.width <= 0) return zoom;
+  return zoom * Math.min(1, availableWidth / baseViewport.width);
+}
+
 function createPageRenderHandle(
   runtime: PdfJsRuntime,
   page: PDFPageProxy,
@@ -52,7 +79,7 @@ function createPageRenderHandle(
   zoom: number,
   signal: AbortSignal,
 ): PdfPageRenderHandle {
-  const viewport = page.getViewport({ scale: zoom });
+  const viewport = page.getViewport({ scale: renderScale(page, surface, zoom) });
   const outputScale = Math.max(1, globalThis.devicePixelRatio || 1);
   if (surface.target instanceof HTMLElement) {
     surface.target.style.setProperty('--scale-factor', String(viewport.scale));

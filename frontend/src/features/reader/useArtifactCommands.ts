@@ -2,7 +2,6 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { isAbortError } from '../../lib/api/errors';
-import { paperKeys } from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';
 import { artifactGateway } from '../../lib/api/artifactGateway';
 import {
@@ -64,10 +63,6 @@ export function useArtifactCommands(paperId: string, generation: number) {
     await Promise.allSettled(keys.map((queryKey) => (
       queryClient.invalidateQueries({ queryKey, exact: true })
     )));
-  }, [queryClient]);
-
-  const reconcileExplainerBatch = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: paperKeys.all() });
   }, [queryClient]);
 
   const run = useCallback(async (
@@ -132,17 +127,6 @@ export function useArtifactCommands(paperId: string, generation: number) {
     }),
   ), [paperId, run]);
 
-  const generateExplainerBatch = useCallback((limit = 0) => run(
-    'explainer',
-    (signal, reportProgress) => artifactGateway.explainBatch(limit, {
-      signal,
-      onEvent(event) {
-        if (event.type === 'progress') reportProgress(event.line);
-      },
-    }),
-    reconcileExplainerBatch,
-  ), [reconcileExplainerBatch, run]);
-
   const generateTranslation = useCallback(() => run(
     'translation',
     (signal, reportProgress) => artifactGateway.translatePaper(paperId, {
@@ -168,7 +152,6 @@ export function useArtifactCommands(paperId: string, generation: number) {
       translation: commandForIdentity(session.translation, paperId, generation),
     },
     generateExplainer,
-    generateExplainerBatch,
     generateTranslation,
     saveNote,
     stop,

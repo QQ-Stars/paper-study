@@ -5,9 +5,10 @@
   grid-template-rows: auto minmax(0, 1fr);
   width: 100%;
   height: 100%;
-  min-height: min(72rem, calc(100dvh - 12rem));
+  min-height: 0;
   overflow: hidden;
   background: #0c100e;
+  container: pdf-workspace / inline-size;
 }
 
 .pdf-workspace__toolbar {
@@ -110,8 +111,7 @@
 .pdf-workspace__viewport {
   position: relative;
   min-width: 0;
-  min-height: 36rem;
-  max-height: calc(100dvh - 12rem);
+  min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -311,11 +311,6 @@
 }
 
 @media (max-width: 1099px) {
-  .pdf-workspace,
-  .pdf-workspace__viewport {
-    min-height: 70dvh;
-  }
-
   .pdf-workspace__toolbar {
     grid-template-columns: minmax(7rem, 1fr) auto auto;
   }
@@ -325,12 +320,31 @@
   }
 }
 
-@media (max-width: 760px) {
-  .pdf-workspace,
-  .pdf-workspace__viewport {
-    min-height: 64dvh;
+@container pdf-workspace (max-width: 36rem) {
+  .pdf-workspace__toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-2);
+    padding: var(--space-2);
   }
 
+  .pdf-workspace__identity {
+    grid-column: 1 / -1;
+  }
+
+  .pdf-workspace__status {
+    display: none;
+  }
+
+  .pdf-workspace__pagination {
+    justify-self: start;
+  }
+
+  .pdf-workspace__zoom {
+    justify-self: end;
+  }
+}
+
+@media (max-width: 760px) {
   .pdf-workspace__toolbar {
     grid-template-columns: 1fr auto;
     gap: var(--space-2);
@@ -355,8 +369,8 @@
     padding: var(--space-3);
   }
 
-  .pdf-page {
-    width: calc(100vw - 2rem);
+  .pdf-page:not([data-status="ready"]) {
+    width: 100%;
     min-height: calc((100vw - 2rem) * 1.294);
   }
 

@@ -2,14 +2,14 @@ import { reactWorkspaceCsp, installRuntimeAudit } from './fixtures/runtimeAudit'
 import { expect, test } from './fixtures/mockApi';
 
 const routeExpectations = [
-  ['/workspace/dashboard', '研究概览'],
-  ['/workspace/library', '文献库'],
-  ['/workspace/reader/paper-lifecycle', '阅读'],
-  ['/workspace/reviews', '复习'],
-  ['/workspace/acquire', '采集'],
-  ['/workspace/jobs', '任务'],
-  ['/workspace/insights', '洞察'],
-  ['/workspace/settings', '设置'],
+  ['/workspace/dashboard', '研究概览', '研究概览'],
+  ['/workspace/library', '文献库', '文献库'],
+  ['/workspace/reader/paper-lifecycle', '生命周期安全的研究阅读器', '阅读'],
+  ['/workspace/reviews', '复习', '复习'],
+  ['/workspace/acquire', '采集', '采集'],
+  ['/workspace/jobs', '任务', '任务'],
+  ['/workspace/insights', '洞察', '洞察'],
+  ['/workspace/settings', '设置', '设置'],
 ] as const;
 
 test.describe('React clean-room runtime', () => {
@@ -22,6 +22,7 @@ test.describe('React clean-room runtime', () => {
 
     await expect(page.getByRole('region', { name: 'PDF 阅读工作区' })).toBeVisible();
     await expect(page.getByRole('article', { name: '第 1 页' })).toHaveAttribute('data-status', 'ready');
+    await page.getByRole('tab', { name: '笔记' }).click();
     await expect(page.locator('.katex')).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
     await expect.poll(() => audit.responses.some(
@@ -32,9 +33,13 @@ test.describe('React clean-room runtime', () => {
 
   test('refreshes every deep route without loading legacy application assets', async ({ page }) => {
     const audit = await installRuntimeAudit(page);
-    for (const [path, heading] of routeExpectations) {
+    for (const [path, heading, commandBarTitle] of routeExpectations) {
       await page.goto(path);
       await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+      await expect(page.locator('.workspace-page-header')).toHaveCount(0);
+      const commandBar = page.getByLabel('工作区命令');
+      await expect(commandBar.getByText(commandBarTitle, { exact: true }).last()).toBeVisible();
+      await expect(commandBar.getByRole('navigation', { name: '面包屑' })).toBeVisible();
       await page.reload();
       await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
     }

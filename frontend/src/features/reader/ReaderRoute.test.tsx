@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PaperRecord, PdfStatus } from '../../lib/api/types';
 import { resetWorkspaceStore, useWorkspaceStore } from '../../lib/workspace';
-import { Component } from './ReaderRoute';
+import { Component, handle } from './ReaderRoute';
 
 const apiMocks = vi.hoisted(() => ({
   getPaper: vi.fn(),
@@ -45,15 +45,19 @@ vi.mock('./ArtifactPanel', () => ({
   ArtifactPanel: ({
     paperId,
     generation,
+    context,
   }: {
     paperId: string;
     generation: number;
+    context?: React.ReactNode;
   }) => (
     <div
       data-testid="artifact-panel"
       data-paper-id={paperId}
       data-generation={generation}
-    />
+    >
+      {context}
+    </div>
   ),
 }));
 
@@ -135,19 +139,46 @@ beforeEach(() => {
 });
 
 describe('Reader route', () => {
+  it('owns its compact page heading instead of rendering the shell heading', () => {
+    expect(handle).toMatchObject({
+      title: '阅读',
+      layout: 'reader-wide',
+      pageHeader: 'route',
+    });
+  });
+
   it('uses the URL paper id for every server fact and synchronizes only toward the workspace store', async () => {
     useWorkspaceStore.getState().setWorkspaceSelectionId('stale-store-paper');
     renderReader();
 
-    expect(await screen.findByRole('heading', { name: '论文甲' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: '论文甲' })).toHaveAttribute(
+      'id',
+      'workspace-page-title',
+    );
     expect(apiMocks.getPaper).toHaveBeenCalledWith('paper-a', expect.any(AbortSignal));
     expect(apiMocks.getPdfStatus).toHaveBeenCalledWith('paper-a', expect.any(AbortSignal));
     expect(screen.getByTestId('pdf-workspace')).toHaveAttribute('data-paper-id', 'paper-a');
     expect(screen.getByTestId('artifact-panel')).toHaveAttribute('data-paper-id', 'paper-a');
+    expect(screen.getByRole('heading', { name: '研究上下文' })).toBeInTheDocument();
+    expect(screen.getByText('A concise finding.')).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId('artifact-panel')).toHaveAttribute('data-generation', '4');
     });
     expect(useWorkspaceStore.getState().workspaceSelectionId).toBe('paper-a');
+  });
+
+  it('exposes the loading heading as the page-level keyboard focus target', () => {
+    apiMocks.getPaper.mockImplementation(() => new Promise(() => undefined));
+    renderReader();
+
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: '正在准备阅读器',
+    })).toHaveAttribute('id', 'workspace-page-title');
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: '正在准备阅读器',
+    })).toHaveAttribute('tabindex', '-1');
   });
 
   it('aborts stale route queries and drops the old identity when the URL changes', async () => {
@@ -196,7 +227,14 @@ describe('Reader route', () => {
     apiMocks.getPaper.mockResolvedValue(null);
     renderReader('/reader/missing-paper');
 
-    expect(await screen.findByRole('heading', { name: '找不到这篇论文' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', {
+      level: 1,
+      name: '找不到这篇论文',
+    })).toHaveAttribute('id', 'workspace-page-title');
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: '找不到这篇论文',
+    })).toHaveAttribute('tabindex', '-1');
     expect(screen.getByText('论文可能已删除，或链接中的标识无效。')).toBeInTheDocument();
     expect(screen.queryByTestId('pdf-workspace')).not.toBeInTheDocument();
     expect(screen.queryByTestId('artifact-panel')).not.toBeInTheDocument();
@@ -221,6 +259,14 @@ describe('Reader route', () => {
     renderReader();
 
     expect(await screen.findByRole('alert')).toHaveTextContent('论文服务不可用');
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: '论文读取失败',
+    })).toHaveAttribute('id', 'workspace-page-title');
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: '论文读取失败',
+    })).toHaveAttribute('tabindex', '-1');
     await user.click(screen.getByRole('button', { name: '重新读取' }));
 
     expect(await screen.findByRole('heading', { name: '论文甲' })).toBeInTheDocument();

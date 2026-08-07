@@ -57,6 +57,16 @@ export function PaperTable({
   return (
     <div className="paper-table-shell">
       <table className="paper-table" aria-label="文献台账">
+        <colgroup>
+          <col className="paper-table__col-select" />
+          <col className="paper-table__col-identity" />
+          <col className="paper-table__col-facts" />
+          <col className="paper-table__col-status" />
+          <col className="paper-table__col-quality" />
+          <col className="paper-table__col-source" />
+          <col className="paper-table__col-date" />
+          <col className="paper-table__col-favorite" />
+        </colgroup>
         <thead>
           <tr>
             <th scope="col"><span className="sr-only">批量选择</span></th>
@@ -100,14 +110,16 @@ export function PaperTable({
                   {paper.titleZh ? <span lang="zh-CN">{paper.titleZh}</span> : null}
                   <small>{[paper.venue, paper.year, paper.type, paper.topic].filter(Boolean).join(' · ') || '未标注'}</small>
                 </td>
-                <td>
+                <td className="paper-table__facts">
+                  <span aria-hidden="true" className="paper-table__field-label">研究事实</span>
                   <div className="paper-table__badges">
                     {paper.hasPdf ? <span>PDF</span> : null}
                     {paper.hasNote ? <span>NOTE</span> : null}
                     {paper.ccf ? <span>{paper.ccf}</span> : null}
                   </div>
                 </td>
-                <td>
+                <td className="paper-table__status-cell">
+                  <span aria-hidden="true" className="paper-table__field-label">状态</span>
                   <button
                     type="button"
                     className="paper-table__status"
@@ -123,11 +135,18 @@ export function PaperTable({
                   </button>
                 </td>
                 <td className="paper-table__numeric">
+                  <span aria-hidden="true" className="paper-table__field-label">质量</span>
                   <span>{semanticScore == null ? formatPercent(paper.relevance) : `语义 ${formatPercent(semanticScore)}`}</span>
                   <small>{paper.citations == null ? '-' : `${paper.citations} 引用`}</small>
                 </td>
-                <td><span className="paper-table__source">{paper.source || 'unknown'}</span></td>
-                <td className="paper-table__date">{formatDate(paper.createdAt)}</td>
+                <td className="paper-table__source-cell">
+                  <span aria-hidden="true" className="paper-table__field-label">来源</span>
+                  <span className="paper-table__source">{paper.source || 'unknown'}</span>
+                </td>
+                <td className="paper-table__date">
+                  <span aria-hidden="true" className="paper-table__field-label">加入日期</span>
+                  {formatDate(paper.createdAt)}
+                </td>
                 <td>
                   <button
                     type="button"

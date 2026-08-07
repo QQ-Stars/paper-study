@@ -23,7 +23,7 @@ test.describe('Reader workflow', () => {
     const audit = await installRuntimeAudit(page);
     await page.goto('/workspace/reader/paper-lifecycle');
 
-    await expect(page.getByRole('heading', { level: 2, name: '生命周期安全的研究阅读器' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: '生命周期安全的研究阅读器' })).toBeVisible();
     const reader = page.getByRole('region', { name: 'PDF 阅读工作区' });
     await expect(reader.getByRole('status').filter({ hasText: '共 1 页' })).toBeVisible();
     await expect(reader.getByRole('article', { name: '第 1 页' })).toHaveAttribute('data-status', 'ready');
@@ -75,7 +75,8 @@ test.describe('Reader workflow', () => {
     const audit = await installRuntimeAudit(page);
     await page.goto('/workspace/reader/paper-lifecycle');
 
-    const artifacts = page.getByRole('region', { name: '研究产物' });
+    const artifacts = page.getByRole('region', { name: '论文阅读工作台' });
+    await artifacts.getByRole('tab', { name: '笔记' }).click();
     const note = artifacts.getByRole('textbox', { name: '笔记内容' });
     await note.fill('# E2E 阅读笔记\n\n只提交当前论文。');
     await artifacts.getByRole('button', { name: '保存笔记' }).click();
@@ -93,6 +94,14 @@ test.describe('Reader workflow', () => {
     await expect(explainerTab).toHaveAttribute('aria-selected', 'true');
     await artifacts.getByRole('button', { name: '生成讲解' }).click();
     await expect(artifacts.getByRole('status').filter({ hasText: '讲解已完成' })).toBeVisible();
+    const explainerPanel = artifacts.getByRole('tabpanel', { name: '讲解' });
+    await expect(explainerPanel.getByRole('heading', { level: 3, name: '研究讲解' })).toBeVisible();
+    await expect(explainerPanel.getByRole('list')).toContainText('资源 owner 与 URL 论文绑定');
+    await expect(explainerPanel.locator('.artifact-panel__markdown')).toHaveAttribute(
+      'data-markdown-state',
+      'resolved',
+    );
+    await expect(explainerPanel).not.toContainText('# 研究讲解');
     expect(mockApi.lastRequest('/api/explain', 'POST')?.body).toEqual({
       id: 'paper-lifecycle',
       deep: false,

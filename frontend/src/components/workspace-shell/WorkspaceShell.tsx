@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { Link, Outlet, useMatches } from 'react-router-dom';
+import { Outlet, useMatches } from 'react-router-dom';
 
 import {
   isWorkspaceRouteHandle,
@@ -101,20 +101,10 @@ export function WorkspaceShell() {
       <GlobalNavigation />
 
       <div className="workspace-shell__body">
-        <CommandBar />
-
-        {routeOwnsPageHeader ? null : (
-          <header className="workspace-page-header">
-            <nav aria-label="面包屑">
-              <Link to="/dashboard">研究工作区</Link>
-              <span aria-hidden="true">/</span>
-              <span aria-current="page">{handle.title}</span>
-            </nav>
-            <h1 id="workspace-page-title" tabIndex={-1}>
-              {handle.title}
-            </h1>
-          </header>
-        )}
+        <CommandBar
+          pageTitle={handle.title}
+          routeOwnsPageHeader={routeOwnsPageHeader}
+        />
 
         <div className="workspace-shell__content">
           <main id="workspace-main" tabIndex={-1}>

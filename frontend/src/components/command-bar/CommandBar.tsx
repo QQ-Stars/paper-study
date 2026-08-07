@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { useWorkspaceStore } from '../../lib/workspace';
 
@@ -19,7 +19,15 @@ const workspaceCommands = [
   { label: '打开设置', keywords: 'settings 模型 目录', to: '/settings' },
 ] as const;
 
-export function CommandBar() {
+interface CommandBarProps {
+  pageTitle: string;
+  routeOwnsPageHeader?: boolean;
+}
+
+export function CommandBar({
+  pageTitle,
+  routeOwnsPageHeader = false,
+}: CommandBarProps) {
   const activePanel = useWorkspaceStore((state) => state.panel.active);
   const openPanel = useWorkspaceStore((state) => state.openPanel);
 
@@ -37,6 +45,19 @@ export function CommandBar() {
 
   return (
     <div className="workspace-command-bar" aria-label="工作区命令">
+      <header className="workspace-command-bar__route">
+        <nav aria-label="面包屑">
+          <Link to="/dashboard">研究工作区</Link>
+          <span aria-hidden="true">/</span>
+          <span aria-current="page">{pageTitle}</span>
+        </nav>
+        {routeOwnsPageHeader ? (
+          <p className="workspace-command-bar__route-title">{pageTitle}</p>
+        ) : (
+          <h1 id="workspace-page-title" tabIndex={-1}>{pageTitle}</h1>
+        )}
+      </header>
+
       <button
         id={triggerIds.command}
         className="workspace-command-bar__command"

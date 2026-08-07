@@ -55,6 +55,87 @@ function parsingClient(): MarkdownWorkerClient {
 }
 
 describe('MarkdownContent', () => {
+  it('offsets embedded document headings without changing their visual depth metadata', async () => {
+    const { container } = render(
+      <MarkdownContent
+        source={'# 讲解标题\n\n## 研究问题'}
+        generation={1}
+        headingLevelOffset={2}
+        workerClientFactory={parsingClient}
+      />,
+    );
+
+    const title = await screen.findByRole('heading', { level: 3, name: '讲解标题' });
+    expect(title).toHaveAttribute('data-markdown-depth', '1');
+    expect(screen.getByRole('heading', { level: 4, name: '研究问题' })).toHaveAttribute(
+      'data-markdown-depth',
+      '2',
+    );
+    expect(container.querySelector('h1')).toBeNull();
+  });
+
+  it('renders explainer Markdown as semantic document structure', async () => {
+    const source = [
+      '# 论文讲解',
+      '',
+      '> 本文提出一种新的研究方法。',
+      '',
+      '## 研究问题',
+      '',
+      '**多模态大模型**需要识别*知识边界*与 `unknown` 状态。',
+      '',
+      '- 识别已知知识',
+      '- 拒绝未知问题',
+      '- [x] 完成安全解析',
+      '',
+      '1. 建立基线',
+      '2. 评估结果',
+      '',
+      '---',
+      '',
+      '| 模块 | 结果 |',
+      '| --- | ---: |',
+      '| 校准 | 7.5% |',
+      '',
+      '~~旧结论~~与新结论。',
+      '',
+      '第一行  ',
+      '第二行',
+      '',
+      '```python',
+      'score = model(sample)',
+      '```',
+      '',
+      '[阅读论文](https://example.com/paper) 并验证 $x^2$',
+    ].join('\n');
+    const { container } = render(
+      <MarkdownContent
+        source={source}
+        generation={1}
+        workerClientFactory={parsingClient}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { level: 1, name: '论文讲解' })).toBeVisible();
+    expect(screen.getByRole('heading', { level: 2, name: '研究问题' })).toBeVisible();
+    expect(container.querySelector('blockquote')).toHaveTextContent('本文提出一种新的研究方法。');
+    expect(container.querySelector('strong')).toHaveTextContent('多模态大模型');
+    expect(container.querySelector('em')).toHaveTextContent('知识边界');
+    expect(container.querySelector('p code')).toHaveTextContent('unknown');
+    expect(container.querySelector('ul')).toHaveTextContent('识别已知知识');
+    expect(container.querySelector('input[type="checkbox"]')).toBeChecked();
+    expect(container.querySelector('ol')).toHaveTextContent('建立基线');
+    expect(container.querySelector('hr')).not.toBeNull();
+    expect(container.querySelector('table')).toHaveTextContent('校准7.5%');
+    expect(container.querySelector('th[data-align="right"], td[data-align="right"]')).not.toBeNull();
+    expect(container.querySelector('del')).toHaveTextContent('旧结论');
+    expect(container.querySelector('br')).not.toBeNull();
+    expect(container.querySelector('pre code[data-language="python"]')).toHaveTextContent('score = model(sample)');
+    expect(screen.getByRole('link', { name: '阅读论文' })).toHaveAttribute('href', 'https://example.com/paper');
+    expect(container.querySelector('.katex')).not.toBeNull();
+    expect(container.textContent).not.toContain('## 研究问题');
+  });
+
   it('renders safe AST nodes without turning hostile Markdown into active DOM', async () => {
     const source = [
       '<img src=x onerror=alert(1)>',

@@ -19,6 +19,7 @@ import './reader-route.css';
 export const handle = {
   title: '阅读',
   layout: 'reader-wide',
+  pageHeader: 'route',
 } satisfies WorkspaceRouteHandle;
 
 interface ReaderIdentity {
@@ -63,10 +64,10 @@ function ReaderRouteState({
   return (
     <section
       className="reader-route-state material-panel"
-      aria-labelledby="reader-route-state-title"
+      aria-labelledby="workspace-page-title"
       role={alert ? 'alert' : undefined}
     >
-      <h2 id="reader-route-state-title">{title}</h2>
+      <h1 id="workspace-page-title" tabIndex={-1}>{title}</h1>
       {children}
     </section>
   );
@@ -74,7 +75,7 @@ function ReaderRouteState({
 
 function PaperMetadata({ paper }: { paper: PaperRecord }) {
   return (
-    <section className="reader-metadata material-panel" aria-labelledby="reader-metadata-title">
+    <section className="reader-metadata" aria-labelledby="reader-metadata-title">
       <header>
         <p className="reader-metadata__label">论文信息</p>
         <h2 id="reader-metadata-title">研究上下文</h2>
@@ -187,11 +188,11 @@ export function Component() {
   return (
     <article className="reader-route" data-paper-id={fixedPaperId}>
       <header className="reader-route__header">
-        <div>
+        <div className="reader-route__title">
           <p className="reader-route__context">
             {[paper.venue, paper.year].filter(Boolean).join(' / ') || '未分类论文'}
           </p>
-          <h2>{paper.titleZh || paper.title}</h2>
+          <h1 id="workspace-page-title" tabIndex={-1}>{paper.titleZh || paper.title}</h1>
           {paper.titleZh ? <p className="reader-route__original-title">{paper.title}</p> : null}
         </div>
         <div className="reader-route__identity" aria-label="当前论文标识">
@@ -234,9 +235,12 @@ export function Component() {
           ) : null}
         </section>
 
-        <aside className="reader-route__rail" aria-label="论文上下文与阅读产物">
-          <PaperMetadata paper={paper} />
-          <ArtifactPanel paperId={fixedPaperId} generation={generation} />
+        <aside className="reader-route__rail" aria-label="论文阅读工作台">
+          <ArtifactPanel
+            context={<PaperMetadata paper={paper} />}
+            paperId={fixedPaperId}
+            generation={generation}
+          />
         </aside>
       </div>
     </article>

@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { artifactKeys, paperKeys } from '../../lib/api/keys';
-import type { ExplainBatchTerminal } from '../../lib/streaming/contracts';
 import { ArtifactPanel } from './ArtifactPanel';
 
 const apiMocks = vi.hoisted(() => ({
@@ -98,36 +97,50 @@ beforeEach(() => {
 });
 
 describe('ArtifactPanel', () => {
-  it('offers separate single and batch explainer commands with streamed progress', async () => {
+  it('keeps single-paper generation in Reader and excludes the library batch command', async () => {
     const user = userEvent.setup();
-    const pending = deferred<ExplainBatchTerminal>();
-    apiMocks.getExplainer
-      .mockResolvedValueOnce('')
-      .mockResolvedValue('# Batch Explanation');
-    apiMocks.explainBatch.mockImplementation((limit, options) => {
-      expect(limit).toBe(0);
-      options.onEvent?.({ type: 'progress', line: '批量讲解 1 / 2' });
-      return pending.promise;
+    apiMocks.explainPaper.mockImplementation(async (_id, _deep, options) => {
+      options.onEvent?.({ type: 'progress', line: '正在生成当前论文讲解' });
+      return { type: 'result', ok: true, markdown: '# Explanation' };
     });
     renderPanel();
 
     await user.click(await screen.findByRole('tab', { name: '讲解' }));
     expect(screen.getByRole('button', { name: '生成讲解' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '批量生成缺失讲解' }));
+    expect(screen.queryByRole('button', { name: '批量生成缺失讲解' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '生成讲解' }));
 
-    expect(await screen.findByText('批量讲解 1 / 2')).toBeInTheDocument();
-    expect(apiMocks.explainBatch).toHaveBeenCalledOnce();
-    await act(async () => {
-      pending.resolve({
-        type: 'result',
-        ok: true,
-        summary: { total: 2, done: 2, failed: [], skippedNoPdf: [] },
-      });
-      await pending.promise;
-    });
     expect(await screen.findByText('讲解已完成，正在同步服务端内容。')).toBeInTheDocument();
-    await waitFor(() => expect(apiMocks.getExplainer.mock.calls.length).toBeGreaterThan(1));
-    expect(await screen.findByText('# Batch Explanation')).toBeInTheDocument();
+    expect(apiMocks.explainPaper).toHaveBeenCalledOnce();
+    expect(apiMocks.explainBatch).not.toHaveBeenCalled();
+  });
+
+  it('integrates paper context into the same keyboard-accessible tab layer', async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(
+      <QueryClientProvider client={client}>
+        <ArtifactPanel
+          context={<div>上下文详情</div>}
+          generation={1}
+          paperId="paper-a"
+        />
+      </QueryClientProvider>,
+    );
+
+    const contextTab = await screen.findByRole('tab', { name: '上下文' });
+    expect(contextTab).toHaveAttribute('aria-selected', 'true');
+    const tabPanel = screen.getByRole('tabpanel');
+    expect(tabPanel).toHaveTextContent('上下文详情');
+
+    contextTab.focus();
+    await user.tab();
+    expect(tabPanel).toHaveFocus();
+
+    contextTab.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: '笔记' })).toHaveFocus();
+    expect(screen.queryByText('上下文详情')).not.toBeInTheDocument();
   });
 
   it('moves tab focus and selection with arrow keys', async () => {

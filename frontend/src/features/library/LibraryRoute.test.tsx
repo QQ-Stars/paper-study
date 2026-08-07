@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -8,7 +8,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetWorkspaceStore, useWorkspaceStore } from '../../lib/workspace';
 import { artifactKeys, paperKeys } from '../../lib/api/keys';
 import type { PaperListItem, PaperRecord } from '../../lib/api/types';
+import type { ExplainBatchTerminal } from '../../lib/streaming/contracts';
 import { Component, LibraryInspectorSlot } from './LibraryRoute';
+
+type SuccessfulExplainBatch = Extract<ExplainBatchTerminal, { ok: true }>;
 
 const apiMocks = vi.hoisted(() => ({
   listPapers: vi.fn(),
@@ -18,6 +21,8 @@ const apiMocks = vi.hoisted(() => ({
   addPaper: vi.fn(),
   updatePaper: vi.fn(),
   deletePaper: vi.fn(),
+  getExplainerPending: vi.fn(),
+  explainBatch: vi.fn(),
   semanticSearch: vi.fn(),
 }));
 
@@ -35,6 +40,13 @@ vi.mock('../../lib/api/paperApi', () => ({
 
 vi.mock('../../lib/api/insightsGateway', () => ({
   insightsGateway: { semanticSearch: apiMocks.semanticSearch },
+}));
+
+vi.mock('../../lib/api/artifactGateway', () => ({
+  artifactGateway: {
+    getExplainerPending: apiMocks.getExplainerPending,
+    explainBatch: apiMocks.explainBatch,
+  },
 }));
 
 function paper(
@@ -137,7 +149,7 @@ function deferred<T>() {
   return { promise, reject, resolve };
 }
 
-function renderLibrary() {
+function renderLibrary(options: { reactStrictMode?: boolean } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -151,6 +163,7 @@ function renderLibrary() {
         <LibraryInspectorSlot />
       </MemoryRouter>
     </QueryClientProvider>,
+    options,
   );
   return { ...view, queryClient };
 }
@@ -165,10 +178,181 @@ beforeEach(() => {
   apiMocks.addPaper.mockResolvedValue('new-paper');
   apiMocks.updatePaper.mockResolvedValue(1);
   apiMocks.deletePaper.mockResolvedValue(undefined);
+  apiMocks.getExplainerPending.mockResolvedValue({
+    pending: 3,
+    withPdf: 2,
+    noPdf: 1,
+  });
+  apiMocks.explainBatch.mockResolvedValue({
+    type: 'result',
+    ok: true,
+    summary: { total: 2, done: 2, failed: [], skippedNoPdf: [] },
+  });
   apiMocks.semanticSearch.mockResolvedValue({ type: 'result', ok: true, results: [] });
 });
 
 describe('LibraryRoute', () => {
+  it('manages missing explainers with authoritative counts and streamed progress', async () => {
+    const user = userEvent.setup();
+    const request = deferred<SuccessfulExplainBatch>();
+    const reconciliation = deferred<{ pending: number; withPdf: number; noPdf: number }>();
+    apiMocks.getExplainerPending
+      .mockResolvedValueOnce({ pending: 3, withPdf: 2, noPdf: 1 })
+      .mockImplementationOnce(() => reconciliation.promise)
+      .mockResolvedValue({ pending: 1, withPdf: 1, noPdf: 0 });
+    apiMocks.explainBatch.mockImplementation((limit, options) => {
+      expect(limit).toBe(0);
+      options.onEvent?.({ type: 'progress', line: '批量讲解 1 / 2' });
+      return request.promise;
+    });
+
+    renderLibrary();
+
+    const manager = await screen.findByRole('region', { name: '批量讲解管理' });
+    expect(await within(manager).findByText('待生成 3 篇')).toBeInTheDocument();
+    expect(within(manager).getByText('可直接处理 2 篇')).toBeInTheDocument();
+    expect(within(manager).getByText('缺少 PDF 1 篇')).toBeInTheDocument();
+
+    await user.click(within(manager).getByRole('button', { name: '批量生成缺失讲解' }));
+
+    expect(await within(manager).findByText('批量讲解 1 / 2')).toBeInTheDocument();
+    expect(apiMocks.explainBatch).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      request.resolve({
+        type: 'result',
+        ok: true,
+        summary: { total: 2, done: 2, failed: [], skippedNoPdf: [] },
+      });
+      await request.promise;
+    });
+
+    expect(await within(manager).findByText('已完成 2 / 2 篇 · 失败 0 · 跳过无 PDF 0')).toBeInTheDocument();
+    await waitFor(() => expect(apiMocks.getExplainerPending).toHaveBeenCalledTimes(2));
+    const restart = within(manager).getByRole('button', { name: '批量生成缺失讲解' });
+    expect(restart).toBeDisabled();
+    await user.click(restart);
+    expect(apiMocks.explainBatch).toHaveBeenCalledOnce();
+
+    reconciliation.resolve({ pending: 1, withPdf: 1, noPdf: 0 });
+    await waitFor(() => expect(apiMocks.listPapers).toHaveBeenCalledTimes(2));
+    expect(within(manager).getByText('待生成 1 篇')).toBeInTheDocument();
+    await waitFor(() => expect(restart).toBeEnabled());
+  });
+
+  it('stops receiving a batch without accepting late progress or claiming server cancellation', async () => {
+    const user = userEvent.setup();
+    const request = deferred<SuccessfulExplainBatch>();
+    const reconciliation = deferred<{ pending: number; withPdf: number; noPdf: number }>();
+    let commandOptions: {
+      signal?: AbortSignal;
+      onEvent?: (event: { type: 'progress'; line: string }) => void;
+    } | undefined;
+    apiMocks.explainBatch.mockImplementation((_limit, options) => {
+      commandOptions = options;
+      return request.promise;
+    });
+    apiMocks.getExplainerPending
+      .mockResolvedValueOnce({ pending: 3, withPdf: 2, noPdf: 1 })
+      .mockImplementationOnce(() => reconciliation.promise)
+      .mockResolvedValue({ pending: 3, withPdf: 2, noPdf: 1 });
+
+    renderLibrary();
+
+    const manager = await screen.findByRole('region', { name: '批量讲解管理' });
+    await within(manager).findByText('待生成 3 篇');
+    await user.click(within(manager).getByRole('button', { name: '批量生成缺失讲解' }));
+    await user.click(await within(manager).findByRole('button', { name: '停止接收' }));
+
+    expect(commandOptions?.signal?.aborted).toBe(true);
+    expect(within(manager).getByText('已停止接收；服务端可能仍在运行。')).toBeInTheDocument();
+    const restart = within(manager).getByRole('button', { name: '批量生成缺失讲解' });
+    expect(restart).toBeDisabled();
+    await user.click(restart);
+    expect(apiMocks.explainBatch).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      commandOptions?.onEvent?.({ type: 'progress', line: '不应出现的晚到进度' });
+      request.resolve({
+        type: 'result',
+        ok: true,
+        summary: { total: 2, done: 2, failed: [], skippedNoPdf: [] },
+      });
+      await request.promise;
+    });
+
+    expect(within(manager).queryByText('不应出现的晚到进度')).not.toBeInTheDocument();
+    expect(within(manager).queryByText('已完成 2 / 2 篇 · 失败 0 · 跳过无 PDF 0')).not.toBeInTheDocument();
+    expect(within(manager).getByText('已停止接收；服务端可能仍在运行。')).toBeInTheDocument();
+    await waitFor(() => expect(apiMocks.getExplainerPending).toHaveBeenCalledTimes(2));
+    expect(restart).toBeDisabled();
+
+    reconciliation.resolve({ pending: 3, withPdf: 2, noPdf: 1 });
+    await waitFor(() => expect(apiMocks.listPapers).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(restart).toBeEnabled());
+  });
+
+  it('aborts an active batch when the StrictMode route unmounts', async () => {
+    const user = userEvent.setup();
+    const request = deferred<SuccessfulExplainBatch>();
+    let signal: AbortSignal | undefined;
+    apiMocks.explainBatch.mockImplementation((_limit, options) => {
+      signal = options.signal;
+      return request.promise;
+    });
+
+    const view = renderLibrary({ reactStrictMode: true });
+    const manager = await screen.findByRole('region', { name: '批量讲解管理' });
+    await within(manager).findByText('待生成 3 篇');
+    await user.click(within(manager).getByRole('button', { name: '批量生成缺失讲解' }));
+    expect(signal?.aborted).toBe(false);
+
+    view.unmount();
+
+    expect(signal?.aborted).toBe(true);
+    request.resolve({
+      type: 'result',
+      ok: true,
+      summary: { total: 2, done: 2, failed: [], skippedNoPdf: [] },
+    });
+    await request.promise;
+  });
+
+  it('disables batch generation when no pending explainer has a PDF', async () => {
+    apiMocks.getExplainerPending.mockResolvedValue({
+      pending: 2,
+      withPdf: 0,
+      noPdf: 2,
+    });
+
+    renderLibrary();
+
+    const manager = await screen.findByRole('region', { name: '批量讲解管理' });
+    expect(await within(manager).findByText('可直接处理 0 篇')).toBeInTheDocument();
+    expect(within(manager).getByRole('button', { name: '批量生成缺失讲解' })).toBeDisabled();
+    expect(apiMocks.explainBatch).not.toHaveBeenCalled();
+  });
+
+  it('keeps failed pending counts unknown and lets the user retry them', async () => {
+    const user = userEvent.setup();
+    apiMocks.getExplainerPending
+      .mockRejectedValueOnce(new Error('统计服务不可用'))
+      .mockResolvedValueOnce({ pending: 3, withPdf: 2, noPdf: 1 });
+
+    renderLibrary();
+
+    const manager = await screen.findByRole('region', { name: '批量讲解管理' });
+    expect(await within(manager).findByText('待生成统计读取失败：统计服务不可用')).toBeInTheDocument();
+    expect(within(manager).getByText('待生成 — 篇')).toBeInTheDocument();
+    expect(within(manager).getByText('可直接处理 — 篇')).toBeInTheDocument();
+    expect(within(manager).getByText('缺少 PDF — 篇')).toBeInTheDocument();
+
+    await user.click(within(manager).getByRole('button', { name: '重新读取统计' }));
+
+    expect(await within(manager).findByText('待生成 3 篇')).toBeInTheDocument();
+    expect(within(manager).getByRole('button', { name: '批量生成缺失讲解' })).toBeEnabled();
+  });
+
   it('renders a dense ledger, client-only batch selection, fixed preview, and selection reconciliation', async () => {
     const user = userEvent.setup();
     renderLibrary();
