@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Sequence
+import hashlib
 import json
 from pathlib import Path
 import sys
 from typing import Any
 
 from backend.app.api.compat.database_identity import (
+    DatabaseIdentityError,
+    canonical_json_bytes,
+    exclusive_write_bytes,
     load_database_evidence_identity_manifest,
 )
 from backend.app.cli.runtime_owner import RuntimeOwnerError, RuntimeOwnerService
@@ -73,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     recover.add_argument("--origin-backup", required=True)
     recover.add_argument("--origin-manifest", required=True)
     recover.add_argument("--owner-marker", required=True)
+
+    export = commands.add_parser("export-rollback-map")
+    _add_runtime_arguments(export)
+    export.add_argument("--owner-marker", required=True)
+    export.add_argument("--output", required=True)
     return parser
 
 
@@ -109,6 +118,23 @@ def run(
         build_identity_manifest=_path(options.build_identity_manifest),
         state_directory=_path(options.state_directory),
     )
+    if options.command == "export-rollback-map":
+        rollback_map = operations.frozen_node_rollback_map_from_active_owner(
+            options.owner_marker
+        )
+        payload = canonical_json_bytes(rollback_map)
+        output = Path(options.output).expanduser().resolve(strict=False)
+        try:
+            exclusive_write_bytes(output, payload)
+        except DatabaseIdentityError as error:
+            raise NativeRuntimeError(error.code, str(error)) from error
+        return {
+            "ok": True,
+            "operation": "export-rollback-map",
+            "deploymentKind": "native-windows",
+            "rollbackMapPath": str(output),
+            "rollbackMapSha256": hashlib.sha256(payload).hexdigest(),
+        }
     if options.command == "start":
         processes = operations.start_active_python_roles(
             owner_marker=_path(options.owner_marker),
@@ -193,7 +219,13 @@ def run(
 def main(arguments: Sequence[str] | None = None) -> int:
     try:
         result = run(sys.argv[1:] if arguments is None else arguments)
-    except (NativeRuntimeError, RuntimeOwnerError, OSError, ValueError) as error:
+    except (
+        DatabaseIdentityError,
+        NativeRuntimeError,
+        RuntimeOwnerError,
+        OSError,
+        ValueError,
+    ) as error:
         result = {
             "ok": False,
             "error": {

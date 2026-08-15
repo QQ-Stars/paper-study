@@ -871,16 +871,42 @@ class NativeWindowsRuntimeOperations:
         self,
         owner_marker: str | os.PathLike[str],
     ) -> dict[str, object]:
+        return self._frozen_node_rollback_map_from_owner(
+            owner_marker,
+            require_live=False,
+        )
+
+    def frozen_node_rollback_map_from_active_owner(
+        self,
+        owner_marker: str | os.PathLike[str],
+    ) -> dict[str, object]:
+        """Export the exact frozen map while the attested Node owner is live."""
+        return self._frozen_node_rollback_map_from_owner(
+            owner_marker,
+            require_live=True,
+        )
+
+    def _frozen_node_rollback_map_from_owner(
+        self,
+        owner_marker: str | os.PathLike[str],
+        *,
+        require_live: bool,
+    ) -> dict[str, object]:
         from backend.app.cli.runtime_owner import _strict_owner_document
         from backend.app.providers.runtime_lease import runtime_pid_is_alive
 
+        error_code = (
+            "NATIVE_ACTIVE_OWNER_INVALID"
+            if require_live
+            else "NATIVE_STALE_OWNER_INVALID"
+        )
         try:
             owner_path = Path(owner_marker).expanduser().resolve(strict=True)
             owner = _strict_owner_document(owner_path.read_bytes())
         except Exception as error:
             raise NativeRuntimeError(
-                "NATIVE_STALE_OWNER_INVALID",
-                "The stale Node owner marker is invalid.",
+                error_code,
+                "The Node owner marker is invalid.",
             ) from error
         configured = self._configuration.rollback
         database_paths = owner.get("databasePaths")
@@ -902,11 +928,11 @@ class NativeWindowsRuntimeOperations:
             or not isinstance(old_pid, int)
             or isinstance(old_pid, bool)
             or old_pid <= 0
-            or runtime_pid_is_alive(old_pid)
+            or runtime_pid_is_alive(old_pid) is not require_live
         ):
             raise NativeRuntimeError(
-                "NATIVE_STALE_OWNER_INVALID",
-                "The owner is not one stale frozen Node runtime bound to this spec.",
+                error_code,
+                "The owner is not one exact frozen Node runtime in the required state.",
             )
         database_path = Path(str(database_paths[0])).resolve(strict=True)
         rollback_map = {
@@ -1007,9 +1033,22 @@ class NativeWindowsRuntimeOperations:
                 "NATIVE_NODE_OWNER_MISMATCH",
                 "The owner marker does not identify one running frozen Node process.",
             )
+        foreign_database_handles = tuple(
+            pid
+            for pid in getattr(before, "database_handle_pids", ())
+            if pid != owner.process_id
+        )
+        if foreign_database_handles:
+            raise NativeRuntimeError(
+                "NATIVE_NODE_QUIESCE_FAILED",
+                "A process outside the frozen Node owner still holds the Live database.",
+            )
         _terminate_pid(owner.process_id, timeout=self._stop_timeout_seconds)
         after = inspector.snapshot()
-        if after.node_processes or after.live_python_roles:
+        remaining_database_handles = tuple(
+            getattr(after, "database_handle_pids", ())
+        )
+        if after.node_processes or after.live_python_roles or remaining_database_handles:
             raise NativeRuntimeError(
                 "NATIVE_NODE_QUIESCE_FAILED",
                 "Runtime process, port, or database handles remain after Node quiesce.",
@@ -1024,6 +1063,7 @@ class NativeWindowsRuntimeOperations:
         return {
             "zeroPidPortDatabaseHandles": True,
             "stoppedProcessId": owner.process_id,
+            "databaseHandlePids": list(remaining_database_handles),
         }
 
     def smoke_legacy(self, handle: object) -> dict[str, object]:

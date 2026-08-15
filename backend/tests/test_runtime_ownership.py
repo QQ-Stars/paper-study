@@ -18,6 +18,7 @@ import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
+from unittest.mock import patch
 
 from backend.tests.support.p4_identity import p4_identity_fixture, sha256_file
 
@@ -1197,6 +1198,62 @@ class RuntimeOwnershipTests(unittest.TestCase):
                 side_effect=ProcessLookupError,
             ):
                 self.assertFalse(runtime_lease.runtime_pid_is_alive(12345))
+
+    @unittest.skipUnless(os.name == "nt", "Windows platform evidence contract")
+    def test_windows_inspector_reports_database_handles_from_non_candidate_pids(
+        self,
+    ) -> None:
+        from backend.app.providers import runtime_lease
+
+        with tempfile.TemporaryDirectory(prefix="study-app-runtime-handles-") as raw:
+            root = Path(raw)
+            entrypoint = root / "server.js"
+            database = root / "app.db"
+            entrypoint.write_text("// fixture\n", encoding="utf-8")
+            database.write_bytes(b"sqlite-fixture")
+            metadata = {
+                41001: (Path("node.exe"), root, ("node.exe", str(entrypoint))),
+                41002: (Path("python.exe"), root, ("python.exe", "agent/mcp_server.py")),
+            }
+            observed_pids: list[frozenset[int]] = []
+
+            def metadata_for(pid: int) -> tuple[Path, Path, tuple[str, ...]]:
+                if pid not in metadata:
+                    raise OSError("metadata unavailable")
+                return metadata[pid]
+
+            def database_users(
+                _path: Path,
+                pids: frozenset[int],
+            ) -> frozenset[int]:
+                observed_pids.append(pids)
+                return frozenset({41002})
+
+            with (
+                patch.object(
+                    runtime_lease,
+                    "_windows_process_ids",
+                    return_value=(41001, 41002, 41003),
+                ),
+                patch.object(
+                    runtime_lease,
+                    "_windows_process_metadata",
+                    side_effect=metadata_for,
+                ),
+                patch.object(runtime_lease, "_windows_tcp_listeners", return_value={}),
+                patch.object(
+                    runtime_lease,
+                    "_windows_processes_using_file",
+                    side_effect=database_users,
+                ),
+            ):
+                snapshot = runtime_lease.WindowsRuntimeInspector(
+                    expected_entrypoint_path=entrypoint,
+                    tracked_database_paths=(database,),
+                ).snapshot()
+
+            self.assertEqual([frozenset({41001, 41002, 41003})], observed_pids)
+            self.assertEqual((41002,), snapshot.database_handle_pids)
 
     def test_filesystem_drain_failed_stop_retains_retryable_cleanup_state(
         self,

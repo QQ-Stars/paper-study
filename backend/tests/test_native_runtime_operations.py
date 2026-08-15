@@ -215,6 +215,199 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
             )
         self.assertEqual(["start", "smoke", "reattest", "stop"], failed.events)
 
+    def test_native_quiesce_rejects_foreign_database_holder_before_stopping_node(self) -> None:
+        from backend.app.providers import native_runtime
+        from backend.app.providers.native_runtime import NativeRuntimeError
+
+        owner_marker = Path("production-owner.json")
+        database = Path("app.db")
+        entrypoint = Path("server.js")
+        configuration = SimpleNamespace(
+            rollback=SimpleNamespace(entrypoint_path=entrypoint),
+            roles=(
+                SimpleNamespace(
+                    role="api",
+                    environment={
+                        "PRODUCTION_OWNER_MARKER": str(owner_marker),
+                        "DB_PATH": str(database),
+                    },
+                ),
+            ),
+        )
+        operations = object.__new__(native_runtime.NativeWindowsRuntimeOperations)
+        operations._configuration = configuration
+        operations._stop_timeout_seconds = 1.0
+        operations._node_state_path = Path("native-node-state.json")
+        snapshot = SimpleNamespace(
+            node_processes=(SimpleNamespace(pid=41001),),
+            live_python_roles=(),
+            database_handle_pids=(41001, 41002),
+        )
+
+        class _Inspector:
+            def __init__(self, **_kwargs: object) -> None:
+                pass
+
+            def snapshot(self) -> object:
+                return snapshot
+
+        with (
+            patch.object(
+                native_runtime,
+                "_terminate_pid",
+            ) as terminate,
+            patch(
+                "backend.app.cli.runtime_owner.read_node_active_owner_marker",
+                return_value=SimpleNamespace(process_id=41001),
+            ),
+            patch(
+                "backend.app.providers.runtime_lease.WindowsRuntimeInspector",
+                _Inspector,
+            ),
+        ):
+            with self.assertRaises(NativeRuntimeError) as raised:
+                operations.quiesce_node()
+
+        self.assertEqual("NATIVE_NODE_QUIESCE_FAILED", raised.exception.code)
+        terminate.assert_not_called()
+
+    def test_active_owner_rollback_map_requires_live_pid_and_exact_frozen_paths(self) -> None:
+        from backend.app.api.compat.database_identity import canonical_json_bytes
+        from backend.app.providers import native_runtime
+        from backend.app.providers.native_runtime import NativeRuntimeError
+
+        rollback_environment = {
+            "RUNTIME_ENVIRONMENT": "live",
+            "RUNTIME_NAMESPACE": "production",
+            "API_BACKEND_MODE": "legacy",
+            "DOCUMENT_PIPELINE_MODE": "legacy",
+            "GENERATION_PIPELINE_MODE": "legacy",
+            "ARTIFACT_READ_MODE": "legacy",
+            "ARTIFACT_WRITE_MODE": "legacy",
+            "OCR_ENABLED": "0",
+            "OBSIDIAN_ENABLED": "0",
+            "PAPER_STUDY_MCP_MODE": "legacy",
+            "UI_ENTRY": "react",
+        }
+        with tempfile.TemporaryDirectory(prefix="study-app-active-owner-") as raw:
+            root = Path(raw)
+            executable = root / "node.exe"
+            entrypoint = root / "server.js"
+            database = root / "app.db"
+            marker = root / "production-owner.json"
+            executable.write_bytes(b"node-binary")
+            entrypoint.write_text("// frozen node\n", encoding="utf-8")
+            database.write_bytes(b"sqlite-fixture")
+            configured = SimpleNamespace(
+                executable_path=executable,
+                entrypoint_path=entrypoint,
+                cwd=root,
+                argv=(str(executable), str(entrypoint)),
+                environment=rollback_environment,
+            )
+            operations = object.__new__(native_runtime.NativeWindowsRuntimeOperations)
+            operations._configuration = SimpleNamespace(rollback=configured)
+            unsigned = {
+                "schemaVersion": 1,
+                "markerKind": "runtime-owner",
+                "ownerState": "node_active",
+                "runtimeNamespace": "production",
+                "databaseLineageId": "lineage",
+                "subjectDatabaseId": "subject",
+                "databaseIdentityManifestPath": str(root / "identity.json"),
+                "databaseIdentityManifestFileSha256": "a" * 64,
+                "originReceiptPath": str(root / "origin.json"),
+                "originReceiptFileSha256": "b" * 64,
+                "originReceiptSha256": "c" * 64,
+                "entrypointPath": str(entrypoint),
+                "processId": 41001,
+                "executablePath": str(executable),
+                "cwd": str(root),
+                "argv": [str(executable), str(entrypoint)],
+                "listenerHost": "127.0.0.1",
+                "listenerPort": 5173,
+                "databasePaths": [str(database)],
+                "createdAt": "2026-08-15T00:00:00Z",
+            }
+            marker.write_bytes(
+                canonical_json_bytes(
+                    {
+                        **unsigned,
+                        "ownerMarkerSha256": hashlib.sha256(
+                            canonical_json_bytes(unsigned)
+                        ).hexdigest(),
+                    }
+                )
+            )
+            with patch(
+                "backend.app.providers.runtime_lease.runtime_pid_is_alive",
+                return_value=True,
+            ):
+                rollback_map = operations.frozen_node_rollback_map_from_active_owner(
+                    marker
+                )
+                with self.assertRaises(NativeRuntimeError) as stale_raised:
+                    operations.frozen_node_rollback_map_from_owner(marker)
+            self.assertEqual("NATIVE_STALE_OWNER_INVALID", stale_raised.exception.code)
+            self.assertEqual("native-windows", rollback_map["deploymentKind"])
+            self.assertEqual(5173, rollback_map["ports"]["api"])
+            self.assertEqual(str(database), rollback_map["databasePath"])
+
+            with patch(
+                "backend.app.providers.runtime_lease.runtime_pid_is_alive",
+                return_value=False,
+            ):
+                with self.assertRaises(NativeRuntimeError) as raised:
+                    operations.frozen_node_rollback_map_from_active_owner(marker)
+            self.assertEqual("NATIVE_ACTIVE_OWNER_INVALID", raised.exception.code)
+
+    def test_native_operator_exports_canonical_rollback_map_exclusively(self) -> None:
+        from backend.app.api.compat.database_identity import canonical_json_bytes
+        from backend.app.cli.native_runtime import run
+
+        rollback_map = {
+            "deploymentKind": "native-windows",
+            "ports": {"api": 5173},
+            "databasePath": "C:/study/app.db",
+        }
+
+        class _Operations:
+            def frozen_node_rollback_map_from_active_owner(
+                self,
+                owner_marker: str,
+            ) -> dict[str, object]:
+                self.owner_marker = owner_marker
+                return rollback_map
+
+        operations = _Operations()
+        with tempfile.TemporaryDirectory(prefix="study-app-export-map-") as raw:
+            output = Path(raw) / "rollback-map.json"
+            common = [
+                "--native-runtime-spec",
+                "native-runtime.json",
+                "--build-identity-manifest",
+                "build-identity.json",
+                "--state-directory",
+                "runtime-state",
+                "--owner-marker",
+                "owner.json",
+                "--output",
+                str(output),
+            ]
+            result = run(
+                ["export-rollback-map", *common],
+                operations_factory=lambda **_kwargs: operations,
+            )
+            payload = canonical_json_bytes(rollback_map)
+            self.assertTrue(result["ok"])
+            self.assertEqual(payload, output.read_bytes())
+            self.assertEqual(hashlib.sha256(payload).hexdigest(), result["rollbackMapSha256"])
+            with self.assertRaises(Exception):
+                run(
+                    ["export-rollback-map", *common],
+                    operations_factory=lambda **_kwargs: operations,
+                )
+
     def test_native_operator_configure_writes_complete_canonical_spec(self) -> None:
         from backend.app.cli.native_runtime import run
 

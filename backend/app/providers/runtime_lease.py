@@ -36,6 +36,7 @@ class ProcessEvidence:
 class RuntimeProcessSnapshot:
     node_processes: tuple[ProcessEvidence, ...]
     live_python_roles: tuple[ProcessEvidence, ...] = ()
+    database_handle_pids: tuple[int, ...] = ()
 
 
 class RoleLeaseError(RuntimeError):
@@ -539,8 +540,9 @@ class WindowsRuntimeInspector:
 
     def snapshot(self) -> RuntimeProcessSnapshot:
         listeners = _windows_tcp_listeners()
+        process_ids = _windows_process_ids()
         candidates: list[tuple[str, int, Path, Path, tuple[str, ...], str, str]] = []
-        for pid in _windows_process_ids():
+        for pid in process_ids:
             try:
                 executable, cwd, argv = _windows_process_metadata(pid)
             except (OSError, RuntimeError, ValueError):
@@ -567,9 +569,12 @@ class WindowsRuntimeInspector:
             candidates.append(
                 ("python", pid, executable, cwd, argv, role, environment)
             )
-        candidate_pids = frozenset(item[1] for item in candidates)
+        # File-handle evidence must include every process, not only recognized
+        # runtime roles. Editor-launched MCP processes and other holders are
+        # valid reasons to fail the final-window zero-handle gate.
+        observed_pids = frozenset(process_ids)
         database_users = {
-            path: _windows_processes_using_file(path, candidate_pids)
+            path: _windows_processes_using_file(path, observed_pids)
             for path in self._databases
         }
         nodes: list[ProcessEvidence] = []
@@ -598,6 +603,9 @@ class WindowsRuntimeInspector:
         return RuntimeProcessSnapshot(
             node_processes=tuple(sorted(nodes, key=lambda item: item.pid)),
             live_python_roles=tuple(sorted(python_roles, key=lambda item: item.pid)),
+            database_handle_pids=tuple(
+                sorted({pid for users in database_users.values() for pid in users})
+            ),
         )
 
 
@@ -942,7 +950,7 @@ def _windows_tcp6_listeners() -> tuple[tuple[int, str, int], ...]:
 
 def _windows_processes_using_file(
     path: Path,
-    candidate_pids: frozenset[int],
+    observed_pids: frozenset[int],
 ) -> frozenset[int]:
     import ctypes
     from ctypes import wintypes
@@ -1000,12 +1008,12 @@ def _windows_processes_using_file(
     session_key = ctypes.create_unicode_buffer(33)
     result = start_session(ctypes.byref(session), 0, session_key)
     if result != 0:
-        return _windows_processes_using_file_via_handles(path, candidate_pids)
+        return _windows_processes_using_file_via_handles(path, observed_pids)
     try:
         resources = (wintypes.LPCWSTR * 1)(str(path))
         result = register(session, 1, resources, 0, None, 0, None)
         if result != 0:
-            return _windows_processes_using_file_via_handles(path, candidate_pids)
+            return _windows_processes_using_file_via_handles(path, observed_pids)
         needed = wintypes.UINT()
         count = wintypes.UINT()
         reboot_reasons = wintypes.DWORD()
@@ -1020,7 +1028,7 @@ def _windows_processes_using_file(
         if result == 0:
             return frozenset()
         if result != more_data or needed.value == 0:
-            return _windows_processes_using_file_via_handles(path, candidate_pids)
+            return _windows_processes_using_file_via_handles(path, observed_pids)
         entries = (RmProcessInfo * needed.value)()
         count = wintypes.UINT(needed.value)
         result = get_list(
@@ -1031,10 +1039,10 @@ def _windows_processes_using_file(
             ctypes.byref(reboot_reasons),
         )
         if result != 0:
-            return _windows_processes_using_file_via_handles(path, candidate_pids)
+            return _windows_processes_using_file_via_handles(path, observed_pids)
         return frozenset(
             int(entries[index].process.process_id) for index in range(count.value)
-            if int(entries[index].process.process_id) in candidate_pids
+            if int(entries[index].process.process_id) in observed_pids
         )
     finally:
         end_session(session)
@@ -1042,11 +1050,11 @@ def _windows_processes_using_file(
 
 def _windows_processes_using_file_via_handles(
     path: Path,
-    candidate_pids: frozenset[int],
+    observed_pids: frozenset[int],
 ) -> frozenset[int]:
-    if not candidate_pids:
+    if not observed_pids:
         return frozenset()
-    handles = _windows_system_handles(candidate_pids)
+    handles = _windows_system_handles(observed_pids)
     return frozenset(
         pid
         for pid, values in handles.items()
@@ -1055,7 +1063,7 @@ def _windows_processes_using_file_via_handles(
 
 
 def _windows_system_handles(
-    candidate_pids: frozenset[int],
+    observed_pids: frozenset[int],
 ) -> dict[int, tuple[int, ...]]:
     import ctypes
     from ctypes import wintypes
@@ -1088,7 +1096,7 @@ def _windows_system_handles(
     count = int.from_bytes(payload[:pointer_size], "little")
     offset = pointer_size * 2
     entry_size = 40 if pointer_size == 8 else 28
-    grouped: dict[int, list[int]] = {pid: [] for pid in candidate_pids}
+    grouped: dict[int, list[int]] = {pid: [] for pid in observed_pids}
     for index in range(count):
         row = offset + index * entry_size
         if row + entry_size > len(payload):
