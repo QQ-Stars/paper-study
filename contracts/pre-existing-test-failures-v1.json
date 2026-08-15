@@ -1,0 +1,10 @@
+{
+  "version": "pre-existing-test-failures-v1",
+  "command": "npm.cmd run test:run --prefix frontend",
+  "exitCode": 0,
+  "failedTestIds": [],
+  "normalizedStackSignatures": [],
+  "relatedFileSha256": [],
+  "capturedAt": "2026-08-09T02:49:09.988Z",
+  "sourceTreeHash": "981dd181155558f41860c3dfb8a422c0e6eca54d1bf4bd0c1554663791898054"
+}

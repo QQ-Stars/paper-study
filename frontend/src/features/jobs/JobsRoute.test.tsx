@@ -229,7 +229,7 @@ describe('Jobs route', () => {
       max: 10,
     }));
     expect(apiMocks.createJob.mock.calls[0][1]).toBeInstanceOf(AbortSignal);
-    expect(screen.getByTestId('location')).toHaveTextContent('/jobs/42');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/jobs/42'));
   });
 
   it('refetches authoritative job facts after failed confirm and exposes changed candidates', async () => {

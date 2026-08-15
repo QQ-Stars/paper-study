@@ -7,6 +7,8 @@ import {
   type Route,
 } from '@playwright/test';
 
+import { obsidianStatusFixture } from '../../src/test/fixtures/obsidian';
+
 type PaperMode = 'empty' | 'one' | 'many';
 type JobMode = 'empty' | 'active' | 'review';
 
@@ -735,6 +737,10 @@ async function handleBackend(
   }
   if (method === 'GET' && pathname === '/api/title-translations') {
     await fulfillJson(route, { ok: true, pending: 1, running: false });
+    return;
+  }
+  if (method === 'GET' && pathname === '/api/v2/obsidian/status') {
+    await fulfillJson(route, obsidianStatusFixture);
     return;
   }
   if (method === 'GET' && pathname === '/api/explain-batch') {

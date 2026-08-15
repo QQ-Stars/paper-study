@@ -239,6 +239,58 @@ export interface SettingsView {
   embedApiModel: string;
   embedKeyTail: string;
   hasEmbedKey: boolean;
+  obsidianEnabled?: boolean;
+  obsidianVaultPath?: string;
+  obsidianRootFolder?: string;
+  obsidianPdfMode?: ObsidianPdfMode;
+  obsidianExportSource?: boolean;
+  obsidianExportExplainer?: boolean;
+  obsidianExportTranslation?: boolean;
+  obsidianAutoExport?: boolean;
+}
+
+export type ObsidianPdfMode = 'none' | 'reference' | 'copy';
+
+export interface ObsidianResultCounts {
+  exported: number;
+  unchanged: number;
+  conflicts: number;
+  errors: number;
+  skipped: number;
+  userManaged: number;
+  orphaned: number;
+  deleted: number;
+}
+
+export interface ObsidianLastJob {
+  id: string;
+  paperId: string | null;
+  jobType: 'obsidian_export' | 'obsidian_sync';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+}
+
+export interface ObsidianStatus {
+  enabled: boolean;
+  vaultConfigured: boolean;
+  writable: boolean;
+  rootFolder: string;
+  pdfMode: ObsidianPdfMode;
+  lastJob: ObsidianLastJob | null;
+  aggregate: ObsidianResultCounts;
+}
+
+export interface ObsidianTestResult {
+  ok: boolean;
+}
+
+export interface ObsidianExportRequest {
+  dryRun: boolean;
+}
+
+export interface ObsidianCleanupRequest {
+  dryRun: boolean;
+  applyCleanup: boolean;
+  cleanupPlanSha: string | null;
 }
 
 export interface TitleTranslationStatus {
@@ -291,6 +343,14 @@ export interface SettingsUpdate {
   embedApiBase?: string;
   embedApiModel?: string;
   embedApiKey?: string;
+  obsidianEnabled?: boolean;
+  obsidianVaultPath?: string;
+  obsidianRootFolder?: string;
+  obsidianPdfMode?: ObsidianPdfMode;
+  obsidianExportSource?: boolean;
+  obsidianExportExplainer?: boolean;
+  obsidianExportTranslation?: boolean;
+  obsidianAutoExport?: boolean;
 }
 
 export interface SearchRequest {

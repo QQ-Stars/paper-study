@@ -16,6 +16,7 @@ import os
 import sys
 import json
 import contextlib
+from contextvars import ContextVar
 from datetime import date, datetime
 from pathlib import Path
 
@@ -34,6 +35,21 @@ MAX_RESULT_LIMIT = 50
 DEFAULT_TEXT_CHARS = 12000
 MAX_TEXT_CHARS = 20000
 REVIEW_TOTAL_STEPS = 7
+
+
+def parse_mcp_mode(value):
+    if value is None:
+        return "legacy"
+    if value not in {"legacy", "shadow", "application"}:
+        raise ValueError(
+            "PAPER_STUDY_MCP_MODE must be legacy, shadow, or application"
+        )
+    return value
+
+
+MCP_MODE = parse_mcp_mode(os.environ.get("PAPER_STUDY_MCP_MODE"))
+_NO_DISPATCH = object()
+_LEGACY_BODY_ACTIVE = ContextVar("paper_study_mcp_legacy_body", default=False)
 
 
 # ---------- 小工具 ----------
@@ -63,6 +79,77 @@ def _has_pdf(row) -> bool:
     if (config.ROOT.parent / "paper" / f"{pid}.pdf").exists():
         return True
     return False
+
+
+def _application_adapter():
+    from backend.app.api.mcp import ApplicationMcpAdapter
+
+    return ApplicationMcpAdapter(
+        config.DB_PATH,
+        artifact_read_mode=os.environ.get("ARTIFACT_READ_MODE", "legacy"),
+        ranker=embed.rank,
+        has_pdf=_has_pdf,
+    )
+
+
+def _shadow_fixture(result):
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        return "error"
+    if result.get("count") == 0 or result.get("content") == "":
+        return "empty"
+    return "normal"
+
+
+def _dispatch_if_needed(tool, arguments):
+    if MCP_MODE == "legacy" or _LEGACY_BODY_ACTIVE.get():
+        return _NO_DISPATCH
+    application_call = lambda: getattr(_application_adapter(), tool)(**arguments)
+    if MCP_MODE == "application":
+        return application_call()
+
+    token = _LEGACY_BODY_ACTIVE.set(True)
+    try:
+        legacy = globals()[tool](**arguments)
+    finally:
+        _LEGACY_BODY_ACTIVE.reset(token)
+    try:
+        application = application_call()
+    except Exception:
+        application = {
+            "ok": False,
+            "error": "MCP application shadow failed",
+            "code": "MCP_APPLICATION_READ_FAILED",
+        }
+    try:
+        from backend.app.api.compat.mcp_shadow import ShadowRecorder
+
+        configured_root = Path(
+            os.environ.get(
+                "PAPER_STUDY_MCP_CONFIG_DIR",
+                str(config.ROOT / "data"),
+            )
+        )
+        configured_path = Path(
+            os.environ.get(
+                "PAPER_STUDY_MCP_SHADOW_PATH",
+                str(configured_root / "mcp-shadow.jsonl"),
+            )
+        )
+        ShadowRecorder(configured_path, allowed_root=configured_root).record(
+            tool=tool,
+            fixture=_shadow_fixture(legacy),
+            legacy=legacy,
+            application=application,
+            source_identity=os.environ.get(
+                "PAPER_STUDY_MCP_SOURCE_IDENTITY", "unfrozen-source"
+            ),
+            build_identity=os.environ.get(
+                "PAPER_STUDY_MCP_BUILD_IDENTITY", "unfrozen-build"
+            ),
+        )
+    except Exception as error:
+        print(f"MCP_SHADOW_RECORD_FAILED::{type(error).__name__}", file=sys.stderr)
+    return legacy
 
 
 def _one(con, sql, args=()):
@@ -164,6 +251,9 @@ def search_papers(query: str = "", type: str = "", topic: str = "", venue: str =
                   has_explainer: bool = False, only_favorites: bool = False,
                   sort: str = "relevance", limit: int = 20) -> dict:
     """按关键词和结构化属性只读检索论文库。参数：query 模糊匹配题录与抽取字段；type 和 topic 使用 list_categories 返回的实际值；venue 为会议或期刊；year_from/year_to 为含端点年份；min_relevance 为最低相关度；has_explainer 和 only_favorites 为布尔过滤；sort 默认 relevance 且仅支持 relevance|year|citations|recent；limit 默认 20 并限制为 1-50。返回 ok: true、count 和紧凑 results；无结果仍为 ok: true。紧凑结果仅用于发现，论文级主张前调用 get_paper。"""
+    dispatched = _dispatch_if_needed("search_papers", locals())
+    if dispatched is not _NO_DISPATCH:
+        return dispatched
     con = _connect_readonly()
     where, args = [], []
     if query.strip():
@@ -200,6 +290,9 @@ def search_papers(query: str = "", type: str = "", topic: str = "", venue: str =
 @mcp.tool()
 def semantic_search(query: str, k: int = 15) -> dict:
     """按自然语言含义只读检索。参数：必填 query；k 默认 15 并限制为 1-50。返回 ok: true、count、indexed、total 和带余弦相似度 score 的紧凑 results；索引未覆盖全部论文时附 note。"""
+    dispatched = _dispatch_if_needed("semantic_search", locals())
+    if dispatched is not _NO_DISPATCH:
+        return dispatched
     capped_k = _clamp_int(k, 15, 1, MAX_RESULT_LIMIT)
     with contextlib.redirect_stdout(sys.stderr):     # 防本地嵌入模型(下载/进度)污染 stdio 协议
         ranked = embed.rank(query, capped_k, reindex_stale=False)   # 只读：服务进程不做同步重嵌(交给网页端自愈)
@@ -222,6 +315,9 @@ def semantic_search(query: str, k: int = 15) -> dict:
 @mcp.tool()
 def related_papers(id: str, k: int = 8) -> dict:
     """按标题和摘要向量查找库内相关论文。参数：必填稳定论文 id；k 默认 8 并限制为 1-50。返回 ok: true、seed、count 和带关系 score 的紧凑 results；种子不存在时返回 ok: false、error 和 id。"""
+    dispatched = _dispatch_if_needed("related_papers", locals())
+    if dispatched is not _NO_DISPATCH:
+        return dispatched
     capped_k = _clamp_int(k, 8, 1, MAX_RESULT_LIMIT)
     con = _connect_readonly()
     row = con.execute("SELECT id,title,tldr,abstract FROM papers WHERE id=?", (id,)).fetchone()
@@ -246,6 +342,9 @@ def related_papers(id: str, k: int = 8) -> dict:
 @mcp.tool()
 def get_paper(id: str) -> dict:
     """按稳定 id 读取完整论文元数据与学习状态。返回 ok: true、题录、摘要、TLDR、分类、任务、模型、数据集、贡献、标签、相关度、笔记、进度、收藏状态，以及 has_explainer、has_translation、has_pdf；论文不存在时返回 ok: false、error 和 id。讲解正文使用 get_explainer。"""
+    dispatched = _dispatch_if_needed("get_paper", locals())
+    if dispatched is not _NO_DISPATCH:
+        return dispatched
     con = _connect_readonly()
     row = con.execute("SELECT * FROM papers WHERE id=?", (id,)).fetchone()
     if not row:
@@ -292,6 +391,9 @@ def get_paper(id: str) -> dict:
 @mcp.tool()
 def get_explainer(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHARS) -> dict:
     """分页读取论文讲解 Markdown。参数：必填 id；offset 默认 0；max_chars 默认 12000 并限制为 1-20000。成功返回 ok: true、content、offset、next_offset、total_chars、truncated；truncated 为 true 时把返回的 next_offset 原样用于下一次调用。论文或讲解不存在时返回 ok: false、error 和 id。"""
+    dispatched = _dispatch_if_needed("get_explainer", locals())
+    if dispatched is not _NO_DISPATCH:
+        return dispatched
     con = _connect_readonly()
     md = _one(con, "SELECT explainer FROM papers WHERE id=?", (id,))
     exists = con.execute("SELECT 1 FROM papers WHERE id=?", (id,)).fetchone()
@@ -306,6 +408,9 @@ def get_explainer(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHARS)
 @mcp.tool()
 def get_translation(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHARS) -> dict:
     """分页读取论文中文全文翻译 Markdown。参数：必填 id；offset 默认 0；max_chars 默认 12000 并限制为 1-20000。成功返回 ok: true、content、offset、next_offset、total_chars、truncated；truncated 为 true 时把返回的 next_offset 原样用于下一次调用。翻译不存在时返回 ok: false、error 和 id。"""
+    dispatched = _dispatch_if_needed("get_translation", locals())
+    if dispatched is not _NO_DISPATCH:
+        return dispatched
     con = _connect_readonly()
     md = _one(con, "SELECT content FROM translations WHERE paper_id=?", (id,))
     con.close()
@@ -317,6 +422,9 @@ def get_translation(id: str, offset: int = 0, max_chars: int = DEFAULT_TEXT_CHAR
 @mcp.tool()
 def list_due_reviews(today: str = "", include_upcoming: bool = False, limit: int = 20) -> dict:
     """只读列出艾宾浩斯复习队列。参数：today 默认当前日期；include_upcoming 默认 false；limit 默认 20 并限制为 1-50。默认只返回 today 当日及以前到期且未完成的条目；成功返回 ok: true、today、count、include_upcoming 和 results。"""
+    dispatched = _dispatch_if_needed("list_due_reviews", locals())
+    if dispatched is not _NO_DISPATCH:
+        return dispatched
     today_s = _date_only(today)
     capped_limit = _clamp_int(limit, 20, 1, MAX_RESULT_LIMIT)
     where = ["r.completed_at IS NULL"]
@@ -374,6 +482,9 @@ def list_due_reviews(today: str = "", include_upcoming: bool = False, limit: int
 @mcp.tool()
 def list_categories() -> dict:
     """只读列出库中实际使用的分类词表与计数，无参数。返回 ok: true、types、topics、tasks；使用返回的 type/topic 值构造 search_papers 过滤，tasks 仅用于理解任务版图。"""
+    dispatched = _dispatch_if_needed("list_categories", locals())
+    if dispatched is not _NO_DISPATCH:
+        return dispatched
     con = _connect_readonly()
 
     def counts(col):
@@ -391,6 +502,9 @@ def list_categories() -> dict:
 @mcp.tool()
 def library_overview() -> dict:
     """只读返回论文库整体画像，无参数。返回 ok: true、total、with_explainer、with_translation、favorites、indexed_vectors、review_due、review_open，以及方向、主题、会议、年份、相关度和引用统计。用于覆盖分析，不替代论文级证据。"""
+    dispatched = _dispatch_if_needed("library_overview", locals())
+    if dispatched is not _NO_DISPATCH:
+        return dispatched
     con = _connect_readonly()
     total = _one(con, "SELECT COUNT(*) FROM papers") or 0
     with_exp = _one(con, "SELECT COUNT(*) FROM papers WHERE explainer IS NOT NULL AND TRIM(explainer)!=''") or 0

@@ -62,6 +62,75 @@ describe('PaperInspector', () => {
     expect(onOpenPaper).toHaveBeenCalledWith('paper-a');
   });
 
+  it('exports only the selected paper through the existing inspector actions', async () => {
+    const user = userEvent.setup();
+    const onExportObsidian = vi.fn();
+    const view = render(
+      <PaperInspector
+        paper={inspectedPaper}
+        mode="rail"
+        open
+        onClose={vi.fn()}
+        onOpenPaper={vi.fn()}
+        onExportObsidian={onExportObsidian}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', {
+      name: '导出 Evidence-bound Interfaces 到 Obsidian',
+    }));
+    expect(onExportObsidian).toHaveBeenCalledWith('paper-a');
+
+    view.rerender(
+      <PaperInspector
+        paper={null}
+        mode="rail"
+        open
+        onClose={vi.fn()}
+        onOpenPaper={vi.fn()}
+        onExportObsidian={onExportObsidian}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /导出.*Obsidian/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps Obsidian export pending and error states recoverable', async () => {
+    const user = userEvent.setup();
+    const onExportObsidian = vi.fn();
+    const view = render(
+      <PaperInspector
+        paper={inspectedPaper}
+        mode="rail"
+        open
+        onClose={vi.fn()}
+        onOpenPaper={vi.fn()}
+        onExportObsidian={onExportObsidian}
+        obsidianExportPending
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '正在导出到 Obsidian…' })).toBeDisabled();
+    view.rerender(
+      <PaperInspector
+        paper={inspectedPaper}
+        mode="rail"
+        open
+        onClose={vi.fn()}
+        onOpenPaper={vi.fn()}
+        onExportObsidian={onExportObsidian}
+        obsidianExportError="Obsidian 导出失败"
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Obsidian 导出失败');
+    const retry = screen.getByRole('button', {
+      name: '导出 Evidence-bound Interfaces 到 Obsidian',
+    });
+    expect(retry).toBeEnabled();
+    await user.click(retry);
+    expect(onExportObsidian).toHaveBeenCalledWith('paper-a');
+  });
+
   it('closes a drawer on Escape and scrim interaction', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

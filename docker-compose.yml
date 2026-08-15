@@ -1,35 +1,308 @@
 # 单机自用：`docker compose up -d --build` 一条命令起服务 → http://localhost:5173
 # 数据与模型缓存挂卷持久化；API Key 放 data/settings.json（随卷带入，不进镜像）。
 services:
-  app:
+  api:
     build:
       context: .
+      target: python-production
       args:
-        # 基础镜像；国内拉不到 Docker Hub 时设环境变量 NODE_IMAGE 覆盖，如：
-        #   NODE_IMAGE=docker.m.daocloud.io/library/node:20-bookworm-slim docker compose up -d --build
         NODE_IMAGE: ${NODE_IMAGE:-node:20-bookworm-slim}
-    image: paper-study:latest
-    container_name: paper-study
+    image: paper-study-python:p6-candidate
+    command: [".venv/bin/python", "-m", "backend.app.cli.candidate_runtime", "--role", "api"]
+    environment: &p6-python-environment
+      RUNTIME_ENVIRONMENT: candidate
+      RUNTIME_NAMESPACE: ${P6_RUNTIME_NAMESPACE:-p6-candidate-unconfigured}
+      API_PROCESS_ROLE: api
+      DB_PATH: /candidate/data/app.db
+      DATABASE_IDENTITY_MANIFEST: /candidate/runtime/database-identity-v1.json
+      CANDIDATE_HOST_IDENTITY_MANIFEST: /candidate/evidence/host-database-identity-v1.json
+      CANDIDATE_PARENT_IDENTITY_MANIFEST: /candidate/evidence/parent-database-identity-v1.json
+      CANDIDATE_ORIGIN_RECEIPT: /candidate/evidence/p0-origin-receipt-v1.json
+      CANDIDATE_PARENT_BACKUP: /candidate/evidence/parent-backup.sqlite3
+      CANDIDATE_PARENT_MANIFEST: /candidate/evidence/parent-manifest.json
+      PRODUCTION_OWNER_MARKER: /production-evidence/production-owner.json
+      RUNTIME_LEASE_DIR: /candidate/runtime/leases
+      REQUIRED_SCHEMA_REVISION: "20260807_03"
+      PROCESSING_CURSOR_SECRET: ${P6_PROCESSING_CURSOR_SECRET:-p6-candidate-unconfigured}
+      API_BIND_HOST: 0.0.0.0
+      API_BIND_PORT: "8000"
+      API_LOOPBACK_PORT_FORWARDING: "1"
+      API_LOOPBACK_FORWARDER_HOSTS: default-gateway
+      ALLOW_REMOTE_ACCESS: "0"
+      EMBED_PROVIDER: model2vec
+      EMBED_MODEL: minishlab/potion-multilingual-128M
+      EMBEDDING_VERSION: model2vec-0.8.2
+      EMBED_DIMENSIONS: "256"
+      OCR_ENABLED: "0"
+      OBSIDIAN_ENABLED: "0"
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    volumes: &p6-python-volumes
+      - type: bind
+        source: ${P6_DATABASE_DIR:-./data/compatibility/preflight/p6-candidate/data}
+        target: /candidate/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P6_RUNTIME_DIR:-./data/compatibility/preflight/p6-candidate/runtime}
+        target: /candidate/runtime
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P6_DATABASE_IDENTITY_MANIFEST:-./data/compatibility/preflight/p6-candidate/database-identity-v1.json}
+        target: /candidate/evidence/host-database-identity-v1.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P6_PARENT_DATABASE_IDENTITY_MANIFEST:-./data/compatibility/runtime/live-database-identity-v1.json}
+        target: /candidate/evidence/parent-database-identity-v1.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P6_ORIGIN_RECEIPT:-./data/compatibility/runtime/p0-origin-receipt-v1.json}
+        target: /candidate/evidence/p0-origin-receipt-v1.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P6_PARENT_BACKUP:-./data/compatibility/preflight/p6-candidate/parent-backup.sqlite3}
+        target: /candidate/evidence/parent-backup.sqlite3
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P6_PARENT_MANIFEST:-./data/compatibility/preflight/p6-candidate/parent-manifest.json}
+        target: /candidate/evidence/parent-manifest.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P6_PRODUCTION_OWNER_MARKER:-./data/compatibility/runtime/production-owner.json}
+        target: /production-evidence/production-owner.json
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
-      - "5173:5173"
-    volumes:
-      - ./data:/app/data           # 论文库 app.db / pdfs / explainers / translations / settings.json
-      - ./.models:/app/.models     # 本地嵌入模型缓存（用外部 bge-m3 API 时可为空）
+      - mode: ingress
+        target: 8000
+        published: "0"
+        protocol: tcp
+        host_ip: 127.0.0.1
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: "no"
+
+  worker:
+    build:
+      context: .
+      target: python-production
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-bookworm-slim}
+    image: paper-study-python:p6-candidate
+    command: [".venv/bin/python", "-m", "backend.app.cli.candidate_runtime", "--role", "worker"]
     environment:
-      - PORT=5173
-      - UI_ENTRY=${UI_ENTRY:-react}
-      - DB_PATH=/app/data/app.db
-      - PYTHONUTF8=1
-      - PYTHONIOENCODING=utf-8
-      - HF_HOME=/app/.models/hf
-      # 也可改用环境变量配置密钥（data/settings.json 优先级更高）：
-      # - LLM_API_KEY=
-      # - S2_API_KEY=
-      # - EMBED_API_KEY=
+      <<: *p6-python-environment
+      API_PROCESS_ROLE: worker
+    volumes: *p6-python-volumes
+    restart: "no"
+
+  scheduler:
+    build:
+      context: .
+      target: python-production
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-bookworm-slim}
+    image: paper-study-python:p6-candidate
+    command: [".venv/bin/python", "-m", "backend.app.cli.candidate_runtime", "--role", "scheduler"]
+    environment:
+      <<: *p6-python-environment
+      API_PROCESS_ROLE: scheduler
+    volumes: *p6-python-volumes
+    restart: "no"
+
+  mcp:
+    build:
+      context: .
+      target: python-production
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-bookworm-slim}
+    image: paper-study-python:p6-candidate
+    command: [".venv/bin/python", "-m", "agent.mcp_server"]
+    environment:
+      <<: *p6-python-environment
+      API_PROCESS_ROLE: mcp
+      PAPER_STUDY_MCP_MODE: application
+    volumes: *p6-python-volumes
+    restart: "no"
+
+  frozen-node:
+    profiles: ["rollback"]
+    build:
+      context: .
+      target: frozen-node
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-bookworm-slim}
+    image: paper-study-node:p6-rollback
+    command: ["node", "server.js"]
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - type: bind
+        source: ${P6_DATABASE_DIR:-./data/compatibility/preflight/p6-candidate/data}
+        target: /app/data
+        bind:
+          create_host_path: false
+      - ./.models:/app/.models
+    environment:
+      PORT: "5173"
+      UI_ENTRY: react
+      DB_PATH: /app/data/app.db
+      RUNTIME_ENVIRONMENT: live
+      RUNTIME_NAMESPACE: production
+      API_BACKEND_MODE: legacy
+      DOCUMENT_PIPELINE_MODE: legacy
+      GENERATION_PIPELINE_MODE: legacy
+      ARTIFACT_READ_MODE: legacy
+      ARTIFACT_WRITE_MODE: legacy
+      OCR_ENABLED: "0"
+      OBSIDIAN_ENABLED: "0"
+      PAPER_STUDY_MCP_MODE: legacy
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+      HF_HOME: /app/.models/hf
     healthcheck:
       test: ["CMD", "node", "-e", "const port=process.env.PORT||5173; fetch('http://127.0.0.1:'+port).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       start_period: 20s
       retries: 3
-    restart: unless-stopped
+    restart: "no"
+
+  candidate-api:
+    profiles: ["p4-candidate"]
+    build:
+      context: .
+      target: fastapi-candidate
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-bookworm-slim}
+    image: paper-study-fastapi-candidate:local
+    command: [".venv/bin/python", "-m", "backend.app.cli.candidate_runtime", "--role", "api"]
+    environment: &p4-candidate-environment
+      RUNTIME_ENVIRONMENT: candidate
+      RUNTIME_NAMESPACE: ${P4_CANDIDATE_RUNTIME_NAMESPACE:-p4-candidate-unconfigured}
+      API_PROCESS_ROLE: api
+      DB_PATH: /candidate/data/app.db
+      DATABASE_IDENTITY_MANIFEST: /candidate/runtime/database-identity-v1.json
+      CANDIDATE_HOST_IDENTITY_MANIFEST: /candidate/evidence/host-database-identity-v1.json
+      CANDIDATE_PARENT_IDENTITY_MANIFEST: /candidate/evidence/parent-database-identity-v1.json
+      CANDIDATE_ORIGIN_RECEIPT: /candidate/evidence/p0-origin-receipt-v1.json
+      CANDIDATE_PARENT_BACKUP: /candidate/evidence/parent-backup.sqlite3
+      CANDIDATE_PARENT_MANIFEST: /candidate/evidence/parent-manifest.json
+      PRODUCTION_OWNER_MARKER: /production-evidence/production-owner.json
+      RUNTIME_LEASE_DIR: /candidate/runtime/leases
+      REQUIRED_SCHEMA_REVISION: "20260807_03"
+      PROCESSING_CURSOR_SECRET: p4-candidate-only-cursor-secret-20260807-03
+      API_BIND_HOST: 0.0.0.0
+      API_BIND_PORT: "8000"
+      API_LOOPBACK_PORT_FORWARDING: "1"
+      API_LOOPBACK_FORWARDER_HOSTS: default-gateway
+      ALLOW_REMOTE_ACCESS: "0"
+      EMBED_PROVIDER: model2vec
+      EMBED_MODEL: minishlab/potion-multilingual-128M
+      EMBEDDING_VERSION: model2vec-0.8.2
+      EMBED_DIMENSIONS: "256"
+      OCR_ENABLED: "0"
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    ports:
+      - mode: ingress
+        target: 8000
+        published: "0"
+        protocol: tcp
+        host_ip: 127.0.0.1
+    volumes: &p4-candidate-volumes
+      - type: bind
+        source: ${P4_CANDIDATE_DB_DIR:-./data/compatibility/preflight/p4-candidate/data}
+        target: /candidate/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P4_CANDIDATE_RUNTIME_DIR:-./data/compatibility/preflight/p4-candidate/runtime}
+        target: /candidate/runtime
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P4_CANDIDATE_IDENTITY_MANIFEST:-./data/compatibility/preflight/p4-candidate/database-identity-v1.json}
+        target: /candidate/evidence/host-database-identity-v1.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P4_CANDIDATE_PARENT_IDENTITY_MANIFEST:-./data/compatibility/preflight/p4-candidate/parent-database-identity-v1.json}
+        target: /candidate/evidence/parent-database-identity-v1.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P4_CANDIDATE_ORIGIN_RECEIPT:-./data/compatibility/runtime/p0-origin-receipt-v1.json}
+        target: /candidate/evidence/p0-origin-receipt-v1.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P4_CANDIDATE_PARENT_BACKUP:-./data/compatibility/preflight/p4-candidate/parent-backup.sqlite3}
+        target: /candidate/evidence/parent-backup.sqlite3
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P4_CANDIDATE_PARENT_MANIFEST:-./data/compatibility/preflight/p4-candidate/parent-manifest.json}
+        target: /candidate/evidence/parent-manifest.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${P4_PRODUCTION_OWNER_MARKER:-./data/compatibility/runtime/production-owner.json}
+        target: /production-evidence/production-owner.json
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: "no"
+
+  candidate-worker:
+    profiles: ["p4-candidate"]
+    build:
+      context: .
+      target: fastapi-candidate
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-bookworm-slim}
+    image: paper-study-fastapi-candidate:local
+    command: [".venv/bin/python", "-m", "backend.app.cli.candidate_runtime", "--role", "worker"]
+    environment:
+      <<: *p4-candidate-environment
+      API_PROCESS_ROLE: worker
+    volumes: *p4-candidate-volumes
+    restart: "no"
+
+  candidate-scheduler:
+    profiles: ["p4-candidate"]
+    build:
+      context: .
+      target: fastapi-candidate
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-bookworm-slim}
+    image: paper-study-fastapi-candidate:local
+    command: [".venv/bin/python", "-m", "backend.app.cli.candidate_runtime", "--role", "scheduler"]
+    environment:
+      <<: *p4-candidate-environment
+      API_PROCESS_ROLE: scheduler
+    volumes: *p4-candidate-volumes
+    restart: "no"

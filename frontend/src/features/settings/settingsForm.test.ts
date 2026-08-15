@@ -66,6 +66,14 @@ describe('settings payload', () => {
       embedApiBase: 'https://embed.example.test/v1',
       embedApiModel: 'embed-model',
       embedApiKey: 'new-embed',
+      obsidianEnabled: false,
+      obsidianVaultPath: '',
+      obsidianRootFolder: 'Research',
+      obsidianPdfMode: 'none',
+      obsidianExportSource: true,
+      obsidianExportExplainer: true,
+      obsidianExportTranslation: true,
+      obsidianAutoExport: false,
     });
   });
 

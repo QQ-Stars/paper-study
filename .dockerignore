@@ -24,3 +24,14 @@ data
 *.pyo
 *.log
 npm-debug.log*
+
+# Production images must not contain test suites, fixtures, or fake providers.
+backend/tests
+backend/app/providers/ocr/fake.py
+test
+frontend/e2e
+frontend/src/**/*.test.*
+frontend/src/test
+frontend/build/**/*.test.*
+frontend/build/legacyGatewayGuard.ts
+test-results

@@ -42,6 +42,13 @@ export const settingsKeys = {
   view: () => ['settings', 'view'] as const,
 };
 
+export const obsidianKeys = {
+  all: () => ['obsidian'] as const,
+  status: () => ['obsidian', 'status'] as const,
+  global: () => ['obsidian', 'global'] as const,
+  paper: (paperId: string) => ['obsidian', 'paper', paperId] as const,
+};
+
 export const citationKeys = {
   graph: () => ['citation-graph'] as const,
 };
@@ -55,5 +62,6 @@ export const queryKeys = {
   schedules: scheduleKeys,
   pdf: pdfKeys,
   settings: settingsKeys,
+  obsidian: obsidianKeys,
   citationGraph: citationKeys,
 };

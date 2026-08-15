@@ -5,6 +5,7 @@ node_modules/
 .models/
 .worktrees/
 .superpowers/
+.agents/
 
 # Python 缓存
 __pycache__/
@@ -17,6 +18,8 @@ __pycache__/
 data/app.db
 data/app.db-wal
 data/app.db-shm
+data/backups/
+data/compatibility/
 data/pdfs/
 data/explainers/
 data/translations/
@@ -28,6 +31,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+test-results/
 
 # PDF 不入库（体积大，放在 ../paper/，通过相对路径引用）
 *.pdf

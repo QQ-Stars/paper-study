@@ -6,6 +6,7 @@ import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary
 import { settingsKeys } from '../../lib/api/keys';
 import type { SettingsUpdate, SettingsView } from '../../lib/api/types';
 import { settingsGateway } from '../../lib/api/settingsGateway';
+import { useObsidianProjection } from '../../lib/api/useObsidianProjection';
 import {
   type WorkspaceRouteHandle,
   useWorkspaceStore,
@@ -69,8 +70,12 @@ function SettingsForm({ settings }: { readonly settings: SettingsView }) {
   const test = useMutation({
     mutationFn: () => settingsGateway.testLlm(),
   });
+  const obsidian = useObsidianProjection();
 
-  const updateDraft = (field: keyof SettingsDraft, value: string) => {
+  const updateDraft = <K extends keyof SettingsDraft>(
+    field: K,
+    value: SettingsDraft[K],
+  ) => {
     setDraft((current) => ({ ...current, [field]: value }));
   };
   const updateSecret = (field: keyof SecretDraft, value: string) => {
@@ -174,6 +179,137 @@ function SettingsForm({ settings }: { readonly settings: SettingsView }) {
               onChange={(event) => updateSecret('embedApiKey', event.currentTarget.value)}
             />
           </Field>
+        </div>
+      </section>
+
+      <section className="settings-section" aria-labelledby="settings-obsidian-heading">
+        <header>
+          <p>OBSIDIAN</p>
+          <h2 id="settings-obsidian-heading">单向投影</h2>
+        </header>
+        <div className="settings-grid">
+          <Field label="启用 Obsidian 投影">
+            <input
+              type="checkbox"
+              checked={draft.obsidianEnabled}
+              onChange={(event) => updateDraft('obsidianEnabled', event.currentTarget.checked)}
+            />
+          </Field>
+          <Field label="Vault 路径">
+            <input
+              value={draft.obsidianVaultPath}
+              onChange={(event) => updateDraft('obsidianVaultPath', event.currentTarget.value)}
+            />
+          </Field>
+          <Field label="受管根目录">
+            <input
+              value={draft.obsidianRootFolder}
+              onChange={(event) => updateDraft('obsidianRootFolder', event.currentTarget.value)}
+            />
+          </Field>
+          <Field label="PDF 投影模式">
+            <select
+              value={draft.obsidianPdfMode}
+              onChange={(event) => updateDraft(
+                'obsidianPdfMode',
+                event.currentTarget.value as SettingsDraft['obsidianPdfMode'],
+              )}
+            >
+              <option value="none">不投影</option>
+              <option value="reference">引用</option>
+              <option value="copy">复制</option>
+            </select>
+          </Field>
+          <Field label="导出 SourceDocument">
+            <input
+              type="checkbox"
+              checked={draft.obsidianExportSource}
+              onChange={(event) => updateDraft(
+                'obsidianExportSource', event.currentTarget.checked,
+              )}
+            />
+          </Field>
+          <Field label="导出讲解">
+            <input
+              type="checkbox"
+              checked={draft.obsidianExportExplainer}
+              onChange={(event) => updateDraft(
+                'obsidianExportExplainer', event.currentTarget.checked,
+              )}
+            />
+          </Field>
+          <Field label="导出翻译">
+            <input
+              type="checkbox"
+              checked={draft.obsidianExportTranslation}
+              onChange={(event) => updateDraft(
+                'obsidianExportTranslation', event.currentTarget.checked,
+              )}
+            />
+          </Field>
+          <Field label="自动导出">
+            <input
+              type="checkbox"
+              checked={draft.obsidianAutoExport}
+              onChange={(event) => updateDraft('obsidianAutoExport', event.currentTarget.checked)}
+            />
+          </Field>
+        </div>
+        <div className="settings-actions">
+          <button
+            type="button"
+            disabled={!draft.obsidianEnabled || obsidian.testAccess.isPending}
+            onClick={() => obsidian.testAccess.mutate()}
+          >
+            {obsidian.testAccess.isPending ? '正在测试 Obsidian…' : '测试 Obsidian 写权限'}
+          </button>
+          <button
+            type="button"
+            disabled={!draft.obsidianEnabled || obsidian.sync.isPending}
+            onClick={() => obsidian.sync.mutate({
+              dryRun: false,
+              applyCleanup: false,
+              cleanupPlanSha: null,
+            })}
+          >
+            {obsidian.sync.isPending ? '正在同步到 Obsidian…' : '同步到 Obsidian'}
+          </button>
+          {obsidian.status.isPending ? (
+            <output className="settings-status">正在读取 Obsidian 状态…</output>
+          ) : null}
+          {obsidian.status.isError ? (
+            <output className="settings-status settings-status--error">
+              {message(obsidian.status.error)}
+            </output>
+          ) : null}
+          {obsidian.status.data ? (
+            <output className="settings-status">
+              {obsidian.status.data.enabled ? 'Obsidian 投影已启用。' : 'Obsidian 投影未启用。'}
+            </output>
+          ) : null}
+          {obsidian.testAccess.isSuccess ? (
+            <output className={`settings-status ${obsidian.testAccess.data.ok
+              ? 'settings-status--ok'
+              : 'settings-status--error'}`}
+            >
+              {obsidian.testAccess.data.ok
+                ? 'Obsidian 写权限可用。'
+                : 'Obsidian 写权限不可用。'}
+            </output>
+          ) : null}
+          {obsidian.testAccess.isError ? (
+            <output className="settings-status settings-status--error">
+              {message(obsidian.testAccess.error)}
+            </output>
+          ) : null}
+          {obsidian.sync.isSuccess ? (
+            <output className="settings-status settings-status--ok">Obsidian 同步已完成。</output>
+          ) : null}
+          {obsidian.sync.isError ? (
+            <output className="settings-status settings-status--error">
+              {message(obsidian.sync.error)}
+            </output>
+          ) : null}
         </div>
       </section>
 

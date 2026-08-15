@@ -4,6 +4,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { loadBackendRollout } = require('./lib/backend-rollout');
+const BACKEND_ROLLOUT = loadBackendRollout(process.env);
 const dbapi = require('./db');
 const { createAgentRunner } = require('./lib/agent-runner');
 const { createArtifactLocator, scanPdfDirectory } = require('./lib/artifacts');
@@ -11,6 +13,7 @@ const frontendAssets = require('./lib/frontend-assets');
 const { MIME, readBody, safeBase, send, startNdjson } = require('./lib/http');
 const { buildImportPdfsTerminal } = require('./lib/import-pdfs-result');
 const { createTitleTranslationService } = require('./lib/title-translations');
+const { listenServer } = require('./lib/server-listen');
 const {
   applySettingsUpdate,
   buildSettingsView,
@@ -651,7 +654,7 @@ function checkSchedules() {
   } catch (e) { console.error('[调度] 出错', e); }
 }
 
-server.listen(PORT, () => {
+listenServer(server, PORT, { host: process.env.HOST, send: process.send?.bind(process), onListening: () => {
   console.log('========================================');
   console.log(' 论文学习 App 已启动 (SQLite)');
   console.log(' 打开:  http://localhost:' + PORT);
@@ -662,4 +665,4 @@ server.listen(PORT, () => {
   try { const n = dbapi.resetOrphanJobs(); if (n) console.log(` ⚠ 已重置 ${n} 个中断的采集任务`); } catch (e) {}
   setTimeout(checkSchedules, 8000);              // 启动 8s 后查一次定时
   setInterval(checkSchedules, 10 * 60 * 1000);   // 之后每 10 分钟查一次
-});
+} });

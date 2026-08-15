@@ -11,6 +11,14 @@ export interface SettingsDraft {
   embedProvider: string;
   embedApiBase: string;
   embedApiModel: string;
+  obsidianEnabled: boolean;
+  obsidianVaultPath: string;
+  obsidianRootFolder: string;
+  obsidianPdfMode: 'none' | 'reference' | 'copy';
+  obsidianExportSource: boolean;
+  obsidianExportExplainer: boolean;
+  obsidianExportTranslation: boolean;
+  obsidianAutoExport: boolean;
 }
 
 export interface SecretDraft {
@@ -31,6 +39,14 @@ export function createSettingsDraft(view: SettingsView): SettingsDraft {
     embedProvider: view.embedProvider,
     embedApiBase: view.embedApiBase,
     embedApiModel: view.embedApiModel,
+    obsidianEnabled: view.obsidianEnabled ?? false,
+    obsidianVaultPath: view.obsidianVaultPath ?? '',
+    obsidianRootFolder: view.obsidianRootFolder ?? 'Research',
+    obsidianPdfMode: view.obsidianPdfMode ?? 'none',
+    obsidianExportSource: view.obsidianExportSource ?? true,
+    obsidianExportExplainer: view.obsidianExportExplainer ?? true,
+    obsidianExportTranslation: view.obsidianExportTranslation ?? true,
+    obsidianAutoExport: view.obsidianAutoExport ?? false,
   };
 }
 
@@ -53,6 +69,14 @@ export function buildSettingsUpdate(
     embedProvider: draft.embedProvider,
     embedApiBase: draft.embedApiBase,
     embedApiModel: draft.embedApiModel,
+    obsidianEnabled: draft.obsidianEnabled,
+    obsidianVaultPath: draft.obsidianVaultPath,
+    obsidianRootFolder: draft.obsidianRootFolder,
+    obsidianPdfMode: draft.obsidianPdfMode,
+    obsidianExportSource: draft.obsidianExportSource,
+    obsidianExportExplainer: draft.obsidianExportExplainer,
+    obsidianExportTranslation: draft.obsidianExportTranslation,
+    obsidianAutoExport: draft.obsidianAutoExport,
   };
   if (secrets.apiKey.trim()) update.apiKey = secrets.apiKey.trim();
   if (secrets.s2ApiKey.trim()) update.s2ApiKey = secrets.s2ApiKey.trim();

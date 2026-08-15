@@ -10,6 +10,7 @@
 import os
 import sys
 import json
+from pathlib import Path
 import numpy as np          # 模块级导入：务必在(可能的)事件循环启动前完成 numpy 的 C 扩展加载。
                             # MCP(FastMCP) 把同步工具跑在 asyncio 事件循环线程上，若首次 semantic_search
                             # 时才懒加载 numpy，在 Windows 上其 C 扩展 DLL 加载会与运行中的事件循环死锁而挂起。
@@ -75,6 +76,28 @@ def embed_texts(texts):
     if config.EMBED_PROVIDER == "api" and config.EMBED_API_KEY:
         return _api_embed(texts)
     return _l2norm(model().encode(texts))
+
+
+def _readonly_embed_texts(texts):
+    """Embed a query without fetching a model or writing any cache state."""
+    texts = list(texts)
+    if config.EMBED_PROVIDER == "api" and config.EMBED_API_KEY:
+        return _api_embed(texts)
+    global _model
+    if _model is None:
+        configured = Path(config.EMBED_MODEL)
+        if configured.exists():
+            local_model = configured
+        else:
+            from model2vec.persistence.hf import maybe_get_cached_model_path
+
+            local_model = maybe_get_cached_model_path(config.EMBED_MODEL)
+        if local_model is None:
+            return None
+        from model2vec import StaticModel
+
+        _model = StaticModel.from_pretrained(local_model, force_download=False)
+    return _l2norm(_model.encode(texts))
 
 
 def _paper_text(row):
@@ -146,6 +169,46 @@ def rank(query, k=30, exclude=None, reindex_stale=True):
     reindex_stale=False：只读模式——不在查询时重嵌缺失/失维的论文（仅按现有向量排序）。
       给 MCP 服务用：查询应快且只读，重嵌交给网页端（语义检索/讲解变更时自愈），避免在
       服务进程里做同步写库+大量进度输出而卡住。"""
+    if not reindex_stale:
+        con = db.connect_readonly()
+        try:
+            vectors_table = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paper_vectors'"
+            ).fetchone()
+            if vectors_table is None:
+                return []
+            allv = con.execute(
+                "SELECT paper_id, dim, vector FROM paper_vectors"
+            ).fetchall()
+        finally:
+            con.close()
+        if not allv:
+            return []
+        _p("STAGE::query")
+        embedded = _readonly_embed_texts([query])
+        if embedded is None:
+            return []
+        qv = embedded[0]
+        qdim = int(qv.shape[0])
+        ids, mat = [], []
+        for row in allv:
+            if exclude and row["paper_id"] == exclude:
+                continue
+            if row["dim"] != qdim:
+                continue
+            vector = np.frombuffer(row["vector"], dtype="float32")
+            if vector.shape[0] == qdim:
+                ids.append(row["paper_id"])
+                mat.append(vector)
+        if not mat:
+            return []
+        sims = np.vstack(mat) @ qv
+        order = np.argsort(-sims)[:max(1, int(k))]
+        return [
+            {"id": ids[index], "score": round(float(sims[index]), 4)}
+            for index in order
+        ]
+
     con = db.connect()
     db.ensure_vectors_table(con)
     _p("STAGE::query")

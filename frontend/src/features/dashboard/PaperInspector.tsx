@@ -36,6 +36,9 @@ export interface PaperInspectorProps {
   readonly embedded?: boolean;
   readonly onClose: (reason: InspectorCloseReason) => void;
   readonly onOpenPaper: (paperId: string) => void;
+  readonly onExportObsidian?: (paperId: string) => void;
+  readonly obsidianExportPending?: boolean;
+  readonly obsidianExportError?: string | null;
 }
 
 function formatDueAt(value: string): string {
@@ -73,6 +76,9 @@ export function PaperInspector({
   embedded = false,
   onClose,
   onOpenPaper,
+  onExportObsidian,
+  obsidianExportPending = false,
+  obsidianExportError = null,
 }: PaperInspectorProps) {
   const panelPlacement = useResponsivePanelPlacement();
   const previousMode = useRef(mode);
@@ -174,6 +180,23 @@ export function PaperInspector({
         <h4>摘要证据</h4>
         <p>{summary || '此论文记录未提供摘要；打开阅读器查看原始内容。'}</p>
       </div>
+
+      {onExportObsidian ? (
+        <>
+          <button
+            type="button"
+            className="paper-inspector__open"
+            aria-label={obsidianExportPending
+              ? '正在导出到 Obsidian…'
+              : `导出 ${paper.title} 到 Obsidian`}
+            disabled={obsidianExportPending}
+            onClick={() => onExportObsidian(paper.id)}
+          >
+            {obsidianExportPending ? '正在导出…' : '导出到 Obsidian'}
+          </button>
+          {obsidianExportError ? <output role="alert">{obsidianExportError}</output> : null}
+        </>
+      ) : null}
 
       <button
         type="button"

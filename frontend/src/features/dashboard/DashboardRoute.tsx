@@ -33,6 +33,7 @@ import type {
 import { artifactGateway } from '../../lib/api/artifactGateway';
 import { jobsGateway } from '../../lib/api/jobsGateway';
 import { settingsGateway } from '../../lib/api/settingsGateway';
+import { useObsidianProjection } from '../../lib/api/useObsidianProjection';
 import { DashboardQueue } from './DashboardQueue';
 import { selectDashboardPapers } from './dashboardSelection';
 import { PaperDeck, type PaperDeckItem } from './PaperDeck';
@@ -483,6 +484,7 @@ export function DashboardInspectorSlot() {
   const selectedPaperId = useWorkspaceStore((state) => state.workspaceSelectionId);
   const closePanel = useWorkspaceStore((state) => state.closePanel);
   const selectedPaperKey = selectedPaperId ?? '';
+  const obsidian = useObsidianProjection(selectedPaperId);
   const paperDetailQuery = useQuery({
     queryKey: paperKeys.detail(selectedPaperKey),
     queryFn: ({ signal }) => paperApi.getPaper(selectedPaperKey, signal),
@@ -561,6 +563,13 @@ export function DashboardInspectorSlot() {
       open
       embedded
       onClose={closePanel}
+      onExportObsidian={(paperId) => {
+        if (paperId === selectedPaperId) obsidian.exportPaper.mutate({ dryRun: false });
+      }}
+      obsidianExportPending={obsidian.exportPaper.isPending}
+      obsidianExportError={obsidian.exportPaper.isError
+        ? errorMessage(obsidian.exportPaper.error)
+        : null}
       onOpenPaper={(paperId) => {
         const requestedPaperId = paperId;
         closePanel();

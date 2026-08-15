@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "exporterVersion": "obsidian-projection-v1",
+  "generatedAt": "2026-08-15T12:00:00Z",
+  "entries": [
+    {
+      "path": "Explainers/paper-01.md",
+      "kind": "explainer",
+      "paperId": "paper-01",
+      "artifactId": "explainer-01",
+      "ownership": "managed",
+      "sourceHash": "3333333333333333333333333333333333333333333333333333333333333333",
+      "exportedHash": "e97eceebe7d4353164cbe8627ac1789aae69c34e5db9c396d11581d386770de9"
+    },
+    {
+      "path": "Notes/paper-01.md",
+      "kind": "note",
+      "paperId": "paper-01",
+      "artifactId": null,
+      "ownership": "user",
+      "sourceHash": "5555555555555555555555555555555555555555555555555555555555555555",
+      "exportedHash": "5f1fdb4ae350b1ca1326abed6b9d4e9b9ae62d14de4e787e9627afa910779689"
+    },
+    {
+      "path": "Papers/paper-01.md",
+      "kind": "paper",
+      "paperId": "paper-01",
+      "artifactId": null,
+      "ownership": "managed",
+      "sourceHash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "exportedHash": "084b3cbdf2bf9c0198131c92ea174076e0c9b2fc72607cd3e98bf2b165a5057e"
+    },
+    {
+      "path": "Sources/paper-01.md",
+      "kind": "source",
+      "paperId": "paper-01",
+      "artifactId": null,
+      "ownership": "managed",
+      "sourceHash": "2222222222222222222222222222222222222222222222222222222222222222",
+      "exportedHash": "c8e550b5915aadaf3b6fa71776cca17358f8ba36a1472c40e5eb9a0b02f466f5"
+    },
+    {
+      "path": "Translations/paper-01.md",
+      "kind": "translation",
+      "paperId": "paper-01",
+      "artifactId": "translation-01",
+      "ownership": "managed",
+      "sourceHash": "4444444444444444444444444444444444444444444444444444444444444444",
+      "exportedHash": "68255f61d2df52bf120f56d5479e7f5b3152db642b2e9ece44e5518da3bceabf"
+    }
+  ]
+}

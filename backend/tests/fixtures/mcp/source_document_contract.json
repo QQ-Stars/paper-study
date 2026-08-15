@@ -1,0 +1,13 @@
+{
+  "application": {
+    "allowedField": "sourceDocument",
+    "allowedModes": ["native", "ocr"],
+    "errorKeys": ["code", "message"],
+    "markdownAllowed": false,
+    "modeViewKeys": ["currentId", "error", "status", "updatedAt"],
+    "optional": true
+  },
+  "legacyAndShadowAdditionalFields": [],
+  "schemaVersion": 1,
+  "toolCount": 9
+}

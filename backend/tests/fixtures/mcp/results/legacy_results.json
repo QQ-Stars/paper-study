@@ -1,0 +1,132 @@
+{
+  "get_explainer.missing": {"error": "\u672a\u627e\u5230\u8bba\u6587 id=missing", "id": "missing", "ok": false},
+  "get_explainer.normal": {"content": "LEGACY-EX", "id": "p1", "next_offset": 9, "offset": 0, "ok": true, "total_chars": 18, "truncated": true},
+  "get_paper.missing": {"error": "\u672a\u627e\u5230\u8bba\u6587 id=missing", "id": "missing", "ok": false},
+  "get_paper.normal": {
+    "abstract": "abstract one",
+    "arxiv_id": "2601.00001",
+    "authors": ["Alice"],
+    "citations": 12,
+    "contribution": "contribution",
+    "datasets": ["d1"],
+    "doi": null,
+    "favorite": true,
+    "fields": ["cs.CL"],
+    "has_explainer": true,
+    "has_pdf": false,
+    "has_translation": true,
+    "id": "p1",
+    "models": ["m1"],
+    "note": "\u7b14\u8bb0",
+    "ok": true,
+    "progress": "\u5b66\u4e60\u4e2d",
+    "relevance": 0.95,
+    "tags": ["tag"],
+    "task": "task-a",
+    "title": "Reviewable Paper",
+    "title_zh": "\u53ef\u590d\u4e60\u8bba\u6587",
+    "tldr": "short summary",
+    "topic": "hallucination",
+    "type": "\u8bc4\u6d4b",
+    "url": "https://example.test/p1",
+    "venue": "ACL",
+    "year": "2026"
+  },
+  "get_translation.missing": {"error": "\u8be5\u8bba\u6587\u6682\u65e0\u4e2d\u6587\u7ffb\u8bd1\uff08\u53ef\u5728\u7f51\u9875\u9605\u8bfb\u9875\u751f\u6210\uff09\u3002id=missing", "id": "missing", "ok": false},
+  "get_translation.normal": {"content": "TRANSLAT", "id": "p1", "next_offset": 15, "offset": 7, "ok": true, "total_chars": 20, "truncated": true},
+  "library_overview.normal": {
+    "avg_citations": 7.5,
+    "by_topic_top15": [{"count": 1, "name": "hallucination"}, {"count": 1, "name": "robustness"}],
+    "by_type": [{"count": 1, "name": "\u65b9\u6cd5"}, {"count": 1, "name": "\u8bc4\u6d4b"}],
+    "by_venue_top15": [{"count": 1, "name": "ACL"}, {"count": 1, "name": "NeurIPS"}],
+    "by_year": [{"count": 1, "year": "2025"}, {"count": 1, "year": "2026"}],
+    "favorites": 1,
+    "indexed_vectors": 1,
+    "ok": true,
+    "relevance_buckets": {"0.6-0.8": 0, "<0.6": 1, ">=0.8": 1},
+    "review_due": 1,
+    "review_open": 1,
+    "total": 2,
+    "with_explainer": 1,
+    "with_translation": 1
+  },
+  "list_categories.normal": {
+    "ok": true,
+    "tasks": [{"count": 1, "name": "task-a"}, {"count": 1, "name": "task-b"}],
+    "topics": [{"count": 1, "name": "hallucination"}, {"count": 1, "name": "robustness"}],
+    "types": [{"count": 1, "name": "\u65b9\u6cd5"}, {"count": 1, "name": "\u8bc4\u6d4b"}]
+  },
+  "list_due_reviews.empty": {"count": 0, "include_upcoming": false, "ok": true, "results": [], "today": "2020-01-01"},
+  "list_due_reviews.normal": {
+    "count": 1,
+    "include_upcoming": false,
+    "ok": true,
+    "results": [{
+      "completed_steps": 1,
+      "current_step": 2,
+      "id": "p1",
+      "next_due_at": "2026-07-03",
+      "progress": "\u5b66\u4e60\u4e2d",
+      "review_state": "dueToday",
+      "started_at": "2026-07-01",
+      "title": "Reviewable Paper",
+      "title_zh": "\u53ef\u590d\u4e60\u8bba\u6587",
+      "total_steps": 7,
+      "updated_at": "2026-07-02",
+      "venue": "ACL",
+      "year": "2026"
+    }],
+    "today": "2026-07-03"
+  },
+  "related_papers.missing": {"error": "\u672a\u627e\u5230\u8bba\u6587 id=missing", "id": "missing", "ok": false},
+  "related_papers.normal": {
+    "count": 1,
+    "ok": true,
+    "results": [{
+      "citations": 3,
+      "has_explainer": false,
+      "has_pdf": false,
+      "id": "p2",
+      "relevance": 0.5,
+      "score": 0.625,
+      "title": "Empty Paper",
+      "title_zh": null,
+      "tldr": "",
+      "topic": "robustness",
+      "type": "\u65b9\u6cd5",
+      "venue": "NeurIPS",
+      "year": "2025"
+    }],
+    "seed": "p1"
+  },
+  "search_papers.empty": {"count": 0, "ok": true, "results": []},
+  "search_papers.limit_high": {
+    "count": 2,
+    "ok": true,
+    "results": [
+      {"citations": 12, "has_explainer": true, "has_pdf": false, "id": "p1", "relevance": 0.95, "title": "Reviewable Paper", "title_zh": "\u53ef\u590d\u4e60\u8bba\u6587", "tldr": "short summary", "topic": "hallucination", "type": "\u8bc4\u6d4b", "venue": "ACL", "year": "2026"},
+      {"citations": 3, "has_explainer": false, "has_pdf": false, "id": "p2", "relevance": 0.5, "title": "Empty Paper", "title_zh": null, "tldr": "", "topic": "robustness", "type": "\u65b9\u6cd5", "venue": "NeurIPS", "year": "2025"}
+    ]
+  },
+  "search_papers.normal": {
+    "count": 1,
+    "ok": true,
+    "results": [{"citations": 12, "has_explainer": true, "has_pdf": false, "id": "p1", "relevance": 0.95, "title": "Reviewable Paper", "title_zh": "\u53ef\u590d\u4e60\u8bba\u6587", "tldr": "short summary", "topic": "hallucination", "type": "\u8bc4\u6d4b", "venue": "ACL", "year": "2026"}]
+  },
+  "semantic_search.empty": {
+    "count": 0,
+    "indexed": 1,
+    "note": "\u8bed\u4e49\u7d22\u5f15\u8986\u76d6 1/2 \u7bc7\uff1b\u672a\u5165\u7d22\u5f15\u7684\u8bba\u6587\u4e0d\u4f1a\u51fa\u73b0\u5728\u8bed\u4e49\u7ed3\u679c\u91cc\uff08\u53ef\u5728\u7f51\u9875\u7aef\u505a\u4e00\u6b21\u8bed\u4e49\u68c0\u7d22\u6216\u91cd\u5efa\u7d22\u5f15\u4ee5\u8865\u5168\uff09\u3002",
+    "ok": true,
+    "results": [],
+    "total": 2
+  },
+  "semantic_search.normal": {
+    "count": 1,
+    "indexed": 1,
+    "note": "\u8bed\u4e49\u7d22\u5f15\u8986\u76d6 1/2 \u7bc7\uff1b\u672a\u5165\u7d22\u5f15\u7684\u8bba\u6587\u4e0d\u4f1a\u51fa\u73b0\u5728\u8bed\u4e49\u7ed3\u679c\u91cc\uff08\u53ef\u5728\u7f51\u9875\u7aef\u505a\u4e00\u6b21\u8bed\u4e49\u68c0\u7d22\u6216\u91cd\u5efa\u7d22\u5f15\u4ee5\u8865\u5168\uff09\u3002",
+    "ok": true,
+    "results": [{"citations": 12, "has_explainer": true, "has_pdf": false, "id": "p1", "relevance": 0.95, "score": 0.875, "title": "Reviewable Paper", "title_zh": "\u53ef\u590d\u4e60\u8bba\u6587", "tldr": "short summary", "topic": "hallucination", "type": "\u8bc4\u6d4b", "venue": "ACL", "year": "2026"}],
+    "total": 2
+  }
+}

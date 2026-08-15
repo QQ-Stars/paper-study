@@ -29,6 +29,52 @@ test('the Docker context cannot substitute host frontend artifacts for the image
   assert.match(dockerignore, /^frontend\/dist\/?$/mu);
 });
 
+test('the production Docker context excludes tests, fixtures, and fake provider credentials', () => {
+  const ignored = new Set(
+    dockerignore.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean),
+  );
+  for (const excluded of [
+    'backend/tests',
+    'backend/app/providers/ocr/fake.py',
+    'test',
+    'frontend/e2e',
+    'frontend/src/**/*.test.*',
+    'frontend/src/test',
+    'frontend/build/**/*.test.*',
+    'frontend/build/legacyGatewayGuard.ts',
+    'test-results',
+  ]) {
+    assert.ok(
+      ignored.has(excluded),
+      `${excluded} must be absent from the production build context`,
+    );
+  }
+});
+
 test('Docker Compose exposes the startup-only UI entry rollback switch', () => {
   assert.match(dockerCompose, /^\s*- UI_ENTRY=\$\{UI_ENTRY:-react\}\s*$/mu);
+});
+
+test('containers default backend rollout to legacy and OCR off with pass-through overrides', () => {
+  for (const [variable, fallback] of Object.entries({
+    API_BACKEND_MODE: 'legacy',
+    DOCUMENT_PIPELINE_MODE: 'legacy',
+    GENERATION_PIPELINE_MODE: 'legacy',
+    ARTIFACT_READ_MODE: 'legacy',
+    ARTIFACT_WRITE_MODE: 'legacy',
+    OCR_ENABLED: '0',
+  })) {
+    assert.match(
+      dockerfile,
+      new RegExp(`\\b${variable}=${fallback}\\b`, 'u'),
+      `${variable} Dockerfile default`,
+    );
+    assert.match(
+      dockerCompose,
+      new RegExp(`^\\s*- ${variable}=\\$\\{${variable}:-${fallback}\\}\\s*$`, 'mu'),
+      `${variable} Compose pass-through`,
+    );
+  }
+  assert.doesNotMatch(dockerfile, /(?:API_KEY|AUTH_TOKEN|PASSWORD)=\S+/u);
+  assert.doesNotMatch(dockerCompose, /^\s*- (?:API_KEY|AUTH_TOKEN|PASSWORD)=\S+/mu);
 });

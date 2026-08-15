@@ -205,6 +205,7 @@ docker compose down               # 停止
 - **修改端口**：编辑 `docker-compose.yml` 中 `ports: "5173:5173"` 左侧的数字。
 - **健康检查**：新版 `docker-compose.yml` 内置健康检查，可用 `docker compose ps` 查看 `paper-study` 是否为 `healthy`。
 - **回退根入口**：Compose 会把 `UI_ENTRY` 透传给容器。Windows PowerShell 执行 `$env:UI_ENTRY='legacy'; docker compose up -d --force-recreate`；macOS / Linux 执行 `UI_ENTRY=legacy docker compose up -d --force-recreate`。显式 `/workspace/` 仍可访问；恢复 React 根入口时以 `UI_ENTRY=react` 重新创建容器，或在新终端中不设置该变量后重新创建。
+- **P6 production 身份与回滚**：默认 Compose profile 只包含 Python `api`、`worker`、`scheduler` 和 `mcp`；`frozen-node` 仅属于 `rollback` profile。候选 Python 镜像与 frozen Node 镜像的 image digest、`gitRevision`、逐 role start command 和 retention deadline 都是每次发布的运行时证据，必须从该次 content-addressed BuildIdentity/启动快照读取，README 不保存某次发布值。权威当前 owner 只能读取 gitignored 的 `data/compatibility/runtime/production-owner.json`；不得在文档或配置中硬编码当前 active/inactive owner。启动 rollback profile 前必须先停止 Python API/Worker/Scheduler/MCP 并将这些 role scale 到 0；runtime rollback 只切换进程和冻结启动配置，不自动 downgrade、恢复或改写数据库。frozen Node 及旧 API/字段/表在正式关闭 Node rollback window 前持续保留。
 - **Docker 内运行 MCP**：如需让 MCP 客户端连接容器内论文库，可使用容器命令作为 stdio 启动入口：
 
   ```bash

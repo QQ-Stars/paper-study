@@ -6,8 +6,10 @@ import { expect, test } from './fixtures/mockApi';
 async function expectTouchTarget(locator: Locator): Promise<void> {
   const box = await locator.boundingBox();
   expect(box, `visible touch target for ${await locator.getAttribute('aria-label') ?? 'control'}`).not.toBeNull();
-  expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  // Chromium can quantize an exact 44 CSS-pixel box to 43.99998 at some
+  // device-scale boundaries. Keep the tolerance far below one rendered pixel.
+  expect(box?.width ?? 0).toBeGreaterThanOrEqual(43.999);
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.999);
 }
 
 async function emulateReducedTransparencyAndMotion(page: Page): Promise<void> {

@@ -7,11 +7,11 @@ FROM ${NODE_IMAGE} AS frontend-build
 
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm ci && test -x node_modules/.bin/eslint && test -x node_modules/.bin/tsc && test -x node_modules/.bin/vite
 COPY frontend/ ./
 RUN npm run build
 
-FROM ${NODE_IMAGE} AS runtime
+FROM ${NODE_IMAGE} AS runtime-base
 
 # 系统依赖：python3+venv（跑 agent，且 better-sqlite3 原生编译需要 python）、构建工具、CA 证书（pip/外部 API 走 HTTPS）
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -42,10 +42,29 @@ RUN mkdir -p data/pdfs data/explainers data/translations .models/hf
 ENV PORT=5173 \
     UI_ENTRY=react \
     DB_PATH=/app/data/app.db \
+    API_BACKEND_MODE=legacy \
+    DOCUMENT_PIPELINE_MODE=legacy \
+    GENERATION_PIPELINE_MODE=legacy \
+    ARTIFACT_READ_MODE=legacy \
+    ARTIFACT_WRITE_MODE=legacy \
+    OCR_ENABLED=0 \
     PYTHONUNBUFFERED=1 \
     PYTHONUTF8=1 \
     PYTHONIOENCODING=utf-8 \
     HF_HOME=/app/.models/hf
+FROM runtime-base AS python-production
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD .venv/bin/python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('API_BIND_PORT','8000')+'/health/ready', timeout=3)"
+
+CMD [".venv/bin/python", "-m", "backend.app.cli.candidate_runtime", "--role", "api"]
+
+FROM python-production AS fastapi-candidate
+
+FROM runtime-base AS frozen-node
+
 EXPOSE 5173
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "const port=process.env.PORT||5173; fetch('http://127.0.0.1:'+port).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

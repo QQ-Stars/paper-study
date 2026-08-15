@@ -216,6 +216,44 @@ describe('ArtifactPanel', () => {
     });
   });
 
+  it('detaches a stopped explainer run and ignores its late events after rerun', async () => {
+    const user = userEvent.setup();
+    const first = deferred<{ type: 'result'; ok: true; markdown: string }>();
+    const second = deferred<{ type: 'result'; ok: true; markdown: string }>();
+    const runOptions: Array<{
+      signal?: AbortSignal;
+      onEvent?: (event: { type: 'progress'; line: string }) => void;
+    }> = [];
+    apiMocks.explainPaper.mockImplementation((_id, _deep, options) => {
+      runOptions.push(options);
+      return runOptions.length === 1 ? first.promise : second.promise;
+    });
+    renderPanel();
+
+    await user.click(await screen.findByRole('tab', { name: '讲解' }));
+    await user.click(screen.getByRole('button', { name: '生成讲解' }));
+    await user.click(screen.getByRole('button', { name: '停止接收讲解' }));
+    expect(runOptions[0]?.signal?.aborted).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: '生成讲解' }));
+    act(() => runOptions[1]?.onEvent?.({ type: 'progress', line: 'current run progress' }));
+    expect(await screen.findByText('current run progress')).toBeInTheDocument();
+
+    act(() => runOptions[0]?.onEvent?.({ type: 'progress', line: 'late stopped progress' }));
+    await act(async () => {
+      first.resolve({ type: 'result', ok: true, markdown: '# stale' });
+      await first.promise;
+    });
+    expect(screen.queryByText('late stopped progress')).not.toBeInTheDocument();
+    expect(screen.getByText('current run progress')).toBeInTheDocument();
+
+    await act(async () => {
+      second.resolve({ type: 'result', ok: true, markdown: '# current' });
+      await second.promise;
+    });
+    expect(await screen.findByText('讲解已完成，正在同步服务端内容。')).toBeInTheDocument();
+  });
+
   it('reconciles the fixed explainer and paper facts after a successful settle', async () => {
     const user = userEvent.setup();
     apiMocks.explainPaper.mockImplementation(async (_id, _deep, options) => {

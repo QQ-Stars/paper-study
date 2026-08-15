@@ -1,0 +1,118 @@
+[
+  {
+    "description": "\u6309\u5173\u952e\u8bcd\u548c\u7ed3\u6784\u5316\u5c5e\u6027\u53ea\u8bfb\u68c0\u7d22\u8bba\u6587\u5e93\u3002\u53c2\u6570\uff1aquery \u6a21\u7cca\u5339\u914d\u9898\u5f55\u4e0e\u62bd\u53d6\u5b57\u6bb5\uff1btype \u548c topic \u4f7f\u7528 list_categories \u8fd4\u56de\u7684\u5b9e\u9645\u503c\uff1bvenue \u4e3a\u4f1a\u8bae\u6216\u671f\u520a\uff1byear_from/year_to \u4e3a\u542b\u7aef\u70b9\u5e74\u4efd\uff1bmin_relevance \u4e3a\u6700\u4f4e\u76f8\u5173\u5ea6\uff1bhas_explainer \u548c only_favorites \u4e3a\u5e03\u5c14\u8fc7\u6ee4\uff1bsort \u9ed8\u8ba4 relevance \u4e14\u4ec5\u652f\u6301 relevance|year|citations|recent\uff1blimit \u9ed8\u8ba4 20 \u5e76\u9650\u5236\u4e3a 1-50\u3002\u8fd4\u56de ok: true\u3001count \u548c\u7d27\u51d1 results\uff1b\u65e0\u7ed3\u679c\u4ecd\u4e3a ok: true\u3002\u7d27\u51d1\u7ed3\u679c\u4ec5\u7528\u4e8e\u53d1\u73b0\uff0c\u8bba\u6587\u7ea7\u4e3b\u5f20\u524d\u8c03\u7528 get_paper\u3002",
+    "inputSchema": {
+      "properties": {
+        "query": {"default": "", "title": "Query", "type": "string"},
+        "type": {"default": "", "title": "Type", "type": "string"},
+        "topic": {"default": "", "title": "Topic", "type": "string"},
+        "venue": {"default": "", "title": "Venue", "type": "string"},
+        "year_from": {"default": 0, "title": "Year From", "type": "integer"},
+        "year_to": {"default": 0, "title": "Year To", "type": "integer"},
+        "min_relevance": {"default": 0.0, "title": "Min Relevance", "type": "number"},
+        "has_explainer": {"default": false, "title": "Has Explainer", "type": "boolean"},
+        "only_favorites": {"default": false, "title": "Only Favorites", "type": "boolean"},
+        "sort": {"default": "relevance", "title": "Sort", "type": "string"},
+        "limit": {"default": 20, "title": "Limit", "type": "integer"}
+      },
+      "title": "search_papersArguments",
+      "type": "object"
+    },
+    "name": "search_papers"
+  },
+  {
+    "description": "\u6309\u81ea\u7136\u8bed\u8a00\u542b\u4e49\u53ea\u8bfb\u68c0\u7d22\u3002\u53c2\u6570\uff1a\u5fc5\u586b query\uff1bk \u9ed8\u8ba4 15 \u5e76\u9650\u5236\u4e3a 1-50\u3002\u8fd4\u56de ok: true\u3001count\u3001indexed\u3001total \u548c\u5e26\u4f59\u5f26\u76f8\u4f3c\u5ea6 score \u7684\u7d27\u51d1 results\uff1b\u7d22\u5f15\u672a\u8986\u76d6\u5168\u90e8\u8bba\u6587\u65f6\u9644 note\u3002",
+    "inputSchema": {
+      "properties": {
+        "query": {"title": "Query", "type": "string"},
+        "k": {"default": 15, "title": "K", "type": "integer"}
+      },
+      "required": ["query"],
+      "title": "semantic_searchArguments",
+      "type": "object"
+    },
+    "name": "semantic_search"
+  },
+  {
+    "description": "\u6309\u6807\u9898\u548c\u6458\u8981\u5411\u91cf\u67e5\u627e\u5e93\u5185\u76f8\u5173\u8bba\u6587\u3002\u53c2\u6570\uff1a\u5fc5\u586b\u7a33\u5b9a\u8bba\u6587 id\uff1bk \u9ed8\u8ba4 8 \u5e76\u9650\u5236\u4e3a 1-50\u3002\u8fd4\u56de ok: true\u3001seed\u3001count \u548c\u5e26\u5173\u7cfb score \u7684\u7d27\u51d1 results\uff1b\u79cd\u5b50\u4e0d\u5b58\u5728\u65f6\u8fd4\u56de ok: false\u3001error \u548c id\u3002",
+    "inputSchema": {
+      "properties": {
+        "id": {"title": "Id", "type": "string"},
+        "k": {"default": 8, "title": "K", "type": "integer"}
+      },
+      "required": ["id"],
+      "title": "related_papersArguments",
+      "type": "object"
+    },
+    "name": "related_papers"
+  },
+  {
+    "description": "\u6309\u7a33\u5b9a id \u8bfb\u53d6\u5b8c\u6574\u8bba\u6587\u5143\u6570\u636e\u4e0e\u5b66\u4e60\u72b6\u6001\u3002\u8fd4\u56de ok: true\u3001\u9898\u5f55\u3001\u6458\u8981\u3001TLDR\u3001\u5206\u7c7b\u3001\u4efb\u52a1\u3001\u6a21\u578b\u3001\u6570\u636e\u96c6\u3001\u8d21\u732e\u3001\u6807\u7b7e\u3001\u76f8\u5173\u5ea6\u3001\u7b14\u8bb0\u3001\u8fdb\u5ea6\u3001\u6536\u85cf\u72b6\u6001\uff0c\u4ee5\u53ca has_explainer\u3001has_translation\u3001has_pdf\uff1b\u8bba\u6587\u4e0d\u5b58\u5728\u65f6\u8fd4\u56de ok: false\u3001error \u548c id\u3002\u8bb2\u89e3\u6b63\u6587\u4f7f\u7528 get_explainer\u3002",
+    "inputSchema": {
+      "properties": {"id": {"title": "Id", "type": "string"}},
+      "required": ["id"],
+      "title": "get_paperArguments",
+      "type": "object"
+    },
+    "name": "get_paper"
+  },
+  {
+    "description": "\u5206\u9875\u8bfb\u53d6\u8bba\u6587\u8bb2\u89e3 Markdown\u3002\u53c2\u6570\uff1a\u5fc5\u586b id\uff1boffset \u9ed8\u8ba4 0\uff1bmax_chars \u9ed8\u8ba4 12000 \u5e76\u9650\u5236\u4e3a 1-20000\u3002\u6210\u529f\u8fd4\u56de ok: true\u3001content\u3001offset\u3001next_offset\u3001total_chars\u3001truncated\uff1btruncated \u4e3a true \u65f6\u628a\u8fd4\u56de\u7684 next_offset \u539f\u6837\u7528\u4e8e\u4e0b\u4e00\u6b21\u8c03\u7528\u3002\u8bba\u6587\u6216\u8bb2\u89e3\u4e0d\u5b58\u5728\u65f6\u8fd4\u56de ok: false\u3001error \u548c id\u3002",
+    "inputSchema": {
+      "properties": {
+        "id": {"title": "Id", "type": "string"},
+        "offset": {"default": 0, "title": "Offset", "type": "integer"},
+        "max_chars": {"default": 12000, "title": "Max Chars", "type": "integer"}
+      },
+      "required": ["id"],
+      "title": "get_explainerArguments",
+      "type": "object"
+    },
+    "name": "get_explainer"
+  },
+  {
+    "description": "\u5206\u9875\u8bfb\u53d6\u8bba\u6587\u4e2d\u6587\u5168\u6587\u7ffb\u8bd1 Markdown\u3002\u53c2\u6570\uff1a\u5fc5\u586b id\uff1boffset \u9ed8\u8ba4 0\uff1bmax_chars \u9ed8\u8ba4 12000 \u5e76\u9650\u5236\u4e3a 1-20000\u3002\u6210\u529f\u8fd4\u56de ok: true\u3001content\u3001offset\u3001next_offset\u3001total_chars\u3001truncated\uff1btruncated \u4e3a true \u65f6\u628a\u8fd4\u56de\u7684 next_offset \u539f\u6837\u7528\u4e8e\u4e0b\u4e00\u6b21\u8c03\u7528\u3002\u7ffb\u8bd1\u4e0d\u5b58\u5728\u65f6\u8fd4\u56de ok: false\u3001error \u548c id\u3002",
+    "inputSchema": {
+      "properties": {
+        "id": {"title": "Id", "type": "string"},
+        "offset": {"default": 0, "title": "Offset", "type": "integer"},
+        "max_chars": {"default": 12000, "title": "Max Chars", "type": "integer"}
+      },
+      "required": ["id"],
+      "title": "get_translationArguments",
+      "type": "object"
+    },
+    "name": "get_translation"
+  },
+  {
+    "description": "\u53ea\u8bfb\u5217\u51fa\u827e\u5bbe\u6d69\u65af\u590d\u4e60\u961f\u5217\u3002\u53c2\u6570\uff1atoday \u9ed8\u8ba4\u5f53\u524d\u65e5\u671f\uff1binclude_upcoming \u9ed8\u8ba4 false\uff1blimit \u9ed8\u8ba4 20 \u5e76\u9650\u5236\u4e3a 1-50\u3002\u9ed8\u8ba4\u53ea\u8fd4\u56de today \u5f53\u65e5\u53ca\u4ee5\u524d\u5230\u671f\u4e14\u672a\u5b8c\u6210\u7684\u6761\u76ee\uff1b\u6210\u529f\u8fd4\u56de ok: true\u3001today\u3001count\u3001include_upcoming \u548c results\u3002",
+    "inputSchema": {
+      "properties": {
+        "today": {"default": "", "title": "Today", "type": "string"},
+        "include_upcoming": {"default": false, "title": "Include Upcoming", "type": "boolean"},
+        "limit": {"default": 20, "title": "Limit", "type": "integer"}
+      },
+      "title": "list_due_reviewsArguments",
+      "type": "object"
+    },
+    "name": "list_due_reviews"
+  },
+  {
+    "description": "\u53ea\u8bfb\u5217\u51fa\u5e93\u4e2d\u5b9e\u9645\u4f7f\u7528\u7684\u5206\u7c7b\u8bcd\u8868\u4e0e\u8ba1\u6570\uff0c\u65e0\u53c2\u6570\u3002\u8fd4\u56de ok: true\u3001types\u3001topics\u3001tasks\uff1b\u4f7f\u7528\u8fd4\u56de\u7684 type/topic \u503c\u6784\u9020 search_papers \u8fc7\u6ee4\uff0ctasks \u4ec5\u7528\u4e8e\u7406\u89e3\u4efb\u52a1\u7248\u56fe\u3002",
+    "inputSchema": {
+      "properties": {},
+      "title": "list_categoriesArguments",
+      "type": "object"
+    },
+    "name": "list_categories"
+  },
+  {
+    "description": "\u53ea\u8bfb\u8fd4\u56de\u8bba\u6587\u5e93\u6574\u4f53\u753b\u50cf\uff0c\u65e0\u53c2\u6570\u3002\u8fd4\u56de ok: true\u3001total\u3001with_explainer\u3001with_translation\u3001favorites\u3001indexed_vectors\u3001review_due\u3001review_open\uff0c\u4ee5\u53ca\u65b9\u5411\u3001\u4e3b\u9898\u3001\u4f1a\u8bae\u3001\u5e74\u4efd\u3001\u76f8\u5173\u5ea6\u548c\u5f15\u7528\u7edf\u8ba1\u3002\u7528\u4e8e\u8986\u76d6\u5206\u6790\uff0c\u4e0d\u66ff\u4ee3\u8bba\u6587\u7ea7\u8bc1\u636e\u3002",
+    "inputSchema": {
+      "properties": {},
+      "title": "library_overviewArguments",
+      "type": "object"
+    },
+    "name": "library_overview"
+  }
+]

@@ -10,6 +10,11 @@ import type {
   JobRecord,
   JobStatus,
   JobSummary,
+  ObsidianLastJob,
+  ObsidianPdfMode,
+  ObsidianResultCounts,
+  ObsidianStatus,
+  ObsidianTestResult,
   PaperListItem,
   PaperRecord,
   PdfScan,
@@ -27,6 +32,7 @@ import type {
   TitleTranslationStatus,
   Verification,
 } from './types';
+import { decodeProcessingJobSummary } from './processingGateway';
 
 function inputObject(value: unknown, path: string): object {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -37,6 +43,18 @@ function inputObject(value: unknown, path: string): object {
 
 function field(value: object, key: string): unknown {
   return Reflect.get(value, key);
+}
+
+function assertExactKeys(value: object, keys: readonly string[], path: string): void {
+  const expected = new Set(keys);
+  const unexpected = Object.keys(value).find((key) => !expected.has(key));
+  if (unexpected !== undefined) {
+    throw new DecodeError(`${path}.${unexpected}`, 'no unknown field', field(value, unexpected));
+  }
+  const missing = keys.find((key) => !Object.prototype.hasOwnProperty.call(value, key));
+  if (missing !== undefined) {
+    throw new DecodeError(`${path}.${missing}`, 'required field', undefined);
+  }
 }
 
 function at(value: object, key: string, path: string): [unknown, string] {
@@ -66,6 +84,23 @@ export const boolean: Decoder<boolean> = (value, path = '$') => {
   if (value === false || value === 0) return false;
   throw new DecodeError(path, 'boolean or SQLite 0|1', value);
 };
+
+const strictBoolean: Decoder<boolean> = (value, path = '$') => {
+  if (typeof value !== 'boolean') throw new DecodeError(path, 'boolean', value);
+  return value;
+};
+
+function optionalStrictBoolean(
+  value: unknown,
+  path: string,
+  fallback: boolean,
+): boolean {
+  return value === undefined ? fallback : strictBoolean(value, path);
+}
+
+function optionalString(value: unknown, path: string, fallback: string): string {
+  return value === undefined ? fallback : string(value, path);
+}
 
 export function arrayOf<T>(decoder: Decoder<T>): Decoder<T[]> {
   return (value, path = '$') => {
@@ -110,6 +145,17 @@ function count(value: unknown, path: string): number {
   const decoded = integer(value, path);
   if (decoded < 0) throw new DecodeError(path, 'non-negative integer', value);
   return decoded;
+}
+
+function oneOf<const T extends readonly string[]>(
+  choices: T,
+  value: unknown,
+  path: string,
+): T[number] {
+  if (typeof value !== 'string' || !choices.includes(value)) {
+    throw new DecodeError(path, choices.join(' | '), value);
+  }
+  return value;
 }
 
 function nullableYear(value: unknown, path: string): string | null {
@@ -461,8 +507,177 @@ export const decodeSettingsView: Decoder<SettingsView> = (value, path = '$') => 
     researchTheme: text('researchTheme'), embedProvider: text('embedProvider'), embedApiBase: text('embedApiBase'),
     embedApiModel: text('embedApiModel'), embedKeyTail: text('embedKeyTail'),
     hasEmbedKey: boolean(field(input, 'hasEmbedKey'), `${path}.hasEmbedKey`),
+    obsidianEnabled: optionalStrictBoolean(
+      field(input, 'obsidianEnabled'), `${path}.obsidianEnabled`, false,
+    ),
+    obsidianVaultPath: optionalString(
+      field(input, 'obsidianVaultPath'), `${path}.obsidianVaultPath`, '',
+    ),
+    obsidianRootFolder: optionalString(
+      field(input, 'obsidianRootFolder'), `${path}.obsidianRootFolder`, 'Research',
+    ),
+    obsidianPdfMode: field(input, 'obsidianPdfMode') === undefined
+      ? 'none'
+      : oneOf(
+          ['none', 'reference', 'copy'] as const,
+          field(input, 'obsidianPdfMode'),
+          `${path}.obsidianPdfMode`,
+        ),
+    obsidianExportSource: optionalStrictBoolean(
+      field(input, 'obsidianExportSource'), `${path}.obsidianExportSource`, true,
+    ),
+    obsidianExportExplainer: optionalStrictBoolean(
+      field(input, 'obsidianExportExplainer'), `${path}.obsidianExportExplainer`, true,
+    ),
+    obsidianExportTranslation: optionalStrictBoolean(
+      field(input, 'obsidianExportTranslation'), `${path}.obsidianExportTranslation`, true,
+    ),
+    obsidianAutoExport: optionalStrictBoolean(
+      field(input, 'obsidianAutoExport'), `${path}.obsidianAutoExport`, false,
+    ),
   };
 };
+
+const obsidianCountKeys = [
+  'exported',
+  'unchanged',
+  'conflicts',
+  'errors',
+  'skipped',
+  'userManaged',
+  'orphaned',
+  'deleted',
+] as const;
+
+export const decodeObsidianResultCounts: Decoder<ObsidianResultCounts> = (
+  value,
+  path = '$',
+) => {
+  const input = inputObject(value, path);
+  assertExactKeys(input, obsidianCountKeys, path);
+  return {
+    exported: count(field(input, 'exported'), `${path}.exported`),
+    unchanged: count(field(input, 'unchanged'), `${path}.unchanged`),
+    conflicts: count(field(input, 'conflicts'), `${path}.conflicts`),
+    errors: count(field(input, 'errors'), `${path}.errors`),
+    skipped: count(field(input, 'skipped'), `${path}.skipped`),
+    userManaged: count(field(input, 'userManaged'), `${path}.userManaged`),
+    orphaned: count(field(input, 'orphaned'), `${path}.orphaned`),
+    deleted: count(field(input, 'deleted'), `${path}.deleted`),
+  };
+};
+
+function decodeObsidianPaperId(
+  value: unknown,
+  jobType: 'obsidian_export' | 'obsidian_sync',
+  path: string,
+): string | null {
+  if (jobType === 'obsidian_sync') {
+    if (value !== null) throw new DecodeError(path, 'null', value);
+    return null;
+  }
+  return string(value, path);
+}
+
+const decodeObsidianLastJob: Decoder<ObsidianLastJob> = (value, path = '$') => {
+  const input = inputObject(value, path);
+  assertExactKeys(input, ['id', 'paperId', 'jobType', 'status'], path);
+  const jobType = oneOf(
+    ['obsidian_export', 'obsidian_sync'] as const,
+    field(input, 'jobType'),
+    `${path}.jobType`,
+  );
+  return {
+    id: string(field(input, 'id'), `${path}.id`),
+    paperId: decodeObsidianPaperId(field(input, 'paperId'), jobType, `${path}.paperId`),
+    jobType,
+    status: oneOf(
+      ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const,
+      field(input, 'status'),
+      `${path}.status`,
+    ),
+  };
+};
+
+export const decodeObsidianStatus: Decoder<ObsidianStatus> = (value, path = '$') => {
+  const input = inputObject(value, path);
+  assertExactKeys(input, [
+    'enabled',
+    'vaultConfigured',
+    'writable',
+    'rootFolder',
+    'pdfMode',
+    'lastJob',
+    'aggregate',
+  ], path);
+  const rawLastJob = field(input, 'lastJob');
+  return {
+    enabled: strictBoolean(field(input, 'enabled'), `${path}.enabled`),
+    vaultConfigured: strictBoolean(
+      field(input, 'vaultConfigured'), `${path}.vaultConfigured`,
+    ),
+    writable: strictBoolean(field(input, 'writable'), `${path}.writable`),
+    rootFolder: string(field(input, 'rootFolder'), `${path}.rootFolder`),
+    pdfMode: oneOf(
+      ['none', 'reference', 'copy'] as const,
+      field(input, 'pdfMode'),
+      `${path}.pdfMode`,
+    ) as ObsidianPdfMode,
+    lastJob: rawLastJob === null
+      ? null
+      : decodeObsidianLastJob(rawLastJob, `${path}.lastJob`),
+    aggregate: decodeObsidianResultCounts(field(input, 'aggregate'), `${path}.aggregate`),
+  };
+};
+
+export const decodeObsidianTestResult: Decoder<ObsidianTestResult> = (value, path = '$') => {
+  const input = inputObject(value, path);
+  assertExactKeys(input, ['ok'], path);
+  return { ok: strictBoolean(field(input, 'ok'), `${path}.ok`) };
+};
+
+function decodeObsidianJobResponse(
+  expectedJobType: 'obsidian_export' | 'obsidian_sync',
+  value: unknown,
+  path = '$',
+) {
+  const input = inputObject(value, path);
+  assertExactKeys(input, ['job', 'deduplicated'], path);
+  const jobPath = `${path}.job`;
+  const rawJob = inputObject(field(input, 'job'), jobPath);
+  assertExactKeys(rawJob, ['id', 'paperId', 'jobType', 'sourceMode', 'status'], jobPath);
+  const rawPaperId = field(rawJob, 'paperId');
+  const job = decodeProcessingJobSummary({
+    id: field(rawJob, 'id'),
+    paperId: rawPaperId === null ? '__global__' : rawPaperId,
+    jobType: field(rawJob, 'jobType'),
+    sourceMode: field(rawJob, 'sourceMode'),
+    status: field(rawJob, 'status'),
+  }, jobPath);
+  if (job.jobType !== expectedJobType) {
+    throw new DecodeError(`${jobPath}.jobType`, expectedJobType, job.jobType);
+  }
+  if (job.sourceMode !== null) {
+    throw new DecodeError(`${jobPath}.sourceMode`, 'null', job.sourceMode);
+  }
+  return {
+    job: {
+      ...job,
+      paperId: decodeObsidianPaperId(rawPaperId, expectedJobType, `${jobPath}.paperId`),
+    },
+    deduplicated: strictBoolean(
+      field(input, 'deduplicated'), `${path}.deduplicated`,
+    ),
+  };
+}
+
+export const decodeObsidianExportJobResponse = (value: unknown, path = '$') => (
+  decodeObsidianJobResponse('obsidian_export', value, path)
+);
+
+export const decodeObsidianSyncJobResponse = (value: unknown, path = '$') => (
+  decodeObsidianJobResponse('obsidian_sync', value, path)
+);
 
 export const decodeTitleTranslationStatus: Decoder<TitleTranslationStatus> = (value, path = '$') => {
   const input = commandObject(value, path);
