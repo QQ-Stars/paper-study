@@ -876,6 +876,16 @@ class NativeWindowsRuntimeOperations:
             require_live=False,
         )
 
+    def frozen_node_rollback_map_from_stale_owner_for_reattestation(
+        self,
+        owner_marker: str | os.PathLike[str],
+    ) -> dict[str, object]:
+        return self._frozen_node_rollback_map_from_owner(
+            owner_marker,
+            require_live=False,
+            allow_p4_relative_entrypoint=True,
+        )
+
     def frozen_node_rollback_map_from_active_owner(
         self,
         owner_marker: str | os.PathLike[str],
@@ -891,6 +901,7 @@ class NativeWindowsRuntimeOperations:
         owner_marker: str | os.PathLike[str],
         *,
         require_live: bool,
+        allow_p4_relative_entrypoint: bool = False,
     ) -> dict[str, object]:
         from backend.app.cli.runtime_owner import _strict_owner_document
         from backend.app.providers.runtime_lease import runtime_pid_is_alive
@@ -912,13 +923,20 @@ class NativeWindowsRuntimeOperations:
         database_paths = owner.get("databasePaths")
         listener_port = owner.get("listenerPort")
         old_pid = owner.get("processId")
+        owner_argv = tuple(owner.get("argv", ()))
+        p4_relative_argv = (
+            allow_p4_relative_entrypoint
+            and configured.cwd == configured.entrypoint_path.parent
+            and owner_argv
+            == (str(configured.executable_path), configured.entrypoint_path.name)
+        )
         if (
             owner.get("ownerState") != "node_active"
             or owner.get("runtimeNamespace") != "production"
             or owner.get("executablePath") != str(configured.executable_path)
             or owner.get("entrypointPath") != str(configured.entrypoint_path)
             or owner.get("cwd") != str(configured.cwd)
-            or tuple(owner.get("argv", ())) != configured.argv
+            or (owner_argv != configured.argv and not p4_relative_argv)
             or owner.get("listenerHost") != "127.0.0.1"
             or not isinstance(listener_port, int)
             or isinstance(listener_port, bool)

@@ -170,8 +170,10 @@ def run(
             "zeroProcesses": evidence.zero_processes,
         }
     if options.command == "recover-stale-node-owner":
-        rollback_map = operations.frozen_node_rollback_map_from_owner(
-            options.owner_marker
+        rollback_map = (
+            operations.frozen_node_rollback_map_from_stale_owner_for_reattestation(
+                options.owner_marker
+            )
         )
         identity = load_database_evidence_identity_manifest(
             options.database_identity_manifest

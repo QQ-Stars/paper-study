@@ -361,6 +361,104 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
                     operations.frozen_node_rollback_map_from_active_owner(marker)
             self.assertEqual("NATIVE_ACTIVE_OWNER_INVALID", raised.exception.code)
 
+    def test_stale_owner_reattestation_accepts_only_the_p4_relative_entrypoint_argv(self) -> None:
+        from backend.app.api.compat.database_identity import canonical_json_bytes
+        from backend.app.providers import native_runtime
+        from backend.app.providers.native_runtime import NativeRuntimeError
+
+        with tempfile.TemporaryDirectory(prefix="study-app-stale-owner-") as raw:
+            root = Path(raw)
+            executable = root / "node.exe"
+            entrypoint = root / "server.js"
+            database = root / "app.db"
+            marker = root / "production-owner.json"
+            executable.write_bytes(b"node-binary")
+            entrypoint.write_text("// frozen node\n", encoding="utf-8")
+            database.write_bytes(b"sqlite-fixture")
+            configured = SimpleNamespace(
+                executable_path=executable,
+                entrypoint_path=entrypoint,
+                cwd=root,
+                argv=(str(executable), str(entrypoint)),
+                environment={
+                    "RUNTIME_ENVIRONMENT": "live",
+                    "RUNTIME_NAMESPACE": "production",
+                    "API_BACKEND_MODE": "legacy",
+                    "DOCUMENT_PIPELINE_MODE": "legacy",
+                    "GENERATION_PIPELINE_MODE": "legacy",
+                    "ARTIFACT_READ_MODE": "legacy",
+                    "ARTIFACT_WRITE_MODE": "legacy",
+                    "OCR_ENABLED": "0",
+                    "OBSIDIAN_ENABLED": "0",
+                    "PAPER_STUDY_MCP_MODE": "legacy",
+                    "UI_ENTRY": "react",
+                },
+            )
+            operations = object.__new__(native_runtime.NativeWindowsRuntimeOperations)
+            operations._configuration = SimpleNamespace(rollback=configured)
+
+            def write_marker(argv: list[str]) -> None:
+                unsigned = {
+                    "schemaVersion": 1,
+                    "markerKind": "runtime-owner",
+                    "ownerState": "node_active",
+                    "runtimeNamespace": "production",
+                    "databaseLineageId": "lineage",
+                    "subjectDatabaseId": "subject",
+                    "databaseIdentityManifestPath": str(root / "identity.json"),
+                    "databaseIdentityManifestFileSha256": "a" * 64,
+                    "originReceiptPath": str(root / "origin.json"),
+                    "originReceiptFileSha256": "b" * 64,
+                    "originReceiptSha256": "c" * 64,
+                    "entrypointPath": str(entrypoint),
+                    "processId": 41001,
+                    "executablePath": str(executable),
+                    "cwd": str(root),
+                    "argv": argv,
+                    "listenerHost": "127.0.0.1",
+                    "listenerPort": 5173,
+                    "databasePaths": [str(database)],
+                    "createdAt": "2026-08-15T00:00:00Z",
+                }
+                marker.write_bytes(
+                    canonical_json_bytes(
+                        {
+                            **unsigned,
+                            "ownerMarkerSha256": hashlib.sha256(
+                                canonical_json_bytes(unsigned)
+                            ).hexdigest(),
+                        }
+                    )
+                )
+
+            write_marker([str(executable), entrypoint.name])
+            with patch(
+                "backend.app.providers.runtime_lease.runtime_pid_is_alive",
+                return_value=False,
+            ):
+                rollback_map = (
+                    operations.frozen_node_rollback_map_from_stale_owner_for_reattestation(
+                        marker
+                    )
+                )
+                with self.assertRaises(NativeRuntimeError) as strict_raised:
+                    operations.frozen_node_rollback_map_from_owner(marker)
+            self.assertEqual("NATIVE_STALE_OWNER_INVALID", strict_raised.exception.code)
+            self.assertEqual(str(entrypoint), rollback_map["entrypointPath"])
+
+            write_marker([str(executable), ".\\server.js"])
+            with (
+                patch(
+                    "backend.app.providers.runtime_lease.runtime_pid_is_alive",
+                    return_value=False,
+                ),
+                self.assertRaises(NativeRuntimeError) as alias_raised,
+            ):
+                operations.frozen_node_rollback_map_from_stale_owner_for_reattestation(
+                    marker
+                )
+            self.assertEqual("NATIVE_STALE_OWNER_INVALID", alias_raised.exception.code)
+
     def test_native_operator_exports_canonical_rollback_map_exclusively(self) -> None:
         from backend.app.api.compat.database_identity import canonical_json_bytes
         from backend.app.cli.native_runtime import run
