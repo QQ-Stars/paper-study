@@ -30,10 +30,24 @@ ROLLBACK_TAIL_EVENTS = (
 )
 
 _ROLLBACK_STATES = frozenset({"node_quiesced", "handoff_pending", "python_active"})
-_MAP_FIELDS = frozenset(
+_CONTAINER_MAP_FIELDS = frozenset(
     {
         "imageDigest",
         "entrypointPath",
+        "cwd",
+        "host",
+        "ports",
+        "databasePath",
+        "environment",
+    }
+)
+_NATIVE_MAP_FIELDS = frozenset(
+    {
+        "deploymentKind",
+        "executablePath",
+        "executableSha256",
+        "entrypointPath",
+        "entrypointSha256",
         "cwd",
         "host",
         "ports",
@@ -444,7 +458,13 @@ def validate_rollback_tail(
 
 
 def validate_frozen_node_rollback_map(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != _MAP_FIELDS:
+    if not isinstance(value, dict):
+        raise _invalid_map("The frozen Node rollback map fields are invalid.")
+    if value.get("deploymentKind") == "native-windows":
+        if set(value) != _NATIVE_MAP_FIELDS:
+            raise _invalid_map("The native frozen Node rollback map fields are invalid.")
+        return _validate_native_rollback_map(value)
+    if set(value) != _CONTAINER_MAP_FIELDS:
         raise _invalid_map("The frozen Node rollback map fields are invalid.")
     digest = value.get("imageDigest")
     if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
@@ -479,6 +499,69 @@ def validate_frozen_node_rollback_map(value: object) -> dict[str, object]:
         "host": value["host"],
         "ports": dict(ports),
         "databasePath": value["databasePath"],
+        "environment": dict(environment),
+    }
+
+
+def _validate_native_rollback_map(value: Mapping[str, object]) -> dict[str, object]:
+    paths: dict[str, Path] = {}
+    for field in ("executablePath", "entrypointPath", "cwd", "databasePath"):
+        raw = value.get(field)
+        if not isinstance(raw, str) or not raw or not Path(raw).is_absolute():
+            raise _invalid_map(f"The native rollback {field} must be an absolute path.")
+        path = Path(raw)
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as error:
+            raise _invalid_map(f"The native rollback {field} does not exist.") from error
+        if resolved != path:
+            raise _invalid_map(f"The native rollback {field} must be canonical.")
+        paths[field] = resolved
+    if not paths["executablePath"].is_file() or not paths["entrypointPath"].is_file():
+        raise _invalid_map("The native rollback executables must be files.")
+    if not paths["cwd"].is_dir() or not paths["databasePath"].is_file():
+        raise _invalid_map("The native rollback cwd or database path is invalid.")
+    for path_field, sha_field in (
+        ("executablePath", "executableSha256"),
+        ("entrypointPath", "entrypointSha256"),
+    ):
+        expected = value.get(sha_field)
+        actual = hashlib.sha256(paths[path_field].read_bytes()).hexdigest()
+        if (
+            not isinstance(expected, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected) is None
+            or expected != actual
+        ):
+            raise _invalid_map(f"The native rollback {sha_field} is invalid or stale.")
+    if value.get("host") not in {"127.0.0.1", "::1"}:
+        raise _invalid_map("The native frozen Node host must be loopback.")
+    ports = value.get("ports")
+    if (
+        not isinstance(ports, dict)
+        or not ports
+        or any(
+            not isinstance(name, str)
+            or not name
+            or not isinstance(port, int)
+            or isinstance(port, bool)
+            or not 1 <= port <= 65535
+            for name, port in ports.items()
+        )
+    ):
+        raise _invalid_map("The native frozen Node port map is invalid.")
+    environment = value.get("environment")
+    if not isinstance(environment, Mapping) or dict(environment) != _ROLLBACK_ENVIRONMENT:
+        raise _invalid_map("The native frozen Node environment is not the rollback map.")
+    return {
+        "deploymentKind": "native-windows",
+        "executablePath": str(paths["executablePath"]),
+        "executableSha256": value["executableSha256"],
+        "entrypointPath": str(paths["entrypointPath"]),
+        "entrypointSha256": value["entrypointSha256"],
+        "cwd": str(paths["cwd"]),
+        "host": value["host"],
+        "ports": dict(ports),
+        "databasePath": str(paths["databasePath"]),
         "environment": dict(environment),
     }
 

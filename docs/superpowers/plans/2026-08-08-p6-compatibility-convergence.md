@@ -8,6 +8,18 @@
 
 **Tech Stack:** Python 3、FastMCP、FastAPI、Pydantic v2、SQLite URI mode=ro、hashlib、canonical JSON、unittest、Node test runner、React、Vitest、Playwright、Docker Compose。
 
+**2026-08-15 deployment-adapter amendment（优先于下文 container-only 表述）：** P6 production
+支持 `native-windows|container` 两个等价 adapter。Windows 默认完整运行方式是
+`native-windows`，Docker 只是可选方式。所有 HTTP/NDJSON/MCP、owner、lease、receipt、rollback、
+zero-skip 与 Live fingerprint 门禁不变。container BuildIdentity 继续绑定 resolved Compose 与 exact
+image digests；native BuildIdentity v2 改为绑定 Python/Node executable bytes、requirements、frontend
+artifacts、application cwd、API/Worker/Scheduler/MCP 与 frozen Node exact argv、环境值 hash，且不得伪造
+image digest。native operator 只通过 `backend.app.cli.native_runtime configure|start|status|stop|recover-stale-node-owner`
+运行；`python_active` 日常重启必须复验 exact HandoffReceipt identity chain。下文凡写“必须为 image
+digest/Compose”之处，对 native adapter 均替换为上述 native artifact identity；凡写“默认 Compose
+profile”之处，均理解为所选 adapter 的四 Python roles。Docker 构建与实机验证按用户要求在项目
+实现及原生门禁完成后单独执行，不得阻塞原生完整运行。
+
 **Prerequisite gate:** P0–P5 scoped gates 已通过且 Alembic 唯一 head 为 P3 revision 20260807_03；若 P0.1 v1 曾记录 non-zero pre-existing failures，它们在 P1–P5 每阶段都必须以 raw non-zero、完全相同 ID/signature/related hashes 且未改相关路径报告，不能称为全绿。FastAPI 已在隔离端口通过真实后端 E2E；Python Worker/Scheduler 单一所有权已验证；P0 verified backup 与隔离 restore/install rehearsal 可用；frozen Node image 能读取 revision 20260807_03 扩展 schema。P4 已 exclusive-create `data/compatibility/runtime/live-database-identity-v1.json` 与 `production-owner.json`，二者分别是 exact Live `DatabaseEvidenceIdentityManifest` 与 `node_active` owner marker；P6 只验证/消费，不重新初始化或用 path/current hash 重算。P6 shutdown gate 和最终完成不接受该临时例外：完整套件必须由 `capture-evidence` 报告 raw 0 failure、0 skip，除非用户明确批准改变完成标准。
 
 **Scope guardrails:** 不删除 server.js、db.js、agent/mcp_server.py、旧 API、旧表、旧列、rollback image 或 `data/settings.json` 的 legacy `apiKey|ocrApiKey|embedApiKey|s2ApiKey` compatibility fields；不物理删除 papers.explainer、papers.pdf_path、translations.content；不在 MCP 查询中 create table、migrate、backfill、embed、enqueue、调用 OCR 或写日志到 SQLite；应用回滚不 downgrade Live DB；数据恢复必须停止所有进程并保留原 DB。P6 不调用 P1 `finalize_legacy_migration`，legacy plaintext 仅在未来独立、版本化且正式关闭 Node rollback window 的计划中才可移除。计划内所有多命令 PowerShell block 都必须以 `Set-StrictMode -Version Latest` 与 `$ErrorActionPreference = 'Stop'` 开始，并在每个 native executable 后立即检查 `$LASTEXITCODE`；通过 pipeline 解析 JSON 时也必须先保存并检查 native exit，禁止未定义 session variable 静默变为 `$null`。

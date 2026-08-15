@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import inspect
 import ipaddress
+import json
 from pathlib import Path
 import re
 import socket
@@ -16,6 +17,7 @@ from backend.app.config import DatabaseSettings
 
 
 _PROCESS_ROLES = frozenset({"api", "worker", "scheduler"})
+_PRODUCTION_ROLES = _PROCESS_ROLES | {"mcp"}
 _HOST_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\Z")
 
 
@@ -175,6 +177,7 @@ class ProductionRuntimeAdmission:
     cutover_lease_payload: bytes
     owner_marker_path: Path
     pending_owner_payload: bytes
+    admission_mode: str = "handoff_pending"
 
 
 class ProductionRuntimeGuard:
@@ -182,6 +185,137 @@ class ProductionRuntimeGuard:
 
     def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+
+    def validate_active_owner(
+        self,
+        *,
+        handoff_receipt: str | Path,
+        expected_handoff_receipt_sha256: str,
+        owner_marker: str | Path,
+        database: DatabaseSettings,
+        environment: str,
+        runtime_namespace: str,
+        role: str,
+    ) -> ProductionRuntimeAdmission:
+        from backend.app.api.compat.build_identity import load_build_identity_manifest
+        from backend.app.api.compat.database_identity import (
+            load_database_evidence_identity_manifest,
+            verify_database_evidence_identity_subject,
+        )
+        from backend.app.api.compat.evidence_capture import load_evidence_run_manifest
+        from backend.app.application.final_window import (
+            _load_lease,
+            load_production_startup_snapshot,
+        )
+        from backend.app.application.runtime_handoff import (
+            _load_runtime_owner,
+            load_handoff_receipt,
+        )
+        from backend.app.infrastructure.database_backup import verify_origin_receipt
+
+        if (
+            not isinstance(database, DatabaseSettings)
+            or environment != "live"
+            or runtime_namespace != "production"
+            or role not in _PRODUCTION_ROLES
+        ):
+            raise RuntimeRoleError(
+                "PRODUCTION_ADMISSION_INVALID",
+                "Active production admission requires one Live Python process role.",
+            )
+        try:
+            receipt = load_handoff_receipt(
+                handoff_receipt,
+                expected_file_sha256=expected_handoff_receipt_sha256,
+            )
+            receipt_document = json.loads(receipt.canonical_bytes.decode("utf-8"))
+            owner_path = Path(owner_marker).resolve(strict=True)
+            owner_payload = owner_path.read_bytes()
+            owner = _load_runtime_owner(owner_payload)
+            snapshot = load_production_startup_snapshot(
+                str(receipt_document["startupSnapshotPath"]),
+                expected_file_sha256=str(
+                    receipt_document["startupSnapshotFileSha256"]
+                ),
+            )
+            build = load_build_identity_manifest(snapshot.build_identity_manifest_path)
+            identity = load_database_evidence_identity_manifest(
+                snapshot.database_identity_manifest_path
+            )
+            run = load_evidence_run_manifest(
+                snapshot.run_manifest_path,
+                expected_file_sha256=snapshot.run_manifest_file_sha256,
+            )
+            origin = verify_origin_receipt(
+                snapshot.origin_receipt_path,
+                snapshot.origin_receipt_file_sha256,
+            )
+            verify_database_evidence_identity_subject(
+                database=database.database_path,
+                identity=identity,
+            )
+            lease_path, lease_payload, lease = _load_lease(
+                str(receipt_document["cutoverLeasePath"])
+            )
+        except Exception as error:
+            raise RuntimeRoleError(
+                "PRODUCTION_ADMISSION_INVALID",
+                "The active production identity chain is invalid.",
+            ) from error
+        if (
+            owner.get("ownerState") != "python_active"
+            or owner.get("runtimeNamespace") != "production"
+            or owner.get("handoffReceiptPath") != str(receipt.path)
+            or owner.get("handoffReceiptFileSha256") != receipt.file_sha256
+            or owner.get("startupSnapshotPath") != str(snapshot.path)
+            or owner.get("startupSnapshotFileSha256") != snapshot.file_sha256
+            or owner.get("buildIdentityManifestPath") != str(build.manifest_path)
+            or owner.get("buildIdentityManifestSha256") != build.manifest_file_sha256
+            or owner.get("databaseIdentityManifestPath") != str(identity.manifest_path)
+            or owner.get("databaseIdentityManifestSha256")
+            != identity.identity_manifest_file_sha256
+            or owner.get("databaseLineageId") != identity.database_lineage_id
+            or owner.get("subjectDatabaseId") != identity.subject_database_id
+            or receipt.run_id != snapshot.run_id
+            or receipt.database_lineage_id != identity.database_lineage_id
+            or receipt.live_subject_database_id != identity.subject_database_id
+            or receipt_document.get("buildId") != build.build_id
+            or receipt_document.get("buildIdentityManifestPath")
+            != str(build.manifest_path)
+            or receipt_document.get("buildIdentityManifestSha256")
+            != build.manifest_file_sha256
+            or receipt_document.get("databaseIdentityManifestPath")
+            != str(identity.manifest_path)
+            or receipt_document.get("databaseIdentityManifestSha256")
+            != identity.identity_manifest_file_sha256
+            or receipt_document.get("originReceiptPath") != str(origin.receipt_path)
+            or receipt_document.get("originReceiptFileSha256")
+            != origin.origin_receipt_file_sha256
+            or run.phase != "final"
+            or run.run_id != snapshot.run_id
+            or lease.get("phase") != "completed"
+            or lease.get("runId") != snapshot.run_id
+            or lease_path != Path(str(owner.get("cutoverLeasePath"))).resolve(strict=True)
+            or Path(str(snapshot.rollback_map["databasePath"])).resolve(strict=True)
+            != database.database_path
+        ):
+            raise RuntimeRoleError(
+                "PRODUCTION_ADMISSION_INVALID",
+                "The active Python owner, receipt, lease, or database identity mismatched.",
+            )
+        return ProductionRuntimeAdmission(
+            run_id=snapshot.run_id,
+            role=role,
+            runtime_namespace=runtime_namespace,
+            database_identity_manifest_path=identity.manifest_path,
+            database_lineage_id=identity.database_lineage_id,
+            subject_database_id=identity.subject_database_id,
+            cutover_lease_path=lease_path,
+            cutover_lease_payload=lease_payload,
+            owner_marker_path=owner_path,
+            pending_owner_payload=owner_payload,
+            admission_mode="python_active",
+        )
 
     def validate_pending_handoff(
         self,
@@ -337,7 +471,7 @@ class ProductionRuntimeGuard:
             or not isinstance(database, DatabaseSettings)
             or environment != "live"
             or runtime_namespace != "production"
-            or role not in _PROCESS_ROLES
+            or role not in _PRODUCTION_ROLES
         ):
             raise RuntimeRoleError(
                 "PRODUCTION_ADMISSION_INVALID",
@@ -480,8 +614,12 @@ def validate_production_runtime_admission(
             "PRODUCTION_ADMISSION_INVALID",
             "The production runtime admission could not be revalidated.",
         ) from error
+    expected_phase = (
+        "completed" if admission.admission_mode == "python_active" else "handoff_pending"
+    )
     if (
-        admission.role != role
+        admission.admission_mode not in {"handoff_pending", "python_active"}
+        or admission.role != role
         or admission.runtime_namespace != runtime_namespace
         or admission.database_identity_manifest_path
         != getattr(identity, "manifest_path", None)
@@ -491,7 +629,7 @@ def validate_production_runtime_admission(
         or getattr(identity, "subject_kind", None) != "live"
         or lease_path != admission.cutover_lease_path
         or lease_payload != admission.cutover_lease_payload
-        or lease.get("phase") != "handoff_pending"
+        or lease.get("phase") != expected_phase
         or lease.get("runId") != admission.run_id
         or owner_payload != admission.pending_owner_payload
     ):

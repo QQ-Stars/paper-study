@@ -184,8 +184,10 @@ def build_parser() -> argparse.ArgumentParser:
     freeze.add_argument("--python-artifact", action="append", required=True)
     freeze.add_argument("--frontend-root", required=True)
     freeze.add_argument("--frontend-manifest", required=True)
-    freeze.add_argument("--resolved-compose", "--compose-file", required=True)
-    freeze.add_argument("--image-digest", action="append", required=True)
+    freeze.add_argument("--deployment-kind", choices=("container", "native-windows"), default="container")
+    freeze.add_argument("--resolved-compose", "--compose-file")
+    freeze.add_argument("--image-digest", action="append", default=[])
+    freeze.add_argument("--native-runtime-spec")
 
     verify = commands.add_parser("verify-identity")
     verify.add_argument("--build-identity-manifest", required=True)
@@ -193,8 +195,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--python-artifact", action="append", required=True)
     verify.add_argument("--frontend-root", required=True)
     verify.add_argument("--frontend-manifest", required=True)
-    verify.add_argument("--resolved-compose", "--compose-file", required=True)
-    verify.add_argument("--image-digest", action="append", required=True)
+    verify.add_argument("--deployment-kind", choices=("container", "native-windows"), default="container")
+    verify.add_argument("--resolved-compose", "--compose-file")
+    verify.add_argument("--image-digest", action="append", default=[])
+    verify.add_argument("--native-runtime-spec")
 
     evidence_run = commands.add_parser("create-evidence-run")
     evidence_run.add_argument("--evidence-root", required=True)
@@ -512,15 +516,14 @@ def run(arguments: Sequence[str]) -> dict[str, Any]:
         )
         return {"operation": "restore-install-rehearsal", **result.to_dict()}
     if options.command == "freeze-identity":
-        image_digests = _image_digests(options.image_digest)
+        identity_inputs = _build_identity_adapter_inputs(options)
         manifest = freeze_build_identity(
             repository=options.source_root,
             build_identity_directory=options.build_identity_directory,
             python_artifacts=tuple(options.python_artifact),
             frontend_root=options.frontend_root,
             frontend_manifest=options.frontend_manifest,
-            resolved_compose=options.resolved_compose,
-            image_digests=image_digests,
+            **identity_inputs,
         )
         return {
             "ok": True,
@@ -528,17 +531,17 @@ def run(arguments: Sequence[str]) -> dict[str, Any]:
             "buildId": manifest.build_id,
             "manifestPath": str(manifest.manifest_path),
             "manifestFileSha256": manifest.manifest_file_sha256,
+            "deploymentKind": manifest.deployment_kind,
         }
     if options.command == "verify-identity":
-        image_digests = _image_digests(options.image_digest)
+        identity_inputs = _build_identity_adapter_inputs(options)
         manifest = verify_build_identity(
             build_identity_manifest=options.build_identity_manifest,
             repository=options.source_root,
             python_artifacts=tuple(options.python_artifact),
             frontend_root=options.frontend_root,
             frontend_manifest=options.frontend_manifest,
-            resolved_compose=options.resolved_compose,
-            image_digests=image_digests,
+            **identity_inputs,
         )
         return {
             "ok": True,
@@ -546,6 +549,7 @@ def run(arguments: Sequence[str]) -> dict[str, Any]:
             "buildId": manifest.build_id,
             "manifestPath": str(manifest.manifest_path),
             "manifestFileSha256": manifest.manifest_file_sha256,
+            "deploymentKind": manifest.deployment_kind,
         }
     if options.command == "create-evidence-run":
         run_manifest = create_evidence_run(
@@ -744,12 +748,19 @@ def run(arguments: Sequence[str]) -> dict[str, Any]:
             expected_startup_snapshot_sha256=options.expected_startup_snapshot_sha256,
             owner_marker=options.owner_marker,
         )
-        smoke_evidence = _promotion_smoke_evidence(
-            operations,
-            python_profile=options.python_profile,
-            rollback_profile=options.rollback_profile,
-            explicit_path=options.smoke_evidence,
-        )
+        try:
+            smoke_evidence = _promotion_smoke_evidence(
+                operations,
+                python_profile=options.python_profile,
+                rollback_profile=options.rollback_profile,
+                explicit_path=options.smoke_evidence,
+            )
+        except BaseException:
+            coordinator.rollback_to_frozen_node(
+                handoff,
+                reason="promotion_smoke_failed",
+            )
+            raise
         try:
             receipt = coordinator.commit_python_owner(
                 handoff,
@@ -1078,6 +1089,39 @@ def _file_sha256(path: str | Path) -> str:
             "COMPATIBILITY_OUTPUT_INVALID",
             "A compatibility result path is unreadable.",
         ) from error
+
+
+def _build_identity_adapter_inputs(options: argparse.Namespace) -> dict[str, object]:
+    if options.deployment_kind == "native-windows":
+        if (
+            not isinstance(options.native_runtime_spec, str)
+            or not options.native_runtime_spec
+            or options.resolved_compose is not None
+            or options.image_digest
+        ):
+            raise CompatibilityCliError(
+                "BUILD_DEPLOYMENT_INPUT_INVALID",
+                "Native identity requires only --native-runtime-spec adapter input.",
+            )
+        return {
+            "deployment_kind": "native-windows",
+            "native_runtime_spec": options.native_runtime_spec,
+        }
+    if (
+        not isinstance(options.resolved_compose, str)
+        or not options.resolved_compose
+        or not options.image_digest
+        or options.native_runtime_spec is not None
+    ):
+        raise CompatibilityCliError(
+            "BUILD_DEPLOYMENT_INPUT_INVALID",
+            "Container identity requires Compose and at least one image digest.",
+        )
+    return {
+        "deployment_kind": "container",
+        "resolved_compose": options.resolved_compose,
+        "image_digests": _image_digests(options.image_digest),
+    }
 
 
 def _image_digests(values: Sequence[str]) -> dict[str, str]:

@@ -22,6 +22,337 @@ def _git(root: Path, *arguments: str) -> None:
 
 
 class BuildIdentityTests(unittest.TestCase):
+    def test_native_windows_identity_binds_runtime_roles_and_rollback(self) -> None:
+        from backend.app.api.compat.build_identity import (
+            BuildIdentityError,
+            freeze_build_identity,
+            verify_build_identity,
+        )
+
+        with tempfile.TemporaryDirectory(prefix="study-app-p6-native-identity-") as raw:
+            root = Path(raw)
+            repository = root / "repository"
+            repository.mkdir()
+            _git(repository, "init", "--quiet")
+            _git(repository, "config", "user.name", "Native Identity Test")
+            _git(repository, "config", "user.email", "native@example.test")
+            source = repository / "app.py"
+            source.write_text("VALUE = 1\n", encoding="utf-8")
+            _git(repository, "add", "--", "app.py")
+            _git(repository, "commit", "--quiet", "-m", "fixture")
+
+            python_executable = root / "python.exe"
+            python_executable.write_bytes(b"python-runtime-v1")
+            requirements = root / "requirements.txt"
+            requirements.write_text("fastapi==0.1\n", encoding="utf-8")
+            node_executable = root / "node.exe"
+            node_executable.write_bytes(b"node-runtime-v1")
+            node_entrypoint = root / "server.js"
+            node_entrypoint.write_text("console.log('rollback');\n", encoding="utf-8")
+
+            frontend = root / "frontend"
+            frontend.mkdir()
+            (frontend / "index.js").write_bytes(b"frontend-v1")
+            frontend_manifest = frontend / "manifest.json"
+            frontend_manifest.write_text(
+                json.dumps({"index.html": {"file": "index.js"}}),
+                encoding="utf-8",
+            )
+            identity_root = root / "identities"
+            identity_root.mkdir()
+            runtime_spec = root / "native-runtime-v1.json"
+
+            def write_runtime_spec(*, api_port: str = "18080") -> None:
+                role_environment = {
+                    "RUNTIME_ENVIRONMENT": "live",
+                    "RUNTIME_NAMESPACE": "production",
+                    "DB_PATH": str(root / "app.db"),
+                    "PROCESSING_CURSOR_SECRET": "secret-not-for-manifest",
+                }
+                runtime_spec.write_text(
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "deploymentKind": "native-windows",
+                            "pythonExecutablePath": str(python_executable),
+                            "requirementsLockPath": str(requirements),
+                            "applicationCwd": str(repository),
+                            "roles": {
+                                "api": {
+                                    "argv": [
+                                        str(python_executable),
+                                        "-B",
+                                        "-m",
+                                        "backend.app.cli.candidate_runtime",
+                                        "--role",
+                                        "api",
+                                    ],
+                                    "environment": {
+                                        **role_environment,
+                                        "API_BIND_PORT": api_port,
+                                    },
+                                },
+                                "worker": {
+                                    "argv": [
+                                        str(python_executable),
+                                        "-B",
+                                        "-m",
+                                        "backend.app.cli.candidate_runtime",
+                                        "--role",
+                                        "worker",
+                                    ],
+                                    "environment": role_environment,
+                                },
+                                "scheduler": {
+                                    "argv": [
+                                        str(python_executable),
+                                        "-B",
+                                        "-m",
+                                        "backend.app.cli.candidate_runtime",
+                                        "--role",
+                                        "scheduler",
+                                    ],
+                                    "environment": role_environment,
+                                },
+                                "mcp": {
+                                    "argv": [
+                                        str(python_executable),
+                                        "-B",
+                                        "-m",
+                                        "agent.mcp_server",
+                                        "--supervisor",
+                                    ],
+                                    "environment": {
+                                        **role_environment,
+                                        "PAPER_STUDY_MCP_MODE": "application",
+                                    },
+                                },
+                            },
+                            "frozenNodeRollback": {
+                                "executablePath": str(node_executable),
+                                "entrypointPath": str(node_entrypoint),
+                                "cwd": str(root),
+                                "argv": [str(node_executable), str(node_entrypoint)],
+                                "environment": {
+                                    "RUNTIME_ENVIRONMENT": "live",
+                                    "RUNTIME_NAMESPACE": "production",
+                                    "API_BACKEND_MODE": "legacy",
+                                },
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            write_runtime_spec()
+            inputs = {
+                "repository": repository,
+                "python_artifacts": (requirements,),
+                "frontend_root": frontend,
+                "frontend_manifest": frontend_manifest,
+                "deployment_kind": "native-windows",
+                "native_runtime_spec": runtime_spec,
+            }
+            frozen = freeze_build_identity(
+                build_identity_directory=identity_root,
+                **inputs,
+            )
+            self.assertEqual("native-windows", frozen.deployment_kind)
+            document = json.loads(frozen.canonical_bytes)
+            self.assertEqual(2, document["schemaVersion"])
+            self.assertEqual("native-windows", document["deploymentKind"])
+            self.assertNotIn("secret-not-for-manifest", frozen.canonical_bytes.decode("utf-8"))
+            self.assertEqual(
+                frozen,
+                verify_build_identity(
+                    build_identity_manifest=frozen.manifest_path,
+                    **inputs,
+                ),
+            )
+            from backend.app.cli.compatibility import run as run_compatibility
+
+            cli_result = run_compatibility(
+                [
+                    "verify-identity",
+                    "--build-identity-manifest",
+                    str(frozen.manifest_path),
+                    "--source-root",
+                    str(repository),
+                    "--python-artifact",
+                    str(requirements),
+                    "--frontend-root",
+                    str(frontend),
+                    "--frontend-manifest",
+                    str(frontend_manifest),
+                    "--deployment-kind",
+                    "native-windows",
+                    "--native-runtime-spec",
+                    str(runtime_spec),
+                ]
+            )
+            self.assertTrue(cli_result["ok"])
+            self.assertEqual("native-windows", cli_result["deploymentKind"])
+
+            write_runtime_spec(api_port="18081")
+            with self.assertRaises(BuildIdentityError) as environment_drift:
+                verify_build_identity(
+                    build_identity_manifest=frozen.manifest_path,
+                    **inputs,
+                )
+            self.assertEqual("BUILD_IDENTITY_DRIFT", environment_drift.exception.code)
+
+            write_runtime_spec()
+            python_executable.write_bytes(b"python-runtime-v2")
+            with self.assertRaises(BuildIdentityError) as executable_drift:
+                verify_build_identity(
+                    build_identity_manifest=frozen.manifest_path,
+                    **inputs,
+                )
+            self.assertEqual("BUILD_IDENTITY_DRIFT", executable_drift.exception.code)
+
+    def test_native_role_argv_must_match_the_frozen_role_contract(self) -> None:
+        from backend.app.api.compat.build_identity import (
+            BuildIdentityError,
+            freeze_build_identity,
+        )
+
+        with tempfile.TemporaryDirectory(prefix="study-app-p6-native-argv-") as raw:
+            root = Path(raw)
+            repository = root / "repository"
+            repository.mkdir()
+            _git(repository, "init", "--quiet")
+            _git(repository, "config", "user.name", "Native Argv Test")
+            _git(repository, "config", "user.email", "argv@example.test")
+            (repository / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+            _git(repository, "add", "--", "app.py")
+            _git(repository, "commit", "--quiet", "-m", "fixture")
+
+            python_executable = root / "python.exe"
+            python_executable.write_bytes(b"python-runtime-v1")
+            requirements = root / "requirements.txt"
+            requirements.write_text("fastapi==0.1\n", encoding="utf-8")
+            node_executable = root / "node.exe"
+            node_executable.write_bytes(b"node-runtime-v1")
+            node_entrypoint = root / "server.js"
+            node_entrypoint.write_text("console.log('rollback');\n", encoding="utf-8")
+            frontend = root / "frontend"
+            frontend.mkdir()
+            (frontend / "index.js").write_bytes(b"frontend-v1")
+            frontend_manifest = frontend / "manifest.json"
+            frontend_manifest.write_text(
+                json.dumps({"index.html": {"file": "index.js"}}),
+                encoding="utf-8",
+            )
+            identity_root = root / "identities"
+            identity_root.mkdir()
+            runtime_spec = root / "native-runtime-v1.json"
+
+            def role_argv(role: str) -> list[str]:
+                if role == "mcp":
+                    return [
+                        str(python_executable),
+                        "-B",
+                        "-m",
+                        "agent.mcp_server",
+                        "--supervisor",
+                    ]
+                return [
+                    str(python_executable),
+                    "-B",
+                    "-m",
+                    "backend.app.cli.candidate_runtime",
+                    "--role",
+                    role,
+                ]
+
+            def write_runtime_spec(overrides: dict[str, list[str]]) -> None:
+                runtime_spec.write_text(
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "deploymentKind": "native-windows",
+                            "pythonExecutablePath": str(python_executable),
+                            "requirementsLockPath": str(requirements),
+                            "applicationCwd": str(repository),
+                            "roles": {
+                                role: {
+                                    "argv": overrides.get(role, role_argv(role)),
+                                    "environment": {"RUNTIME_ENVIRONMENT": "live"},
+                                }
+                                for role in ("api", "worker", "scheduler", "mcp")
+                            },
+                            "frozenNodeRollback": {
+                                "executablePath": str(node_executable),
+                                "entrypointPath": str(node_entrypoint),
+                                "cwd": str(root),
+                                "argv": [str(node_executable), str(node_entrypoint)],
+                                "environment": {"API_BACKEND_MODE": "legacy"},
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            def freeze() -> object:
+                return freeze_build_identity(
+                    repository=repository,
+                    build_identity_directory=identity_root,
+                    python_artifacts=(requirements,),
+                    frontend_root=frontend,
+                    frontend_manifest=frontend_manifest,
+                    deployment_kind="native-windows",
+                    native_runtime_spec=runtime_spec,
+                )
+
+            drifted = {
+                "bytecode-writing api": {
+                    "api": [
+                        str(python_executable),
+                        "-m",
+                        "backend.app.cli.candidate_runtime",
+                        "--role",
+                        "api",
+                    ]
+                },
+                "stdio mcp": {
+                    "mcp": [str(python_executable), "-B", "-m", "agent.mcp_server"]
+                },
+                "cross-wired worker": {
+                    "worker": [
+                        str(python_executable),
+                        "-B",
+                        "-m",
+                        "backend.app.cli.candidate_runtime",
+                        "--role",
+                        "scheduler",
+                    ]
+                },
+                "arbitrary scheduler command": {
+                    "scheduler": [str(python_executable), "-B", "-c", "pass"]
+                },
+            }
+            for description, overrides in drifted.items():
+                with self.subTest(description):
+                    write_runtime_spec(overrides)
+                    with self.assertRaises(BuildIdentityError) as rejected:
+                        freeze()
+                    self.assertEqual(
+                        "BUILD_NATIVE_RUNTIME_INVALID",
+                        rejected.exception.code,
+                    )
+
+            write_runtime_spec({})
+            frozen = freeze()
+            self.assertEqual(
+                [role_argv(role) for role in ("api", "worker", "scheduler", "mcp")],
+                [
+                    entry["argv"]
+                    for entry in json.loads(frozen.canonical_bytes)["nativeRuntime"][
+                        "roles"
+                    ]
+                ],
+            )
+
     def test_source_tree_hash_covers_tracked_untracked_and_modified_bytes(self) -> None:
         from backend.app.api.compat.build_identity import compute_source_tree_hash
 

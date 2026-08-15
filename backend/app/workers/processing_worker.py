@@ -220,5 +220,5 @@ class ProcessingWorker:
 async def _wait_for_stop(stop_event: asyncio.Event, timeout_seconds: float) -> None:
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=timeout_seconds)
-    except TimeoutError:
+    except asyncio.TimeoutError:
         return

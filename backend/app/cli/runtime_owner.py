@@ -532,10 +532,12 @@ class RuntimeOwnerService:
         *,
         clock: Callable[[], datetime] | None = None,
         identity_service: DatabaseEvidenceIdentityService | None = None,
+        pid_probe: Callable[[int], bool] | None = None,
     ) -> None:
         self._inspector = inspector
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._identity_service = identity_service or DatabaseEvidenceIdentityService()
+        self._pid_probe = pid_probe or runtime_pid_is_alive
 
     def initialize_node_owner(
         self,
@@ -631,6 +633,109 @@ class RuntimeOwnerService:
             verification_mode="read_only",
         )
 
+    def reattest_stale_node_owner(
+        self,
+        *,
+        database_identity_manifest: str | os.PathLike[str],
+        p0_origin_receipt: str | os.PathLike[str],
+        expected_p0_origin_receipt_sha256: str,
+        origin_backup: str | os.PathLike[str],
+        origin_manifest: str | os.PathLike[str],
+        runtime_namespace: str,
+        expected_entrypoint_path: str | os.PathLike[str],
+        owner_marker: str | os.PathLike[str],
+    ) -> RuntimeOwnerReport:
+        if runtime_namespace != "production":
+            raise RuntimeOwnerError(
+                "RUNTIME_NAMESPACE_INVALID",
+                "Stale owner reattestation is restricted to production.",
+            )
+        marker_path = _absolute_existing_file(owner_marker, "owner marker")
+        old_payload = marker_path.read_bytes()
+        old_document = _strict_owner_document(old_payload)
+        old_pid = int(old_document["processId"])
+        if self._pid_probe(old_pid):
+            raise RuntimeOwnerError(
+                "OWNER_PROCESS_NOT_STALE",
+                "The recorded Node owner process is still active.",
+            )
+        entrypoint = _absolute_existing_file(expected_entrypoint_path, "entrypoint")
+        try:
+            identity = self._identity_service.verify_live_database_identity(
+                database_identity_manifest=database_identity_manifest,
+                p0_origin_receipt=p0_origin_receipt,
+                expected_p0_origin_receipt_sha256=expected_p0_origin_receipt_sha256,
+                origin_backup=origin_backup,
+                origin_manifest=origin_manifest,
+            )
+        except DatabaseIdentityError as error:
+            raise RuntimeOwnerError(error.code, str(error)) from error
+        expected_static = {
+            "runtimeNamespace": runtime_namespace,
+            "databaseLineageId": identity.database_lineage_id,
+            "subjectDatabaseId": identity.subject_database_id,
+            "databaseIdentityManifestPath": str(identity.manifest_path),
+            "databaseIdentityManifestFileSha256": identity.identity_manifest_file_sha256,
+            "originReceiptPath": str(identity.origin_receipt_path),
+            "originReceiptFileSha256": identity.origin_receipt_file_sha256,
+            "originReceiptSha256": identity.origin_receipt_sha256,
+            "entrypointPath": str(entrypoint),
+            "databasePaths": [str(identity.database_path)],
+        }
+        if any(old_document.get(key) != value for key, value in expected_static.items()):
+            raise RuntimeOwnerError(
+                "OWNER_MARKER_IDENTITY_MISMATCH",
+                "The stale owner marker does not bind the verified Live identity.",
+            )
+        first = self._inspector.snapshot()
+        process = _replacement_node_process(
+            first,
+            identity=identity,
+            entrypoint=entrypoint,
+            old_pid=old_pid,
+        )
+        if self._pid_probe(old_pid):
+            raise RuntimeOwnerError(
+                "OWNER_PROCESS_STALE_RACE",
+                "The stale owner PID became active during reattestation.",
+            )
+        second = self._inspector.snapshot()
+        if second != first:
+            raise RuntimeOwnerError(
+                "OWNER_REATTESTATION_RACE",
+                "Runtime ownership changed during stale owner reattestation.",
+            )
+        _replacement_node_process(
+            second,
+            identity=identity,
+            entrypoint=entrypoint,
+            old_pid=old_pid,
+        )
+        unsigned = _owner_document(
+            identity=identity,
+            process=process,
+            runtime_namespace=runtime_namespace,
+            entrypoint=entrypoint,
+            created_at=_timestamp(self._clock()),
+        )
+        payload = canonical_json_bytes(
+            {
+                **unsigned,
+                "ownerMarkerSha256": hashlib.sha256(
+                    canonical_json_bytes(unsigned)
+                ).hexdigest(),
+            }
+        )
+        from backend.app.application.final_window import _cas_replace
+
+        _cas_replace(marker_path, old_payload, payload)
+        return _report(
+            _strict_owner_document(payload),
+            marker_path=marker_path,
+            payload=payload,
+            verification_mode="stale_owner_reattested",
+        )
+
     def _verify_current_owner(
         self,
         *,
@@ -672,6 +777,33 @@ class RuntimeOwnerService:
         process = snapshot.node_processes[0]
         _verify_process(process, identity=identity, entrypoint=entrypoint)
         return identity, process, entrypoint
+
+
+def _replacement_node_process(
+    snapshot: RuntimeProcessSnapshot,
+    *,
+    identity: DatabaseEvidenceIdentityManifest,
+    entrypoint: Path,
+    old_pid: int,
+) -> ProcessEvidence:
+    if snapshot.live_python_roles:
+        raise RuntimeOwnerError(
+            "LIVE_PYTHON_ROLE_PRESENT",
+            "A Live Python role is present during stale Node reattestation.",
+        )
+    if len(snapshot.node_processes) != 1:
+        raise RuntimeOwnerError(
+            "NODE_OWNER_CARDINALITY_INVALID",
+            "Stale owner reattestation requires exactly one replacement Node process.",
+        )
+    process = snapshot.node_processes[0]
+    if process.pid == old_pid:
+        raise RuntimeOwnerError(
+            "OWNER_PROCESS_NOT_REPLACED",
+            "The replacement Node process must not reuse the stale owner PID.",
+        )
+    _verify_process(process, identity=identity, entrypoint=entrypoint)
+    return process
 
 
 def read_node_active_owner_marker(
@@ -1568,6 +1700,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_owner_arguments(initialize)
     verify_owner = commands.add_parser("verify-node-owner")
     add_owner_arguments(verify_owner)
+    reattest_owner = commands.add_parser("reattest-stale-node-owner")
+    add_owner_arguments(reattest_owner)
 
     rollback = commands.add_parser("candidate-rollback-smoke")
     rollback.add_argument("--database", required=True)
@@ -1667,7 +1801,11 @@ def run(
             rollback_profile=options.rollback_profile,
             evidence_output=options.evidence_output,
         )
-    if options.command in {"initialize-node-owner", "verify-node-owner"}:
+    if options.command in {
+        "initialize-node-owner",
+        "verify-node-owner",
+        "reattest-stale-node-owner",
+    }:
         try:
             identity = load_database_evidence_identity_manifest(
                 options.database_identity_manifest
@@ -1689,18 +1827,18 @@ def run(
             "expected_entrypoint_path": options.expected_entrypoint_path,
             "owner_marker": options.owner_marker,
         }
-        report = (
-            service.initialize_node_owner(**arguments)
-            if options.command == "initialize-node-owner"
-            else service.verify_node_owner(**arguments)
-        )
+        if options.command == "initialize-node-owner":
+            report = service.initialize_node_owner(**arguments)
+            operation = "initializeNodeOwner"
+        elif options.command == "verify-node-owner":
+            report = service.verify_node_owner(**arguments)
+            operation = "verifyNodeOwner"
+        else:
+            report = service.reattest_stale_node_owner(**arguments)
+            operation = "reattestStaleNodeOwner"
         return {
             "ok": True,
-            "operation": (
-                "initializeNodeOwner"
-                if options.command == "initialize-node-owner"
-                else "verifyNodeOwner"
-            ),
+            "operation": operation,
             "verificationMode": report.verification_mode,
             "ownerState": report.owner_state,
             "ownerMarkerPath": str(report.owner_marker_path),

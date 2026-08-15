@@ -868,16 +868,19 @@ P5 回滚只停用 projection runtime，不 downgrade schema，也不删除 Vaul
 4. PDF migration 只能使用 exact intent path 与最新 SHA 显式 resume 或 rollback，不从 settings 或目录扫描推导状态。
 5. 清理必须先生成 managed-only dry-run plan，再以同一 plan SHA 单独授权；Note、orphan 和 tombstone 永远不能获得清理授权。
 
-## 16. P6 Python production candidate 与 frozen Node rollback
+## 16. P6 Python production adapters 与 frozen Node rollback
 
-P6 的默认 Compose profile 只运行 Python `api`、`worker`、`scheduler` 和 `mcp`；Node 不属于
-默认 production runtime。`frozen-node` 只存在于 `rollback` profile，供应用级 runtime rollback
-使用。它不执行 schema downgrade，也不安装旧数据库快照。
+P6 production 支持两个等价 deployment adapter：Windows 默认使用 `native-windows`，直接运行
+Python `api`、`worker`、`scheduler` 和 `mcp`；`container` 使用 Docker Compose 运行相同四个
+角色。Docker 不是功能依赖。Node 不属于默认 production runtime，只作为 frozen rollback
+entrypoint 保留；runtime rollback 不执行 schema downgrade，也不安装旧数据库快照。
 
 每次候选构建和最终发布都必须在 content-addressed BuildIdentity 与 canonical startup snapshot
 中记录并复验以下运行时证据，不能把某一次发布值写死在本文件：
 
-- Python candidate 与 frozen Node 各自的 image digest；
+- container adapter 记录 Python candidate 与 frozen Node 的 image digest；
+- native-windows adapter 记录 Python/Node executable bytes、requirements lock、frontend artifact、
+  application cwd、四角色与 rollback exact argv，以及环境值 hash；原生模式不得伪造 image digest；
 - exact `gitRevision`、source tree/build artifact identity；
 - API、Worker、Scheduler、MCP 与 frozen Node 的 exact start command；
 - frozen Node artifact、旧 API 和 legacy schema/credential fallback 的 retention deadline 或正式
@@ -887,6 +890,20 @@ P6 的默认 Compose profile 只运行 Python `api`、`worker`、`scheduler` 和
 `data/compatibility/runtime/production-owner.json` 读取。README、runbook、Compose 和受
 `sourceTreeHash` 保护的其他静态文件都不得硬编码当前 active/inactive owner；promotion 与
 rollback 只更新 identity-bound runtime evidence。
+
+原生日常启动使用 `backend.app.cli.native_runtime start|status|stop`，并显式传入 exact native
+runtime spec、BuildIdentity manifest、state directory 与 owner marker。`start` 只接受
+`python_active` marker 引用的 exact HandoffReceipt，并在任何 role 副作用前复验 receipt、startup
+snapshot、build/database/origin identity 与 completed cutover lease。状态文件记录四角色 exact
+argv/cwd/PID 并自哈希；attach 时重新对照 frozen spec，不能用被重写的 state 文件终止其他进程。
+真实 stdout/stderr 位于 state directory 的逐角色日志。readiness 必须覆盖 `/health/live`、
+`/health/ready`、`/api/papers`、`/api/v2/jobs`、`/workspace/`、`/legacy/` 以及 MCP `tools/list`
+九工具 exact set，单纯 PID 存活不算 ready。
+
+若升级前 `node_active` marker 的 PID 已失效，只能调用 native operator 的
+`recover-stale-node-owner`：按 frozen spec 启动 exact Node，五路径 legacy smoke 成功后，使用
+Windows Inspector 双快照和旧 marker bytes CAS reattest；任一步失败都停止新 Node并保持旧 marker。
+不得手工删除、覆盖或重新生成 owner marker。
 
 进入 `rollback` profile 前，必须先停止新的 Python 流量和 claim，drain 在途工作，关闭连接并
 停止 Python API、Worker、Scheduler、MCP，确认这些 role 已 scale 到 0，随后才可按冻结启动快照

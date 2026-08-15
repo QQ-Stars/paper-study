@@ -59,12 +59,26 @@ async def run(
     api_presence = None
     container = None
     try:
-        option_role = _parser().parse_args(arguments).role
+        options = _parser().parse_args(arguments)
+        option_role = options.role
         role = parse_process_role(values)
         if option_role != role:
             raise RuntimeRoleError(
                 "PROCESS_ROLE_MISMATCH",
                 "The command role must equal API_PROCESS_ROLE.",
+            )
+        if options.study_app_role is not None and options.study_app_role != role:
+            raise RuntimeRoleError(
+                "PROCESS_MARKER_MISMATCH",
+                "The process marker role must equal API_PROCESS_ROLE.",
+            )
+        if (
+            options.study_app_environment is not None
+            and options.study_app_environment != values.get("RUNTIME_ENVIRONMENT")
+        ):
+            raise RuntimeRoleError(
+                "PROCESS_MARKER_MISMATCH",
+                "The process marker environment must equal RUNTIME_ENVIRONMENT.",
             )
         database = DatabaseSettings(values.get("DB_PATH"))
         runtime = ProcessRuntimeSettings.from_environment(database, values)
@@ -120,40 +134,54 @@ async def run(
                 )
         elif runtime_environment == "live":
             identity_path = _required_path(values, "DATABASE_IDENTITY_MANIFEST")
-            production_admission = ProductionRuntimeGuard().validate_pending_handoff(
-                authorization=_required_path(values, "P6_PROMOTION_AUTHORIZATION"),
-                expected_authorization_sha256=_required_sha256(
-                    values, "P6_PROMOTION_AUTHORIZATION_SHA256"
-                ),
-                final_evidence_run_manifest=_required_path(
-                    values, "P6_FINAL_EVIDENCE_RUN_MANIFEST"
-                ),
-                expected_final_evidence_run_manifest_sha256=_required_sha256(
-                    values, "P6_FINAL_EVIDENCE_RUN_MANIFEST_SHA256"
-                ),
-                cutover_lease=_required_path(values, "P6_CUTOVER_LEASE"),
-                startup_snapshot=_required_path(
-                    values, "P6_PRODUCTION_STARTUP_SNAPSHOT"
-                ),
-                expected_startup_snapshot_sha256=_required_sha256(
-                    values, "P6_PRODUCTION_STARTUP_SNAPSHOT_SHA256"
-                ),
-                build_identity_manifest=_required_path(
-                    values, "P6_BUILD_IDENTITY_MANIFEST"
-                ),
-                expected_build_identity_manifest_sha256=_required_sha256(
-                    values, "P6_BUILD_IDENTITY_MANIFEST_SHA256"
-                ),
-                database_identity_manifest=identity_path,
-                expected_database_identity_manifest_sha256=_required_sha256(
-                    values, "P6_DATABASE_IDENTITY_MANIFEST_SHA256"
-                ),
-                owner_marker=_required_path(values, "PRODUCTION_OWNER_MARKER"),
-                database=database,
-                environment=runtime_environment,
-                runtime_namespace=values.get("RUNTIME_NAMESPACE", ""),
-                role=role,
-            )
+            guard = ProductionRuntimeGuard()
+            if values.get("P6_HANDOFF_RECEIPT", "").strip():
+                production_admission = guard.validate_active_owner(
+                    handoff_receipt=_required_path(values, "P6_HANDOFF_RECEIPT"),
+                    expected_handoff_receipt_sha256=_required_sha256(
+                        values, "P6_HANDOFF_RECEIPT_SHA256"
+                    ),
+                    owner_marker=_required_path(values, "PRODUCTION_OWNER_MARKER"),
+                    database=database,
+                    environment=runtime_environment,
+                    runtime_namespace=values.get("RUNTIME_NAMESPACE", ""),
+                    role=role,
+                )
+            else:
+                production_admission = guard.validate_pending_handoff(
+                    authorization=_required_path(values, "P6_PROMOTION_AUTHORIZATION"),
+                    expected_authorization_sha256=_required_sha256(
+                        values, "P6_PROMOTION_AUTHORIZATION_SHA256"
+                    ),
+                    final_evidence_run_manifest=_required_path(
+                        values, "P6_FINAL_EVIDENCE_RUN_MANIFEST"
+                    ),
+                    expected_final_evidence_run_manifest_sha256=_required_sha256(
+                        values, "P6_FINAL_EVIDENCE_RUN_MANIFEST_SHA256"
+                    ),
+                    cutover_lease=_required_path(values, "P6_CUTOVER_LEASE"),
+                    startup_snapshot=_required_path(
+                        values, "P6_PRODUCTION_STARTUP_SNAPSHOT"
+                    ),
+                    expected_startup_snapshot_sha256=_required_sha256(
+                        values, "P6_PRODUCTION_STARTUP_SNAPSHOT_SHA256"
+                    ),
+                    build_identity_manifest=_required_path(
+                        values, "P6_BUILD_IDENTITY_MANIFEST"
+                    ),
+                    expected_build_identity_manifest_sha256=_required_sha256(
+                        values, "P6_BUILD_IDENTITY_MANIFEST_SHA256"
+                    ),
+                    database_identity_manifest=identity_path,
+                    expected_database_identity_manifest_sha256=_required_sha256(
+                        values, "P6_DATABASE_IDENTITY_MANIFEST_SHA256"
+                    ),
+                    owner_marker=_required_path(values, "PRODUCTION_OWNER_MARKER"),
+                    database=database,
+                    environment=runtime_environment,
+                    runtime_namespace=values.get("RUNTIME_NAMESPACE", ""),
+                    role=role,
+                )
             identity = load_database_evidence_identity_manifest(identity_path)
         else:
             raise RuntimeRoleError(
@@ -248,10 +276,23 @@ async def run(
     except (KeyboardInterrupt, asyncio.CancelledError):
         return 130
     except Exception as error:
+        traceback = error.__traceback__
+        while traceback is not None and traceback.tb_next is not None:
+            traceback = traceback.tb_next
+        exception_origin = (
+            None
+            if traceback is None
+            else (
+                f"{Path(traceback.tb_frame.f_code.co_filename).name}:"
+                f"{traceback.tb_lineno}:{traceback.tb_frame.f_code.co_name}"
+            )
+        )
         _write_error(
             target_stderr,
             str(getattr(error, "code", "CANDIDATE_STARTUP_FAILED")),
             str(error),
+            exception_type=type(error).__name__,
+            exception_origin=exception_origin,
         )
         return 2
     finally:
@@ -536,10 +577,22 @@ def _required_output_path(environment: Mapping[str, str], name: str) -> Path:
     return path
 
 
-def _write_error(stderr: TextIO, code: str, message: str) -> None:
+def _write_error(
+    stderr: TextIO,
+    code: str,
+    message: str,
+    *,
+    exception_type: str | None = None,
+    exception_origin: str | None = None,
+) -> None:
+    details = {}
+    if exception_type:
+        details["exceptionType"] = exception_type
+    if exception_origin:
+        details["exceptionOrigin"] = exception_origin
     stderr.write(
         json.dumps(
-            {"error": {"code": code, "message": message, "details": {}}},
+            {"error": {"code": code, "message": message, "details": details}},
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -550,6 +603,12 @@ def _write_error(stderr: TextIO, code: str, message: str) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="study-candidate-runtime")
     parser.add_argument("--role", required=True, choices=("api", "worker", "scheduler"))
+    parser.add_argument(
+        "--study-app-role",
+        choices=("api", "worker", "scheduler"),
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--study-app-environment", help=argparse.SUPPRESS)
     return parser
 
 

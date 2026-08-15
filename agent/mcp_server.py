@@ -19,6 +19,8 @@ import contextlib
 from contextvars import ContextVar
 from datetime import date, datetime
 from pathlib import Path
+import signal
+import threading
 
 # 让 `python -m agent.mcp_server` 与直接运行都能找到包
 if __package__ in (None, ""):
@@ -551,6 +553,8 @@ def _prewarm():
     """启动阶段(单线程、事件循环未起)先把含 C 扩展/较重的模块导入好。
     否则首次 semantic_search/related_papers 会在 asyncio 事件循环线程上懒加载 numpy 的
     C 扩展，在 Windows 上与运行中的事件循环死锁而整个服务挂起(已用 faulthandler 定位)。"""
+    if os.environ.get("PAPER_STUDY_MCP_PROBE") == "1":
+        return
     import numpy  # noqa: F401  embed 已模块级导入 numpy，这里再确保一次
     try:
         import httpx  # noqa: F401  外部嵌入 API(_api_embed)用
@@ -563,7 +567,125 @@ def _prewarm():
             pass
 
 
-def main():
+def _validate_live_application_runtime() -> None:
+    if MCP_MODE != "application" or os.environ.get("RUNTIME_ENVIRONMENT") != "live":
+        return
+    from backend.app.bootstrap import verify_schema_revision
+    from backend.app.config import DatabaseSettings
+    from backend.app.runtime import ProductionRuntimeGuard
+
+    values = dict(os.environ)
+    database = DatabaseSettings(values.get("DB_PATH"))
+    identity_path = _required_runtime_file(values, "DATABASE_IDENTITY_MANIFEST")
+    guard = ProductionRuntimeGuard()
+    common = {
+        "owner_marker": _required_runtime_file(values, "PRODUCTION_OWNER_MARKER"),
+        "database": database,
+        "environment": "live",
+        "runtime_namespace": values.get("RUNTIME_NAMESPACE", ""),
+        "role": "mcp",
+    }
+    if values.get("P6_HANDOFF_RECEIPT", "").strip():
+        guard.validate_active_owner(
+            handoff_receipt=_required_runtime_file(values, "P6_HANDOFF_RECEIPT"),
+            expected_handoff_receipt_sha256=_required_runtime_sha256(
+                values,
+                "P6_HANDOFF_RECEIPT_SHA256",
+            ),
+            **common,
+        )
+    else:
+        guard.validate_pending_handoff(
+            authorization=_required_runtime_file(values, "P6_PROMOTION_AUTHORIZATION"),
+            expected_authorization_sha256=_required_runtime_sha256(
+                values,
+                "P6_PROMOTION_AUTHORIZATION_SHA256",
+            ),
+            final_evidence_run_manifest=_required_runtime_file(
+                values,
+                "P6_FINAL_EVIDENCE_RUN_MANIFEST",
+            ),
+            expected_final_evidence_run_manifest_sha256=_required_runtime_sha256(
+                values,
+                "P6_FINAL_EVIDENCE_RUN_MANIFEST_SHA256",
+            ),
+            cutover_lease=_required_runtime_file(values, "P6_CUTOVER_LEASE"),
+            startup_snapshot=_required_runtime_file(
+                values,
+                "P6_PRODUCTION_STARTUP_SNAPSHOT",
+            ),
+            expected_startup_snapshot_sha256=_required_runtime_sha256(
+                values,
+                "P6_PRODUCTION_STARTUP_SNAPSHOT_SHA256",
+            ),
+            build_identity_manifest=_required_runtime_file(
+                values,
+                "P6_BUILD_IDENTITY_MANIFEST",
+            ),
+            expected_build_identity_manifest_sha256=_required_runtime_sha256(
+                values,
+                "P6_BUILD_IDENTITY_MANIFEST_SHA256",
+            ),
+            database_identity_manifest=identity_path,
+            expected_database_identity_manifest_sha256=_required_runtime_sha256(
+                values,
+                "P6_DATABASE_IDENTITY_MANIFEST_SHA256",
+            ),
+            **common,
+        )
+    verify_schema_revision(database, "20260807_03")
+
+
+def _run_supervisor() -> None:
+    stopped = threading.Event()
+    previous = {}
+
+    def stop(_signum, _frame) -> None:
+        stopped.set()
+
+    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        signum = getattr(signal, name, None)
+        if signum is None:
+            continue
+        previous[signum] = signal.getsignal(signum)
+        signal.signal(signum, stop)
+    try:
+        while not stopped.wait(0.5):
+            pass
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def _required_runtime_file(values, name):
+    value = values.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} is required")
+    path = Path(value).expanduser().resolve(strict=True)
+    if not path.is_file():
+        raise ValueError(f"{name} must name a file")
+    return path
+
+
+def _required_runtime_sha256(values, name):
+    value = values.get(name)
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be lowercase SHA-256")
+    return value
+
+
+def main(arguments=None):
+    values = list(sys.argv[1:] if arguments is None else arguments)
+    if values not in ([], ["--supervisor"]):
+        raise ValueError("agent.mcp_server accepts only --supervisor")
+    _validate_live_application_runtime()
+    if values == ["--supervisor"]:
+        _run_supervisor()
+        return
     _prewarm()
     mcp.run()      # 默认 stdio
 

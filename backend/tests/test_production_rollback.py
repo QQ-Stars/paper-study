@@ -7,6 +7,7 @@ import hashlib
 from io import StringIO
 import json
 from pathlib import Path
+import tempfile
 
 from backend.tests.support.p4_identity import p4_identity_fixture
 
@@ -42,6 +43,42 @@ def _rollback_map(
 
 
 class ProductionRollbackTests(unittest.TestCase):
+    def test_native_rollback_map_binds_executable_without_image_digest(self) -> None:
+        from backend.app.application.production_rollback import (
+            ProductionRollbackError,
+            validate_frozen_node_rollback_map,
+        )
+
+        with tempfile.TemporaryDirectory(prefix="study-app-native-rollback-map-") as raw:
+            root = Path(raw).resolve()
+            node = root / "node.exe"
+            node.write_bytes(b"node-runtime-v1")
+            entrypoint = root / "server.js"
+            entrypoint.write_text("console.log('rollback');\n", encoding="utf-8")
+            database = root / "app.db"
+            database.write_bytes(b"sqlite-fixture")
+            native = {
+                "deploymentKind": "native-windows",
+                "executablePath": str(node),
+                "executableSha256": hashlib.sha256(node.read_bytes()).hexdigest(),
+                "entrypointPath": str(entrypoint),
+                "entrypointSha256": hashlib.sha256(entrypoint.read_bytes()).hexdigest(),
+                "cwd": str(root),
+                "host": "127.0.0.1",
+                "ports": {"api": 5173},
+                "databasePath": str(database),
+                "environment": _rollback_map(root=root, database=database)["environment"],
+            }
+
+            validated = validate_frozen_node_rollback_map(native)
+            self.assertEqual("native-windows", validated["deploymentKind"])
+            self.assertNotIn("imageDigest", validated)
+
+            node.write_bytes(b"node-runtime-v2")
+            with self.assertRaises(ProductionRollbackError) as drift:
+                validate_frozen_node_rollback_map(native)
+            self.assertEqual("ROLLBACK_MAP_INVALID", drift.exception.code)
+
     def test_runtime_rollback_keeps_nonactive_owner_until_legacy_smoke(self) -> None:
         from backend.app.application.production_rollback import (
             ROLLBACK_TAIL_EVENTS,

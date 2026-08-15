@@ -17,7 +17,7 @@ from backend.app.api.compat.database_identity import (
 )
 
 
-_MANIFEST_FIELDS = (
+_CONTAINER_MANIFEST_FIELDS = (
     "schemaVersion",
     "manifestKind",
     "buildId",
@@ -32,6 +32,22 @@ _MANIFEST_FIELDS = (
     "imageDigests",
     "generatedAt",
 )
+_NATIVE_MANIFEST_FIELDS = (
+    "schemaVersion",
+    "manifestKind",
+    "buildId",
+    "deploymentKind",
+    "gitRevision",
+    "dirty",
+    "sourceTreeHash",
+    "sourceEntries",
+    "buildArtifactHash",
+    "pythonArtifacts",
+    "frontendArtifacts",
+    "nativeRuntime",
+    "generatedAt",
+)
+_NATIVE_ROLES = ("api", "worker", "scheduler", "mcp")
 
 
 class BuildIdentityError(RuntimeError):
@@ -49,6 +65,7 @@ class BuildIdentityManifest:
     dirty: bool
     source_tree_hash: str
     build_artifact_hash: str
+    deployment_kind: str
     canonical_bytes: bytes
 
 
@@ -62,8 +79,10 @@ def compute_build_artifact_hash(
     python_artifacts: Sequence[str | os.PathLike[str]],
     frontend_root: str | os.PathLike[str],
     frontend_manifest: str | os.PathLike[str],
-    resolved_compose: str | os.PathLike[str],
-    image_digests: Mapping[str, str],
+    resolved_compose: str | os.PathLike[str] | None = None,
+    image_digests: Mapping[str, str] | None = None,
+    deployment_kind: str = "container",
+    native_runtime_spec: str | os.PathLike[str] | None = None,
 ) -> str:
     document = _build_artifact_document(
         python_artifacts=python_artifacts,
@@ -71,6 +90,8 @@ def compute_build_artifact_hash(
         frontend_manifest=frontend_manifest,
         resolved_compose=resolved_compose,
         image_digests=image_digests,
+        deployment_kind=deployment_kind,
+        native_runtime_spec=native_runtime_spec,
     )
     return hashlib.sha256(canonical_json_bytes(document)).hexdigest()
 
@@ -82,8 +103,10 @@ def freeze_build_identity(
     python_artifacts: Sequence[str | os.PathLike[str]],
     frontend_root: str | os.PathLike[str],
     frontend_manifest: str | os.PathLike[str],
-    resolved_compose: str | os.PathLike[str],
-    image_digests: Mapping[str, str],
+    resolved_compose: str | os.PathLike[str] | None = None,
+    image_digests: Mapping[str, str] | None = None,
+    deployment_kind: str = "container",
+    native_runtime_spec: str | os.PathLike[str] | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> BuildIdentityManifest:
     root = Path(repository).resolve(strict=True)
@@ -96,25 +119,22 @@ def freeze_build_identity(
         frontend_manifest=frontend_manifest,
         resolved_compose=resolved_compose,
         image_digests=image_digests,
+        deployment_kind=deployment_kind,
+        native_runtime_spec=native_runtime_spec,
     )
     build_artifact_hash = hashlib.sha256(
         canonical_json_bytes(artifact_document)
     ).hexdigest()
     git_revision = _git_revision(root)
     dirty = _git_dirty(root)
-    unsigned = {
-        "schemaVersion": 1,
-        "manifestKind": "build",
-        "gitRevision": git_revision,
-        "dirty": dirty,
-        "sourceTreeHash": source_tree_hash,
-        "sourceEntries": source_entries,
-        "buildArtifactHash": build_artifact_hash,
-        "pythonArtifacts": artifact_document["pythonArtifacts"],
-        "frontendArtifacts": artifact_document["frontendArtifacts"],
-        "resolvedComposeSha256": artifact_document["resolvedComposeSha256"],
-        "imageDigests": artifact_document["imageDigests"],
-    }
+    unsigned = _unsigned_build_document(
+        git_revision=git_revision,
+        dirty=dirty,
+        source_tree_hash=source_tree_hash,
+        source_entries=source_entries,
+        build_artifact_hash=build_artifact_hash,
+        artifact_document=artifact_document,
+    )
     build_id = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
     instant = (clock or (lambda: datetime.now(timezone.utc)))()
     if instant.tzinfo is None or instant.utcoffset() is None:
@@ -123,18 +143,13 @@ def freeze_build_identity(
             "The build identity timestamp must be timezone-aware.",
         )
     document = {
-        "schemaVersion": 1,
+        **{key: value for key, value in unsigned.items() if key != "manifestKind"},
+    }
+    document = {
+        "schemaVersion": document.pop("schemaVersion"),
         "manifestKind": "build",
         "buildId": build_id,
-        "gitRevision": git_revision,
-        "dirty": dirty,
-        "sourceTreeHash": source_tree_hash,
-        "sourceEntries": source_entries,
-        "buildArtifactHash": build_artifact_hash,
-        "pythonArtifacts": artifact_document["pythonArtifacts"],
-        "frontendArtifacts": artifact_document["frontendArtifacts"],
-        "resolvedComposeSha256": artifact_document["resolvedComposeSha256"],
-        "imageDigests": artifact_document["imageDigests"],
+        **document,
         "generatedAt": instant.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     payload = canonical_json_bytes(document)
@@ -188,6 +203,7 @@ def load_build_identity_manifest(
         build_artifact_hash=_required_hex(
             document["buildArtifactHash"], widths=(64,)
         ),
+        deployment_kind=str(document.get("deploymentKind", "container")),
         canonical_bytes=payload,
     )
 
@@ -199,8 +215,10 @@ def verify_build_identity(
     python_artifacts: Sequence[str | os.PathLike[str]],
     frontend_root: str | os.PathLike[str],
     frontend_manifest: str | os.PathLike[str],
-    resolved_compose: str | os.PathLike[str],
-    image_digests: Mapping[str, str],
+    resolved_compose: str | os.PathLike[str] | None = None,
+    image_digests: Mapping[str, str] | None = None,
+    deployment_kind: str = "container",
+    native_runtime_spec: str | os.PathLike[str] | None = None,
 ) -> BuildIdentityManifest:
     frozen = load_build_identity_manifest(build_identity_manifest)
     root = Path(repository).resolve(strict=True)
@@ -214,20 +232,17 @@ def verify_build_identity(
         frontend_manifest=frontend_manifest,
         resolved_compose=resolved_compose,
         image_digests=image_digests,
+        deployment_kind=deployment_kind,
+        native_runtime_spec=native_runtime_spec,
     )
-    current = {
-        "schemaVersion": 1,
-        "manifestKind": "build",
-        "gitRevision": _git_revision(root),
-        "dirty": _git_dirty(root),
-        "sourceTreeHash": source_tree_hash,
-        "sourceEntries": source_entries,
-        "buildArtifactHash": hashlib.sha256(canonical_json_bytes(artifacts)).hexdigest(),
-        "pythonArtifacts": artifacts["pythonArtifacts"],
-        "frontendArtifacts": artifacts["frontendArtifacts"],
-        "resolvedComposeSha256": artifacts["resolvedComposeSha256"],
-        "imageDigests": artifacts["imageDigests"],
-    }
+    current = _unsigned_build_document(
+        git_revision=_git_revision(root),
+        dirty=_git_dirty(root),
+        source_tree_hash=source_tree_hash,
+        source_entries=source_entries,
+        build_artifact_hash=hashlib.sha256(canonical_json_bytes(artifacts)).hexdigest(),
+        artifact_document=artifacts,
+    )
     if current != _identity_document(frozen.canonical_bytes):
         raise BuildIdentityError(
             "BUILD_IDENTITY_DRIFT",
@@ -236,11 +251,35 @@ def verify_build_identity(
     return frozen
 
 
+def verify_native_runtime_spec(
+    *,
+    build_identity_manifest: str | os.PathLike[str],
+    native_runtime_spec: str | os.PathLike[str],
+) -> BuildIdentityManifest:
+    frozen = load_build_identity_manifest(build_identity_manifest)
+    if frozen.deployment_kind != "native-windows":
+        raise BuildIdentityError(
+            "BUILD_DEPLOYMENT_KIND_MISMATCH",
+            "A native runtime requires a native-windows build identity.",
+        )
+    document = _strict_manifest_document(frozen.canonical_bytes)
+    if document["nativeRuntime"] != _native_runtime_document(native_runtime_spec):
+        raise BuildIdentityError(
+            "BUILD_IDENTITY_DRIFT",
+            "The native runtime specification drifted from the frozen identity.",
+        )
+    return frozen
+
+
 def _identity_document(payload: bytes) -> dict[str, object]:
     document = _strict_manifest_document(payload)
-    return {
+    common = {
         "schemaVersion": document["schemaVersion"],
         "manifestKind": document["manifestKind"],
+    }
+    if document["schemaVersion"] == 2:
+        common["deploymentKind"] = document["deploymentKind"]
+    common.update({
         "gitRevision": document["gitRevision"],
         "dirty": document["dirty"],
         "sourceTreeHash": document["sourceTreeHash"],
@@ -248,9 +287,47 @@ def _identity_document(payload: bytes) -> dict[str, object]:
         "buildArtifactHash": document["buildArtifactHash"],
         "pythonArtifacts": document["pythonArtifacts"],
         "frontendArtifacts": document["frontendArtifacts"],
-        "resolvedComposeSha256": document["resolvedComposeSha256"],
-        "imageDigests": document["imageDigests"],
+    })
+    if document["schemaVersion"] == 1:
+        common["resolvedComposeSha256"] = document["resolvedComposeSha256"]
+        common["imageDigests"] = document["imageDigests"]
+    else:
+        common["nativeRuntime"] = document["nativeRuntime"]
+    return common
+
+
+def _unsigned_build_document(
+    *,
+    git_revision: str,
+    dirty: bool,
+    source_tree_hash: str,
+    source_entries: list[dict[str, str]],
+    build_artifact_hash: str,
+    artifact_document: Mapping[str, object],
+) -> dict[str, object]:
+    common = {
+        "schemaVersion": artifact_document["schemaVersion"],
+        "manifestKind": "build",
     }
+    if artifact_document["schemaVersion"] == 2:
+        common["deploymentKind"] = artifact_document["deploymentKind"]
+    common.update(
+        {
+            "gitRevision": git_revision,
+            "dirty": dirty,
+            "sourceTreeHash": source_tree_hash,
+            "sourceEntries": source_entries,
+            "buildArtifactHash": build_artifact_hash,
+            "pythonArtifacts": artifact_document["pythonArtifacts"],
+            "frontendArtifacts": artifact_document["frontendArtifacts"],
+        }
+    )
+    if artifact_document["schemaVersion"] == 1:
+        common["resolvedComposeSha256"] = artifact_document["resolvedComposeSha256"]
+        common["imageDigests"] = artifact_document["imageDigests"]
+    else:
+        common["nativeRuntime"] = artifact_document["nativeRuntime"]
+    return common
 
 
 def _strict_manifest_document(payload: bytes) -> dict[str, object]:
@@ -274,10 +351,17 @@ def _strict_manifest_document(payload: bytes) -> dict[str, object]:
     if (
         duplicates
         or not isinstance(document, dict)
-        or tuple(document) != _MANIFEST_FIELDS
+        or tuple(document)
+        != (
+            _CONTAINER_MANIFEST_FIELDS
+            if document.get("schemaVersion") == 1
+            else _NATIVE_MANIFEST_FIELDS
+        )
         or canonical_json_bytes(document) != payload
-        or document["schemaVersion"] != 1
+        or document["schemaVersion"] not in {1, 2}
         or document["manifestKind"] != "build"
+        or document.get("deploymentKind", "container")
+        != ("container" if document["schemaVersion"] == 1 else "native-windows")
     ):
         raise BuildIdentityError(
             "BUILD_IDENTITY_INVALID",
@@ -337,8 +421,10 @@ def _build_artifact_document(
     python_artifacts: Sequence[str | os.PathLike[str]],
     frontend_root: str | os.PathLike[str],
     frontend_manifest: str | os.PathLike[str],
-    resolved_compose: str | os.PathLike[str],
-    image_digests: Mapping[str, str],
+    resolved_compose: str | os.PathLike[str] | None,
+    image_digests: Mapping[str, str] | None,
+    deployment_kind: str,
+    native_runtime_spec: str | os.PathLike[str] | None,
 ) -> dict[str, object]:
     python_entries = [
         {"name": path.name, "sha256": _file_sha256(path)}
@@ -384,6 +470,35 @@ def _build_artifact_document(
         {"path": manifest_relative, "sha256": _file_sha256(manifest_path)},
     )
 
+    if deployment_kind == "native-windows":
+        if resolved_compose is not None or image_digests is not None:
+            raise BuildIdentityError(
+                "BUILD_DEPLOYMENT_INPUT_INVALID",
+                "Native build identity cannot contain Compose or image inputs.",
+            )
+        if native_runtime_spec is None:
+            raise BuildIdentityError(
+                "BUILD_NATIVE_RUNTIME_INVALID",
+                "Native build identity requires an exact runtime specification.",
+            )
+        return {
+            "schemaVersion": 2,
+            "deploymentKind": "native-windows",
+            "pythonArtifacts": python_entries,
+            "frontendArtifacts": frontend_entries,
+            "nativeRuntime": _native_runtime_document(native_runtime_spec),
+        }
+    if deployment_kind != "container" or native_runtime_spec is not None:
+        raise BuildIdentityError(
+            "BUILD_DEPLOYMENT_INPUT_INVALID",
+            "Build deployment kind or adapter inputs are invalid.",
+        )
+    if resolved_compose is None or image_digests is None:
+        raise BuildIdentityError(
+            "BUILD_CONTAINER_RUNTIME_INVALID",
+            "Container build identity requires Compose and image digests.",
+        )
+
     digest_entries: list[dict[str, str]] = []
     for name, digest in sorted(image_digests.items()):
         if (
@@ -412,6 +527,220 @@ def _build_artifact_document(
         "resolvedComposeSha256": _file_sha256(compose_path),
         "imageDigests": digest_entries,
     }
+
+
+def _native_runtime_document(
+    native_runtime_spec: str | os.PathLike[str],
+) -> dict[str, object]:
+    spec_path = Path(native_runtime_spec).resolve(strict=True)
+    try:
+        document = json.loads(spec_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            "The native runtime specification is not valid JSON.",
+        ) from error
+    expected = {
+        "schemaVersion",
+        "deploymentKind",
+        "pythonExecutablePath",
+        "requirementsLockPath",
+        "applicationCwd",
+        "roles",
+        "frozenNodeRollback",
+    }
+    if (
+        not isinstance(document, dict)
+        or set(document) != expected
+        or document.get("schemaVersion") != 1
+        or document.get("deploymentKind") != "native-windows"
+    ):
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            "The native runtime specification schema is invalid.",
+        )
+    python_path = _runtime_file(document["pythonExecutablePath"], "Python executable")
+    requirements_path = _runtime_file(document["requirementsLockPath"], "requirements lock")
+    application_cwd = _runtime_directory(document["applicationCwd"], "application cwd")
+    roles = document["roles"]
+    if not isinstance(roles, dict) or tuple(roles) != _NATIVE_ROLES:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            "Native runtime roles must be ordered api, worker, scheduler, mcp.",
+        )
+    role_entries = [
+        _native_role_document(role, roles[role], python_path=python_path)
+        for role in _NATIVE_ROLES
+    ]
+    rollback = document["frozenNodeRollback"]
+    if not isinstance(rollback, dict) or set(rollback) != {
+        "executablePath",
+        "entrypointPath",
+        "cwd",
+        "argv",
+        "environment",
+    }:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            "The frozen Node rollback specification is invalid.",
+        )
+    node_path = _runtime_file(rollback["executablePath"], "Node executable")
+    entrypoint_path = _runtime_file(rollback["entrypointPath"], "Node entrypoint")
+    cwd = _runtime_directory(rollback["cwd"], "Node cwd")
+    node_argv = _runtime_argv(rollback["argv"])
+    if (
+        Path(node_argv[0]).expanduser().resolve(strict=False) != node_path
+        or len(node_argv) < 2
+        or Path(node_argv[1]).expanduser().resolve(strict=False) != entrypoint_path
+    ):
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            "Frozen Node argv must name the exact executable and entrypoint.",
+        )
+    return {
+        "specPath": str(spec_path),
+        "pythonExecutable": {
+            "path": str(python_path),
+            "sha256": _file_sha256(python_path),
+        },
+        "requirementsLock": {
+            "path": str(requirements_path),
+            "sha256": _file_sha256(requirements_path),
+        },
+        "applicationCwd": str(application_cwd),
+        "roles": role_entries,
+        "frozenNodeRollback": {
+            "executablePath": str(node_path),
+            "executableSha256": _file_sha256(node_path),
+            "entrypointPath": str(entrypoint_path),
+            "entrypointSha256": _file_sha256(entrypoint_path),
+            "cwd": str(cwd),
+            "argv": list(node_argv),
+            "environment": _hashed_environment(rollback["environment"]),
+        },
+    }
+
+
+def native_role_argv(python_executable: Path, role: str) -> tuple[str, ...]:
+    """Return the only command a native role may ever be frozen or started with."""
+    if role == "mcp":
+        return (str(python_executable), "-B", "-m", "agent.mcp_server", "--supervisor")
+    return (
+        str(python_executable),
+        "-B",
+        "-m",
+        "backend.app.cli.candidate_runtime",
+        "--role",
+        role,
+    )
+
+
+def _native_role_document(
+    role: str,
+    value: object,
+    *,
+    python_path: Path,
+) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != {"argv", "environment"}:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {role} role specification is invalid.",
+        )
+    argv = _runtime_argv(value["argv"])
+    if Path(argv[0]).expanduser().resolve(strict=False) != python_path:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {role} argv does not use the frozen Python executable.",
+        )
+    if argv[1:] != native_role_argv(python_path, role)[1:]:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {role} argv does not match the frozen role contract.",
+        )
+    return {
+        "role": role,
+        "argv": list(argv),
+        "environment": _hashed_environment(value["environment"]),
+    }
+
+
+def _runtime_argv(value: object) -> tuple[str, ...]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item for item in value)
+    ):
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            "A native runtime argv is invalid.",
+        )
+    return tuple(value)
+
+
+def _hashed_environment(value: object) -> list[dict[str, str]]:
+    if (
+        not isinstance(value, dict)
+        or not value
+        or any(
+            not isinstance(name, str)
+            or not name
+            or not isinstance(item, str)
+            for name, item in value.items()
+        )
+    ):
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            "A native runtime environment map is invalid.",
+        )
+    return [
+        {
+            "name": name,
+            "valueSha256": hashlib.sha256(item.encode("utf-8")).hexdigest(),
+        }
+        for name, item in sorted(value.items())
+    ]
+
+
+def _runtime_file(value: object, description: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {description} path is invalid.",
+        )
+    try:
+        path = Path(value).expanduser().resolve(strict=True)
+    except OSError as error:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {description} path does not exist.",
+        ) from error
+    if not path.is_file():
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {description} path is not a file.",
+        )
+    return path
+
+
+def _runtime_directory(value: object, description: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {description} path is invalid.",
+        )
+    try:
+        path = Path(value).expanduser().resolve(strict=True)
+    except OSError as error:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {description} path does not exist.",
+        ) from error
+    if not path.is_dir():
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {description} path is not a directory.",
+        )
+    return path
 
 
 def _frontend_references(document: object) -> set[str]:
@@ -575,5 +904,7 @@ __all__ = [
     "compute_source_tree_hash",
     "freeze_build_identity",
     "load_build_identity_manifest",
+    "native_role_argv",
     "verify_build_identity",
+    "verify_native_runtime_spec",
 ]

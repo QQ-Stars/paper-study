@@ -2396,6 +2396,59 @@ process.on('SIGINT', stop);
                 service.verify_node_owner(**arguments)
             self.assertEqual(tampered, marker.read_bytes())
 
+    def test_stale_node_owner_reattestation_requires_dead_old_pid_and_exact_replacement(self) -> None:
+        with p4_identity_fixture() as fixture:
+            identity_type, owner_type, process_type, snapshot_type = _api()
+            identity_path = _identity(fixture, identity_type)
+            old_process = _process(fixture, process_type, pid=41001)
+            inspector = _Inspector(_snapshot(snapshot_type, (old_process,)))
+            marker = fixture.root / "production-owner.json"
+            arguments = _owner_arguments(fixture, identity_path, marker)
+            owner_type(inspector).initialize_node_owner(**arguments)
+            old_payload = marker.read_bytes()
+
+            replacement = replace(old_process, pid=41002)
+            inspector.snapshot_value = _snapshot(snapshot_type, (replacement,))
+            service = owner_type(
+                inspector,
+                pid_probe=lambda pid: pid == replacement.pid,
+            )
+            report = service.reattest_stale_node_owner(**arguments)
+
+            self.assertEqual(replacement.pid, report.process_id)
+            self.assertEqual("stale_owner_reattested", report.verification_mode)
+            self.assertNotEqual(old_payload, marker.read_bytes())
+            self.assertEqual(
+                replacement.pid,
+                json.loads(marker.read_text(encoding="utf-8"))["processId"],
+            )
+
+            before_alive_rejection = marker.read_bytes()
+            with self.assertRaises(Exception):
+                owner_type(
+                    inspector,
+                    pid_probe=lambda _pid: True,
+                ).reattest_stale_node_owner(**arguments)
+            self.assertEqual(before_alive_rejection, marker.read_bytes())
+
+            competing = replace(replacement, pid=41003)
+            samples = [
+                _snapshot(snapshot_type, (replacement,)),
+                _snapshot(snapshot_type, (competing,)),
+            ]
+
+            class RacingInspector:
+                def snapshot(self):
+                    return samples.pop(0)
+
+            before_race = marker.read_bytes()
+            with self.assertRaises(Exception):
+                owner_type(
+                    RacingInspector(),
+                    pid_probe=lambda pid: pid != replacement.pid,
+                ).reattest_stale_node_owner(**arguments)
+            self.assertEqual(before_race, marker.read_bytes())
+
     def test_owner_rejects_same_basename_from_different_directory(self) -> None:
         with p4_identity_fixture() as fixture:
             identity_type, owner_type, process_type, snapshot_type = _api()

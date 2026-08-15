@@ -43,14 +43,14 @@
 
 ## 一、环境准备
 
-> **不熟悉命令行环境的用户**：可直接采用 [Docker 部署](#五使用-docker-部署可选)，仅需安装 Docker Desktop，一条命令即可启动。以下为「手动安装」方式，步骤更透明、便于排查。
+> Windows 默认采用原生 Python production runtime，功能不依赖 Docker。Docker Compose 是等价的可选部署适配器，适合希望隔离依赖的用户。
 
 运行本工具前，需先安装以下 3 个免费软件。安装时保持默认选项即可，注意下方标 ★ 的事项。
 
 | 软件 | 用途 | 下载地址 | 验证方式 |
 |---|---|---|---|
-| **Node.js**（20.19+ 或 22.13+） | 运行网页服务器与 React 构建工具 | <https://nodejs.org> | 终端执行 `node -v`，显示受支持版本（如 v22.13） |
-| **Python 3.10 或更高** | 运行 AI 采集 / 讲解 / 翻译 | <https://www.python.org/downloads/> | 终端执行 `python --version`，显示版本号 |
+| **Node.js**（20.19+ 或 22.13+） | 构建 React，并保留 frozen Node 回滚能力 | <https://nodejs.org> | 终端执行 `node -v`，显示受支持版本（如 v22.13） |
+| **Python 3.10 或更高** | 运行 FastAPI、Worker、Scheduler、MCP 与 AI 流水线 | <https://www.python.org/downloads/> | 终端执行 `python --version`，显示版本号 |
 | **Git**（可选） | 获取本项目源码 | <https://git-scm.com> | 终端执行 `git --version`，显示版本号 |
 
 > ★ **Windows 安装 Python 时，请务必勾选安装页底部的「Add Python to PATH」**，否则后续 `python` 命令将无法识别。
@@ -114,23 +114,39 @@ python3 -m venv .venv
 
 > 此步骤会联网下载若干 Python 包，可能耗时数分钟；**末尾若无 ERROR 即为成功**（warning 可忽略）。
 
-### 4) 构建并启动
+### 4) 构建 React
 
-生产服务器从 `frontend/dist/` 提供 React 资源，因此首次启动或修改 React 代码后必须先构建。Windows PowerShell 执行：
+FastAPI 从 `frontend/dist/` 提供 React 资源，因此首次启动或修改 React 代码后先执行：
 
 ```powershell
 npm.cmd run frontend:build
-npm.cmd start
 ```
 
-macOS / Linux 执行：
+macOS / Linux 将 `npm.cmd` 换成 `npm`。
 
-```bash
-npm run frontend:build
-npm start
+### 5) 启动原生 Windows production runtime
+
+P6 首次接管会生成 content-addressed BuildIdentity、native runtime spec、`python_active` owner marker 和 exact HandoffReceipt。日常启动必须使用该次接管返回的精确路径；不得用 `latest`、glob、目录扫描或重新计算 SHA 替代。Windows PowerShell：
+
+```powershell
+$nativeSpec = (Resolve-Path -LiteralPath $env:STUDY_APP_NATIVE_RUNTIME_SPEC).Path
+$buildIdentity = (Resolve-Path -LiteralPath $env:P6_BUILD_IDENTITY_MANIFEST).Path
+$runtimeState = [System.IO.Path]::GetFullPath($env:STUDY_APP_NATIVE_RUNTIME_STATE_DIR)
+$ownerMarker = (Resolve-Path -LiteralPath 'data/compatibility/runtime/production-owner.json').Path
+
+.\.venv\Scripts\python.exe -B -m backend.app.cli.native_runtime start --native-runtime-spec $nativeSpec --build-identity-manifest $buildIdentity --state-directory $runtimeState --owner-marker $ownerMarker
 ```
 
-终端显示 **`论文学习 App 已启动`** 后，在浏览器中打开 <http://localhost:5173>。默认入口行为如下：
+成功 JSON 中 `state` 为 `running` 后，在浏览器中打开 <http://localhost:5173>。四个角色在后台运行，日志位于 `<state-directory>/logs/api.log|worker.log|scheduler.log|mcp.log`。查询和停止使用相同的三个 frozen identity 参数：
+
+```powershell
+.\.venv\Scripts\python.exe -B -m backend.app.cli.native_runtime status --native-runtime-spec $nativeSpec --build-identity-manifest $buildIdentity --state-directory $runtimeState
+.\.venv\Scripts\python.exe -B -m backend.app.cli.native_runtime stop --native-runtime-spec $nativeSpec --build-identity-manifest $buildIdentity --state-directory $runtimeState
+```
+
+`start` 会在启动子进程前复验 owner marker 引用的 exact HandoffReceipt、startup snapshot、BuildIdentity、DatabaseIdentity、OriginReceipt 与 completed cutover lease；六个 HTTP 端点和 MCP `tools/list` 九工具未全部通过时会自动排空刚启动的角色。若 marker 仍是 `node_active`，说明尚未完成一次性 P6 接管，不能绕过 admission 直接连接 Live 数据库。
+
+默认入口行为如下：
 
 | 地址 | 行为 |
 |---|---|
@@ -138,20 +154,7 @@ npm start
 | <http://localhost:5173/workspace/> | 始终进入 React 工作区，并继续到研究概览 |
 | <http://localhost:5173/legacy/> | 始终进入旧版前端 |
 
-`UI_ENTRY` 只控制根地址 `/`，不会禁用或改写两个显式入口。它只接受 `react` 或 `legacy`；未设置时默认为 `react`。例如在 Windows PowerShell 中回退根入口：
-
-```powershell
-$env:UI_ENTRY = 'legacy'
-npm.cmd start
-```
-
-macOS / Linux：
-
-```bash
-UI_ENTRY=legacy npm start
-```
-
-服务只在进程启动时读取 `UI_ENTRY`。切换值后必须先按 `Ctrl+C` 停止服务，再重新启动；运行中修改环境变量不会生效。即使根入口设为 `legacy`，`/workspace/` 仍可直接访问；恢复默认时以 `UI_ENTRY=react` 重启，或在新终端中不设置该变量后重启。
+`UI_ENTRY` 只控制根地址 `/`，不会禁用两个显式入口。production 值冻结在 native runtime spec 中；修改后必须产生新的 BuildIdentity 并重新执行受控接管，不能在日常启动时临时覆盖。旧版入口始终可通过 `/legacy/` 访问。
 
 ---
 
@@ -192,7 +195,9 @@ UI_ENTRY=legacy npm start
 
 ## 五、使用 Docker 部署（可选）
 
-适用于**不希望手动安装 Node/Python** 的用户。仅需先安装 **Docker Desktop**（<https://www.docker.com/products/docker-desktop>）并启动，然后在项目目录中执行：
+Docker 只是另一种完整运行方式，不是功能前置条件。它使用与原生模式相同的 FastAPI/Worker/Scheduler/MCP、数据库 revision 和 owner/receipt 门禁；容器模式额外以 image digest 绑定 BuildIdentity，原生模式则绑定 Python/Node executable、requirements、前端产物、argv/cwd 与环境值 hash。
+
+完成对应发布的 P6 identity 配置后，安装并启动 **Docker Desktop**（<https://www.docker.com/products/docker-desktop>），再在项目目录中执行：
 
 ```bash
 docker compose up -d --build      # 首次会构建镜像，耗时数分钟 → http://localhost:5173
@@ -300,8 +305,7 @@ DB_PATH = '<项目路径>\data\app.db'
 
 ## 八、常见问题
 
-- **端口 5173 被占用 / 无法打开**：更换端口启动 ——
-  Windows PowerShell：`$env:PORT=5174; node server.js`；macOS/Linux：`PORT=5174 node server.js`，随后访问 <http://localhost:5174>。
+- **端口 5173 被占用 / 无法打开**：先执行 native `status`/`stop` 排除残留角色。端口属于 frozen native runtime spec；更换端口必须重新 `configure`、冻结 BuildIdentity 并完成受控接管，不能只改当前 shell 环境。
 - **采集 / 讲解报错或无响应**：通常是**未配置 API Key 或 Key 有误**，请在 ⚙ 设置中点击「测试连接」排查。
 - **提示 `python` 命令不存在**：安装 Python 时未勾选「Add Python to PATH」。请重装并勾选，或改用 `py`（Windows）/ `python3`（macOS/Linux）。
 - **`npm install` 时 better-sqlite3 编译失败**：缺少编译工具链。建议改用 [Docker 部署](#五使用-docker-部署可选)；或在 Windows 安装「Visual Studio Build Tools（含 C++）」后重试。
@@ -317,7 +321,7 @@ DB_PATH = '<项目路径>\data\app.db'
 
 - 当前交付分支是 `codex/react-clean-room-workspace`。`frontend/` 是独立的 React 19 + TypeScript + Vite 应用，构建基址固定为 `/workspace/`；`public/` 是旧版实现，只通过 `/legacy/`（或根入口回退）提供。
 - React 源码、样式和构建产物不导入旧版 `public/index.html`、`public/app.js`、`public/style.css` 或旧版 vendor 资源。两套界面只共享现有 Node/SQLite/Python API 与本地数据契约。
-- `UI_ENTRY=react|legacy` 仅决定 `/` 的启动时行为。显式 `/workspace/` 与 `/legacy/` 始终有效，切换后必须重启 Node 进程。
+- `UI_ENTRY=react|legacy` 仅决定 `/` 的启动时行为。显式 `/workspace/` 与 `/legacy/` 始终有效；production 值属于冻结 runtime identity。
 - 旧版前端不会随本次切换删除。只有在 React 工作区完成**两次正式发布**或累计**14 个有记录的活跃使用日**之后，才重新审查是否删除；达到门槛不代表自动删除，仍需一次新的兼容性、数据安全与回滚评审。
 
 从项目根目录执行完整开发门禁（Windows PowerShell）：
@@ -344,8 +348,8 @@ macOS / Linux 将上述命令中的 `npm.cmd` 换成 `npm`。E2E 会先执行 li
 
 ```
 paper-study/            # 克隆后的项目根目录
-├─ server.js            # Node Web/API：静态资源 + PDF 流 + 各 REST/NDJSON 接口
-├─ db.js                # SQLite 访问层（better-sqlite3，同步）
+├─ server.js            # frozen Node Web/API rollback entrypoint
+├─ db.js                # frozen Node SQLite rollback 访问层
 ├─ db/schema.sql        # 表结构（papers / progress / notes / favorites / translations …）
 ├─ data/                # 运行期数据（全部 gitignore，不入库）
 │  ├─ app.db            #   SQLite 数据库（WAL）
@@ -368,12 +372,13 @@ paper-study/            # 克隆后的项目根目录
 │  ├─ src/              #   app、feature 与深模块实现
 │  └─ e2e/              #   确定性 mock API 的浏览器工作流与 clean-room 断言
 ├─ public/              # 旧版原生 JS/CSS/HTML，仅由 /legacy/ 回退入口提供
+├─ backend/             # FastAPI、Worker、Scheduler、P1-P6 application runtime
 ├─ Dockerfile / docker-compose.yml   # 单机自用容器化
 └─ docs/                # 设计文档（ARCHITECTURE / AGENT / DATABASE / ROADMAP）
 ```
 
-- **三方共享同一 `data/app.db`**：Node（better-sqlite3）与 Python（sqlite3）均读写，统一开启 WAL。
-- **流式接口采用 NDJSON**：检索 / 入库 / 讲解 / 翻译 / 语义检索 / 本地导入等均将进度逐行推送至前端。
+- **Python production 独占运行所有权**：FastAPI、Worker、Scheduler 与 MCP 使用同一 `data/app.db`；frozen Node 仅在受控 runtime rollback 后重新取得 owner。
+- **旧 NDJSON 契约由 FastAPI compatibility gateway 保留**：React 与 legacy UI 不需要因后端接管而改变既有调用方式。
 
 ### Python Agent 命令
 
