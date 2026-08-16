@@ -38,7 +38,7 @@ class PdfStaticApiTests(unittest.TestCase):
                     def __init__(self) -> None:
                         self.streams: list[io.BytesIO] = []
 
-                    def open_for_id(self, paper_id: str) -> object | None:
+                    def open_for_id(self, paper_id: str, stored_path: object = None) -> object | None:
                         if paper_id != "paper-1":
                             return None
                         stream = io.BytesIO(payload)

@@ -23,10 +23,10 @@ from backend.tests.support.p3_database import p3_database_fixture
 
 
 class _NoPdfFiles:
-    def open_for_id(self, _paper_id: str) -> None:
+    def open_for_id(self, _paper_id: str, stored_path: object = None) -> None:
         return None
 
-    def resolve_for_id(self, _paper_id: str) -> None:
+    def resolve_for_id(self, _paper_id: str, stored_path: object = None) -> None:
         return None
 
     def has_pdf(self, _paper: object) -> bool:

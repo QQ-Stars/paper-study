@@ -233,9 +233,18 @@ def create_legacy_router() -> APIRouter:
             return _safe_json_error(error)
         return _json_response(result)
 
+    async def _stored_pdf_path(request: Request, identifier: str) -> str | None:
+        try:
+            row = await _services(request).library_queries.get_paper(identifier)
+        except Exception:
+            row = None
+        return row.get("pdf_path") if isinstance(row, dict) else None
+
     async def _serve_pdf_bytes(request: Request) -> Response:
         identifier = str(request.query_params.get("id") or "")
-        opened = _pdf_files(request).open_for_id(identifier)
+        opened = _pdf_files(request).open_for_id(
+            identifier, stored_path=await _stored_pdf_path(request, identifier)
+        )
         if opened is None:
             return Response("not found", status_code=404, media_type="text/plain")
         return _opened_pdf_response(
@@ -265,7 +274,9 @@ def create_legacy_router() -> APIRouter:
         identifier = paper_path
         if identifier.lower().endswith(".pdf"):
             identifier = identifier[:-4]
-        opened = _pdf_files(request).open_for_id(identifier)
+        opened = _pdf_files(request).open_for_id(
+            identifier, stored_path=await _stored_pdf_path(request, identifier)
+        )
         if opened is None:
             return Response("PDF not found", status_code=404, media_type="text/plain")
         return _opened_pdf_response(request, opened, media_type="application/pdf")
