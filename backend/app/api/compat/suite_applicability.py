@@ -49,6 +49,7 @@ NATIVE_WINDOWS_NODE_CONTAINER_ONLY_TEST_NAMES = (
 _DISCOVERY_START_DIRECTORY = "backend/tests"
 _DISCOVERY_PATTERN = "test_*.py"
 _NODE_DISCOVERY_PATTERN = "test/**/*.js"
+NATIVE_WINDOWS_SYMLINK_UNAVAILABLE_WIN_ERRORS = frozenset({1, 1314})
 _REPORT_FIELDS = (
     "schemaVersion",
     "manifestKind",
@@ -595,7 +596,15 @@ def _validated_capabilities(
             not isinstance(item.kind, str)
             or not isinstance(item.available, bool)
             or (item.available and item.win_error is not None)
-            or (not item.available and item.win_error != 1314)
+            or (
+                not item.available
+                and (
+                    not isinstance(item.win_error, int)
+                    or isinstance(item.win_error, bool)
+                    or item.win_error
+                    not in NATIVE_WINDOWS_SYMLINK_UNAVAILABLE_WIN_ERRORS
+                )
+            )
         ):
             raise _invalid_report()
     return capabilities

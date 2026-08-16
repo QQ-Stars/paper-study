@@ -19,6 +19,7 @@ from backend.app.api.compat.database_identity import (
     exclusive_write_bytes,
 )
 from backend.app.api.compat.suite_applicability import (
+    NATIVE_WINDOWS_SYMLINK_UNAVAILABLE_WIN_ERRORS,
     SuiteApplicabilityError,
     SymlinkCapability,
     create_suite_applicability_report,
@@ -183,12 +184,12 @@ def _probe_symlink(root: Path, kind: str) -> SymlinkCapability:
             os.symlink(target, link, target_is_directory=(kind == "directory"))
         except OSError as error:
             win_error = getattr(error, "winerror", None)
-            if win_error != 1314:
+            if win_error not in NATIVE_WINDOWS_SYMLINK_UNAVAILABLE_WIN_ERRORS:
                 raise SuiteApplicabilityError(
                     "SUITE_APPLICABILITY_SYMLINK_PROBE_FAILED",
                     f"The {kind} symlink capability probe failed unexpectedly.",
                 ) from error
-            return SymlinkCapability(kind=kind, available=False, win_error=1314)
+            return SymlinkCapability(kind=kind, available=False, win_error=win_error)
         link.unlink()
         return SymlinkCapability(kind=kind, available=True, win_error=None)
     finally:

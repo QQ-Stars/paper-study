@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 
 class _NamedTest:
@@ -16,6 +17,26 @@ class _NamedTest:
         return self._test_id
 
 class NativeWindowsSuiteApplicabilityTests(unittest.TestCase):
+    def test_probe_classifies_invalid_function_as_unavailable(self) -> None:
+        from backend.app.cli import native_windows_suite
+
+        error = OSError("The filesystem does not support symlinks")
+        error.winerror = 1
+        with tempfile.TemporaryDirectory(prefix="study-app-symlink-probe-") as raw:
+            with mock.patch.object(
+                native_windows_suite.os,
+                "symlink",
+                side_effect=error,
+            ):
+                capability = native_windows_suite._probe_symlink(
+                    Path(raw),
+                    "directory",
+                )
+
+        self.assertEqual("directory", capability.kind)
+        self.assertFalse(capability.available)
+        self.assertEqual(1, capability.win_error)
+
     def test_selection_excludes_only_container_and_unavailable_symlink_cases(self) -> None:
         from backend.app.api.compat.suite_applicability import (
             NATIVE_WINDOWS_CONTAINER_ONLY_TEST_IDS,
@@ -107,8 +128,8 @@ class NativeWindowsSuiteApplicabilityTests(unittest.TestCase):
         selection = select_native_windows_tests(
             tests,
             symlink_capabilities=(
-                SymlinkCapability(kind="directory", available=False, win_error=1314),
-                SymlinkCapability(kind="file", available=False, win_error=1314),
+                SymlinkCapability(kind="directory", available=False, win_error=1),
+                SymlinkCapability(kind="file", available=False, win_error=1),
             ),
         )
 
