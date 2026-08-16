@@ -1,6 +1,7 @@
 body {
   background: var(--color-bg);
   color: var(--color-text);
+  color-scheme: dark;
   font-family: var(--font-sans);
   font-size: var(--font-size-4);
   line-height: 1.5;
@@ -66,6 +67,35 @@ button {
 button:hover {
   border-color: var(--color-line-strong);
   background: var(--color-surface-strong);
+}
+
+/* 表单控件基础外观：深色主题下不能落回浏览器默认白底（选项/输入不可见）。
+   :where() 零特异性，各功能样式仍可自由覆盖。 */
+:where(input:not([type='checkbox']):not([type='radio']):not([type='range'])),
+:where(select),
+:where(textarea) {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+:where(select option) {
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+}
+
+:where(input)::placeholder,
+:where(textarea)::placeholder {
+  color: var(--color-text-weak);
+  opacity: 1;
+}
+
+:where(input:disabled),
+:where(select:disabled),
+:where(textarea:disabled) {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 input[type="checkbox"],
