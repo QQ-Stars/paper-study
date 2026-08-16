@@ -1275,7 +1275,12 @@ def _required_sha256(value: object) -> str:
 
 def _reject_secret_argv(argv: Sequence[str]) -> None:
     forbidden = ("api-key", "secret", "credential", "token-value", "password")
-    if any(any(fragment in value.casefold() for fragment in forbidden) for value in argv):
+    option_names = (
+        value.partition("=")[0].casefold()
+        for value in argv
+        if value.startswith("-")
+    )
+    if any(any(fragment in option for fragment in forbidden) for option in option_names):
         raise EvidenceCaptureError(
             "EVIDENCE_ARGV_SECRET_REJECTED",
             "The evidence child argv contains a secret-bearing flag.",

@@ -63,6 +63,35 @@ def _build_identity(root: Path):
 
 
 class EvidenceCaptureTests(unittest.TestCase):
+    def test_secret_argv_guard_allows_credential_names_outside_option_flags(
+        self,
+    ) -> None:
+        from backend.app.api.compat.evidence_capture import (
+            EvidenceCaptureError,
+            _reject_secret_argv,
+        )
+
+        _reject_secret_argv(
+            (
+                sys.executable,
+                "-B",
+                "-m",
+                "unittest",
+                "backend.tests.test_credentials",
+            )
+        )
+
+        for secret_flag in (
+            "--api-key",
+            "--password=fixture-value",
+            "--credential-file",
+            "--token-value",
+        ):
+            with self.subTest(secret_flag=secret_flag):
+                with self.assertRaises(EvidenceCaptureError) as caught:
+                    _reject_secret_argv((sys.executable, secret_flag))
+                self.assertEqual("EVIDENCE_ARGV_SECRET_REJECTED", caught.exception.code)
+
     def test_create_evidence_run_rejects_hostile_root_swap(self) -> None:
         from backend.app.api.compat.database_identity import DatabaseEvidenceIdentityService
         from backend.app.api.compat.evidence_capture import (
