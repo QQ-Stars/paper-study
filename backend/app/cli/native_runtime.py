@@ -31,6 +31,7 @@ def recover_stale_node_owner(
     rollback_map: object,
     reattest: Callable[[], object],
 ) -> dict[str, object]:
+    reclaimed = operations.reclaim_stale_frozen_node_state(rollback_map)
     handle = operations.start_frozen_node(rollback_map)
     try:
         smoke = operations.smoke_legacy(handle)
@@ -38,7 +39,12 @@ def recover_stale_node_owner(
     except BaseException:
         operations.stop_frozen_node(handle)
         raise
-    return {"handle": handle, "smoke": smoke, "report": report}
+    return {
+        "handle": handle,
+        "smoke": smoke,
+        "report": report,
+        "staleStateReclaimed": reclaimed,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -208,6 +214,7 @@ def run(
             "ok": True,
             "operation": "recover-stale-node-owner",
             "deploymentKind": "native-windows",
+            "staleStateReclaimed": recovery["staleStateReclaimed"],
             "ownerState": report.owner_state,
             "processId": report.process_id,
             "ownerMarkerPath": str(report.owner_marker_path),

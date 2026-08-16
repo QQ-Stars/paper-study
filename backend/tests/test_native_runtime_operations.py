@@ -174,6 +174,10 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
                 self.events: list[str] = []
                 self.handle = SimpleNamespace(pid=44001)
 
+            def reclaim_stale_frozen_node_state(self, _rollback_map: object) -> bool:
+                self.events.append("reclaim")
+                return True
+
             def start_frozen_node(self, _rollback_map: object) -> object:
                 self.events.append("start")
                 return self.handle
@@ -199,7 +203,8 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
             reattest=lambda: successful.events.append("reattest") or report,
         )
         self.assertIs(report, result["report"])
-        self.assertEqual(["start", "smoke", "reattest"], successful.events)
+        self.assertTrue(result["staleStateReclaimed"])
+        self.assertEqual(["reclaim", "start", "smoke", "reattest"], successful.events)
 
         failed = _Operations()
 
@@ -213,7 +218,114 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
                 rollback_map={"deploymentKind": "native-windows"},
                 reattest=fail_reattest,
             )
-        self.assertEqual(["start", "smoke", "reattest", "stop"], failed.events)
+        self.assertEqual(
+            ["reclaim", "start", "smoke", "reattest", "stop"],
+            failed.events,
+        )
+
+    def test_stale_owner_recovery_reclaims_only_a_nonlive_exact_node_state(self) -> None:
+        from backend.app.api.compat.database_identity import canonical_json_bytes
+        from backend.app.providers import native_runtime
+        from backend.app.providers.native_runtime import NativeRuntimeError
+
+        with tempfile.TemporaryDirectory(prefix="study-app-stale-node-state-") as raw:
+            root = Path(raw)
+            node = root / "node.exe"
+            server = root / "server.js"
+            database = root / "app.db"
+            state = root / "node-runtime-state-v1.json"
+            node.write_bytes(b"node")
+            server.write_text("// server\n", encoding="utf-8")
+            database.write_bytes(b"sqlite")
+            environment = {
+                "RUNTIME_ENVIRONMENT": "live",
+                "RUNTIME_NAMESPACE": "production",
+                "API_BACKEND_MODE": "legacy",
+                "DOCUMENT_PIPELINE_MODE": "legacy",
+                "GENERATION_PIPELINE_MODE": "legacy",
+                "ARTIFACT_READ_MODE": "legacy",
+                "ARTIFACT_WRITE_MODE": "legacy",
+                "OCR_ENABLED": "0",
+                "OBSIDIAN_ENABLED": "0",
+                "PAPER_STUDY_MCP_MODE": "legacy",
+                "UI_ENTRY": "react",
+            }
+            configured = SimpleNamespace(
+                executable_path=node.resolve(),
+                entrypoint_path=server.resolve(),
+                cwd=root.resolve(),
+                argv=(str(node.resolve()), str(server.resolve())),
+                environment=environment,
+            )
+            rollback_map = {
+                "deploymentKind": "native-windows",
+                "executablePath": str(node.resolve()),
+                "executableSha256": hashlib.sha256(node.read_bytes()).hexdigest(),
+                "entrypointPath": str(server.resolve()),
+                "entrypointSha256": hashlib.sha256(server.read_bytes()).hexdigest(),
+                "cwd": str(root.resolve()),
+                "host": "127.0.0.1",
+                "ports": {"api": 5173},
+                "databasePath": str(database.resolve()),
+                "environment": environment,
+            }
+            unsigned = {
+                "schemaVersion": 1,
+                "stateKind": "native-frozen-node-runtime",
+                "deploymentKind": "native-windows",
+                "buildId": "a" * 64,
+                "pid": 41001,
+                "argv": list(configured.argv),
+                "cwd": str(configured.cwd),
+                "rollbackMapSha256": hashlib.sha256(
+                    canonical_json_bytes(rollback_map)
+                ).hexdigest(),
+            }
+            payload = canonical_json_bytes(
+                {
+                    **unsigned,
+                    "stateSha256": hashlib.sha256(
+                        canonical_json_bytes(unsigned)
+                    ).hexdigest(),
+                }
+            )
+            state.write_bytes(payload)
+            operations = object.__new__(native_runtime.NativeWindowsRuntimeOperations)
+            operations._configuration = SimpleNamespace(rollback=configured)
+            operations._build_identity = SimpleNamespace(build_id="b" * 64)
+            operations._node_state_path = state
+            operations._active_frozen_node = None
+            operations._node_state_payload = None
+            operations._active_rollback_map = None
+
+            class _LiveChild:
+                def __init__(self, pid: int) -> None:
+                    self.pid = pid
+
+                def poll(self) -> None:
+                    return None
+
+                def process_metadata(self):
+                    return configured.executable_path, configured.cwd, configured.argv
+
+                def close(self) -> None:
+                    return None
+
+            with patch.object(native_runtime, "_AttachedChild", _LiveChild):
+                with self.assertRaises(NativeRuntimeError) as active:
+                    operations.reclaim_stale_frozen_node_state(rollback_map)
+            self.assertEqual("NATIVE_ROLLBACK_ALREADY_ACTIVE", active.exception.code)
+            self.assertEqual(payload, state.read_bytes())
+
+            class _DeadChild:
+                def __init__(self, _pid: int) -> None:
+                    raise OSError("process no longer exists")
+
+            with patch.object(native_runtime, "_AttachedChild", _DeadChild):
+                self.assertTrue(
+                    operations.reclaim_stale_frozen_node_state(rollback_map)
+                )
+            self.assertFalse(state.exists())
 
     def test_native_quiesce_rejects_foreign_database_holder_before_stopping_node(self) -> None:
         from backend.app.providers import native_runtime

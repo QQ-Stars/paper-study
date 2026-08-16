@@ -867,6 +867,108 @@ class NativeWindowsRuntimeOperations:
         self._active_rollback_map = validated
         return process
 
+    def reclaim_stale_frozen_node_state(
+        self,
+        rollback_map: Mapping[str, object],
+    ) -> bool:
+        validated = validate_frozen_node_rollback_map(dict(rollback_map))
+        self._verify_native_rollback_map(validated)
+        if self._active_frozen_node is not None:
+            raise NativeRuntimeError(
+                "NATIVE_ROLLBACK_ALREADY_ACTIVE",
+                "The frozen Node runtime is attached in this process.",
+            )
+        try:
+            payload = self._node_state_path.read_bytes()
+        except FileNotFoundError:
+            return False
+        document = _validate_runtime_state(
+            payload,
+            expected_kind="native-frozen-node-runtime",
+        )
+        expected_fields = {
+            "schemaVersion",
+            "stateKind",
+            "deploymentKind",
+            "buildId",
+            "pid",
+            "argv",
+            "cwd",
+            "rollbackMapSha256",
+            "stateSha256",
+        }
+        expected_map_sha = hashlib.sha256(canonical_json_bytes(validated)).hexdigest()
+        pid = document.get("pid")
+        argv = document.get("argv")
+        if (
+            set(document) != expected_fields
+            or not _is_sha256(document.get("buildId"))
+            or not isinstance(pid, int)
+            or isinstance(pid, bool)
+            or pid <= 0
+            or not isinstance(argv, list)
+            or any(not isinstance(item, str) for item in argv)
+            or tuple(argv) != self._configuration.rollback.argv
+            or document.get("cwd") != str(self._configuration.rollback.cwd)
+            or document.get("rollbackMapSha256") != expected_map_sha
+        ):
+            raise NativeRuntimeError(
+                "NATIVE_ROLLBACK_STATE_MISMATCH",
+                "The stale frozen Node state does not match the frozen runtime.",
+            )
+
+        child: _AttachedChild | None = None
+        try:
+            child = _AttachedChild(pid)
+            if child.poll() is None:
+                if os.name != "nt":
+                    raise NativeRuntimeError(
+                        "NATIVE_ROLLBACK_ALREADY_ACTIVE",
+                        "The frozen Node durable state still names a live process.",
+                    )
+                try:
+                    executable, cwd, actual_argv = child.process_metadata()
+                except (OSError, RuntimeError, ValueError) as error:
+                    raise NativeRuntimeError(
+                        "NATIVE_ROLLBACK_STATE_MISMATCH",
+                        "A live frozen Node state process could not be identified.",
+                    ) from error
+                if (
+                    executable == self._configuration.rollback.executable_path
+                    and cwd == self._configuration.rollback.cwd
+                    and actual_argv == self._configuration.rollback.argv
+                ):
+                    raise NativeRuntimeError(
+                        "NATIVE_ROLLBACK_ALREADY_ACTIVE",
+                        "The frozen Node durable state still names the exact live process.",
+                    )
+        except OSError as error:
+            from backend.app.providers.runtime_lease import runtime_pid_is_alive
+
+            if runtime_pid_is_alive(pid):
+                raise NativeRuntimeError(
+                    "NATIVE_ROLLBACK_STATE_MISMATCH",
+                    "The frozen Node state names a live process that cannot be inspected.",
+                ) from error
+        finally:
+            if child is not None:
+                child.close()
+
+        try:
+            current = self._node_state_path.read_bytes()
+        except FileNotFoundError as error:
+            raise NativeRuntimeError(
+                "NATIVE_ROLLBACK_STATE_MISMATCH",
+                "The frozen Node state disappeared before stale recovery.",
+            ) from error
+        if current != payload:
+            raise NativeRuntimeError(
+                "NATIVE_ROLLBACK_STATE_MISMATCH",
+                "The frozen Node state changed before stale recovery.",
+            )
+        self._node_state_path.unlink()
+        return True
+
     def frozen_node_rollback_map_from_owner(
         self,
         owner_marker: str | os.PathLike[str],
