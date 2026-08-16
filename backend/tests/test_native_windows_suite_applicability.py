@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
@@ -232,6 +233,138 @@ class NativeWindowsSuiteApplicabilityTests(unittest.TestCase):
             with self.assertRaises(CompatibilityGateError) as mismatch:
                 _verify_native_windows_applicability(record, run_root=root, build=build)
             self.assertEqual("COMPATIBILITY_APPLICABILITY_INVALID", mismatch.exception.code)
+
+    def test_node_selection_excludes_only_the_frozen_container_contract_file(self) -> None:
+        from backend.app.api.compat.suite_applicability import (
+            NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE,
+            NATIVE_WINDOWS_NODE_CONTAINER_ONLY_TEST_NAMES,
+            SuiteApplicabilityError,
+            select_native_windows_node_files,
+        )
+
+        repository = Path(__file__).resolve().parents[2]
+        selection = select_native_windows_node_files(repository)
+
+        self.assertIn(NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE, selection.discovered_files)
+        self.assertIn(
+            "test/support/legacy-server-process.js",
+            selection.selected_files,
+        )
+        self.assertNotIn(NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE, selection.selected_files)
+        self.assertEqual(
+            NATIVE_WINDOWS_NODE_CONTAINER_ONLY_TEST_NAMES,
+            selection.excluded_test_names,
+        )
+        self.assertEqual(
+            {NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE},
+            set(selection.discovered_files) - set(selection.selected_files),
+        )
+
+        with tempfile.TemporaryDirectory(prefix="study-app-node-policy-") as raw:
+            root = Path(raw)
+            source = repository / NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE
+            target = root / NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE
+            target.parent.mkdir(parents=True)
+            shutil.copyfile(source, target)
+            (target.parent / "kept.test.js").write_text(
+                "const test=require('node:test');test('kept',()=>{});\n",
+                encoding="utf-8",
+            )
+            select_native_windows_node_files(root)
+            target.write_bytes(target.read_bytes() + b"\n")
+            with self.assertRaises(SuiteApplicabilityError) as stale:
+                select_native_windows_node_files(root)
+            self.assertEqual("SUITE_APPLICABILITY_POLICY_STALE", stale.exception.code)
+
+    def test_node_result_and_applicability_are_bound_to_the_node_suite(self) -> None:
+        from backend.app.api.compat.build_identity import BuildIdentityManifest
+        from backend.app.api.compat.gates import (
+            CompatibilityGateError,
+            _verify_native_windows_applicability,
+        )
+        from backend.app.api.compat.suite_applicability import (
+            create_node_suite_applicability_report,
+            load_node_suite_applicability_report,
+            select_native_windows_node_files,
+        )
+
+        repository = Path(__file__).resolve().parents[2]
+        selection = select_native_windows_node_files(repository)
+        with tempfile.TemporaryDirectory(prefix="study-app-native-node-gate-") as raw:
+            root = Path(raw)
+            build_path = root / f"frozen-build-identity-{'a' * 64}.json"
+            build_path.write_bytes(b"{}")
+            build = BuildIdentityManifest(
+                build_id="a" * 64,
+                manifest_path=build_path.resolve(),
+                manifest_file_sha256="b" * 64,
+                git_revision="c" * 40,
+                dirty=False,
+                source_tree_hash="d" * 64,
+                build_artifact_hash="e" * 64,
+                deployment_kind="native-windows",
+                canonical_bytes=b"{}",
+            )
+            report_path = root / "node-applicability.json"
+            report = create_node_suite_applicability_report(
+                selection=selection,
+                build_identity=build,
+                selected_tests=293,
+                output=report_path,
+            )
+            loaded = load_node_suite_applicability_report(report_path)
+            self.assertEqual("node-suite", loaded.suite_key)
+            self.assertEqual(293, loaded.selected_tests)
+            self.assertEqual(298, loaded.discovered_tests)
+
+            record = {
+                "totals": 293,
+                "buildIdentityManifestPath": str(build.manifest_path),
+                "buildIdentityManifestSha256": build.manifest_file_sha256,
+                "buildId": build.build_id,
+                "artifacts": [
+                    {
+                        "name": "applicability",
+                        "path": str(report.manifest_path),
+                        "sha256": report.manifest_file_sha256,
+                    }
+                ],
+            }
+            _verify_native_windows_applicability(
+                record,
+                key="node-suite",
+                run_root=root,
+                build=build,
+            )
+            with self.assertRaises(CompatibilityGateError) as wrong_suite:
+                _verify_native_windows_applicability(
+                    record,
+                    key="backend-suite",
+                    run_root=root,
+                    build=build,
+                )
+            self.assertEqual(
+                "COMPATIBILITY_APPLICABILITY_INVALID",
+                wrong_suite.exception.code,
+            )
+
+    def test_node_junit_conversion_counts_failures_and_skips_once(self) -> None:
+        from backend.app.cli.native_windows_node_suite import _read_node_junit_result
+
+        payload = b"""<?xml version=\"1.0\" encoding=\"utf-8\"?>
+<testsuites>
+  <testcase name=\"passing\" classname=\"test\"/>
+  <testcase name=\"failing\" classname=\"test\" failure=\"boom\"><failure/></testcase>
+  <testcase name=\"skipped\" classname=\"test\"><skipped/></testcase>
+</testsuites>
+"""
+        with tempfile.TemporaryDirectory(prefix="study-app-node-junit-") as raw:
+            result = Path(raw) / "result.xml"
+            result.write_bytes(payload)
+            self.assertEqual(
+                {"tests": 3, "pass": 1, "fail": 1, "skipped": 1},
+                _read_node_junit_result(result),
+            )
 
 
 if __name__ == "__main__":

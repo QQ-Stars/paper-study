@@ -26,6 +26,7 @@ from backend.app.infrastructure.database_backup import (
 )
 from backend.app.api.compat.suite_applicability import (
     SuiteApplicabilityError,
+    load_node_suite_applicability_report,
     load_suite_applicability_report,
 )
 
@@ -318,14 +319,18 @@ def _validate_records(
             )
         if document.get("resultKind") == "machine-summary":
             _verify_isolation_binding(document, key=key, run_root=root)
-        if key == "backend-suite" and build.deployment_kind == "native-windows":
+        if (
+            key in {"backend-suite", "node-suite"}
+            and build.deployment_kind == "native-windows"
+        ):
             if document.get("resultKind") != "machine-summary":
                 raise CompatibilityGateError(
                     "COMPATIBILITY_APPLICABILITY_INVALID",
-                    "Native-Windows backend evidence must be a machine summary.",
+                    "Native-Windows suite evidence must be a machine summary.",
                 )
             _verify_native_windows_applicability(
                 document,
+                key=key,
                 run_root=root,
                 build=build,
             )
@@ -445,9 +450,15 @@ def _verify_artifact_pairs(
 def _verify_native_windows_applicability(
     document: dict[str, object],
     *,
+    key: str = "backend-suite",
     run_root: Path,
     build: BuildIdentityManifest,
 ) -> None:
+    if key not in {"backend-suite", "node-suite"}:
+        raise CompatibilityGateError(
+            "COMPATIBILITY_APPLICABILITY_INVALID",
+            "The native-Windows applicability suite key is invalid.",
+        )
     artifacts = document.get("artifacts")
     matching = (
         [
@@ -461,7 +472,7 @@ def _verify_native_windows_applicability(
     if len(matching) != 1:
         raise CompatibilityGateError(
             "COMPATIBILITY_APPLICABILITY_INVALID",
-            "Native-Windows backend evidence requires one applicability artifact.",
+            "Native-Windows suite evidence requires one applicability artifact.",
         )
     item = matching[0]
     path_value = item.get("path")
@@ -473,7 +484,11 @@ def _verify_native_windows_applicability(
         )
     try:
         path = Path(path_value).resolve(strict=True)
-        report = load_suite_applicability_report(path)
+        report = (
+            load_suite_applicability_report(path)
+            if key == "backend-suite"
+            else load_node_suite_applicability_report(path)
+        )
     except (OSError, SuiteApplicabilityError) as error:
         raise CompatibilityGateError(
             "COMPATIBILITY_APPLICABILITY_INVALID",

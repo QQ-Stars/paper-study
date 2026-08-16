@@ -35,8 +35,20 @@ NATIVE_WINDOWS_SYMLINK_TEST_IDS = {
         "test_windows_rename_rejects_a_final_component_symlink"
     ),
 }
+NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE = "test/docker-react-build.test.js"
+NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE_SHA256 = (
+    "bddc4bd8fe49c0e710a81253523e0a1932a8545eed658c2bd340c3534b08fa73"
+)
+NATIVE_WINDOWS_NODE_CONTAINER_ONLY_TEST_NAMES = (
+    "the runtime image receives a production React build from an isolated frontend stage",
+    "the Docker context cannot substitute host frontend artifacts for the image build",
+    "the production Docker context excludes tests, fixtures, and fake provider credentials",
+    "Docker Compose exposes the startup-only UI entry rollback switch",
+    "containers default backend rollout to legacy and OCR off with pass-through overrides",
+)
 _DISCOVERY_START_DIRECTORY = "backend/tests"
 _DISCOVERY_PATTERN = "test_*.py"
+_NODE_DISCOVERY_PATTERN = "test/**/*.js"
 _REPORT_FIELDS = (
     "schemaVersion",
     "manifestKind",
@@ -53,6 +65,22 @@ _REPORT_FIELDS = (
     "selectedTestIds",
     "excludedTests",
     "symlinkCapabilities",
+)
+_NODE_REPORT_FIELDS = (
+    "schemaVersion",
+    "manifestKind",
+    "suiteKey",
+    "deploymentKind",
+    "buildIdentityManifestPath",
+    "buildIdentityManifestSha256",
+    "buildId",
+    "repositoryPath",
+    "discoveryPattern",
+    "discoveredTests",
+    "selectedTests",
+    "discoveredFiles",
+    "selectedFiles",
+    "excludedFiles",
 )
 
 
@@ -106,6 +134,34 @@ class SuiteApplicabilityReport:
     canonical_bytes: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class NativeWindowsNodeSuiteSelection:
+    repository_path: Path
+    discovered_files: tuple[str, ...]
+    selected_files: tuple[str, ...]
+    excluded_file_sha256: str
+    excluded_test_names: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class NodeSuiteApplicabilityReport:
+    suite_key: str
+    manifest_path: Path
+    manifest_file_sha256: str
+    build_identity_manifest_path: Path
+    build_identity_manifest_sha256: str
+    build_id: str
+    deployment_kind: str
+    repository_path: Path
+    discovered_tests: int
+    selected_tests: int
+    discovered_files: tuple[str, ...]
+    selected_files: tuple[str, ...]
+    excluded_file_sha256: str
+    excluded_test_names: tuple[str, ...]
+    canonical_bytes: bytes
+
+
 def select_native_windows_tests(
     tests: Sequence[_IdentifiedTest],
     *,
@@ -155,6 +211,192 @@ def select_native_windows_tests(
         selected_test_ids=selected_ids,
         excluded_tests=excluded,
         symlink_capabilities=capabilities,
+    )
+
+
+def select_native_windows_node_files(
+    repository: str | os.PathLike[str],
+) -> NativeWindowsNodeSuiteSelection:
+    try:
+        root = Path(repository).resolve(strict=True)
+    except OSError as error:
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_DISCOVERY_INVALID",
+            "The native-Windows Node repository does not exist.",
+        ) from error
+    test_root = root / "test"
+    if not root.is_dir() or not test_root.is_dir():
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_DISCOVERY_INVALID",
+            "The native-Windows Node discovery root is invalid.",
+        )
+    candidates = tuple(sorted(test_root.rglob("*.js")))
+    if any(not path.is_file() or path.is_symlink() for path in candidates):
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_DISCOVERY_INVALID",
+            "Node test discovery encountered a non-physical test file.",
+        )
+    discovered = tuple(path.relative_to(root).as_posix() for path in candidates)
+    if (
+        not discovered
+        or len(discovered) != len(set(discovered))
+        or NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE not in discovered
+    ):
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_POLICY_STALE",
+            "The frozen native-Windows Node applicability file is missing.",
+        )
+    excluded_path = root / NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE
+    try:
+        excluded_sha256 = hashlib.sha256(excluded_path.read_bytes()).hexdigest()
+    except OSError as error:
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_POLICY_STALE",
+            "The frozen native-Windows Node applicability file cannot be read.",
+        ) from error
+    if excluded_sha256 != NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE_SHA256:
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_POLICY_STALE",
+            "The frozen native-Windows Node applicability file changed.",
+        )
+    selected = tuple(
+        path for path in discovered if path != NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE
+    )
+    if not selected:
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_DISCOVERY_INVALID",
+            "The native-Windows Node suite selected no applicable test files.",
+        )
+    return NativeWindowsNodeSuiteSelection(
+        repository_path=root,
+        discovered_files=discovered,
+        selected_files=selected,
+        excluded_file_sha256=excluded_sha256,
+        excluded_test_names=NATIVE_WINDOWS_NODE_CONTAINER_ONLY_TEST_NAMES,
+    )
+
+
+def create_node_suite_applicability_report(
+    *,
+    selection: NativeWindowsNodeSuiteSelection,
+    build_identity: BuildIdentityManifest,
+    selected_tests: int,
+    output: str | os.PathLike[str],
+) -> NodeSuiteApplicabilityReport:
+    if build_identity.deployment_kind != "native-windows":
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_DEPLOYMENT_INVALID",
+            "The native-Windows Node suite requires a native-Windows BuildIdentity.",
+        )
+    if not _is_count(selected_tests) or selected_tests < 1:
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_RESULT_INVALID",
+            "The native-Windows Node suite test count is invalid.",
+        )
+    current = select_native_windows_node_files(selection.repository_path)
+    if current != selection:
+        raise SuiteApplicabilityError(
+            "SUITE_APPLICABILITY_POLICY_STALE",
+            "Node test discovery changed before the applicability report was written.",
+        )
+    excluded_tests = len(selection.excluded_test_names)
+    document = {
+        "schemaVersion": 1,
+        "manifestKind": "suite-applicability",
+        "suiteKey": "node-suite",
+        "deploymentKind": "native-windows",
+        "buildIdentityManifestPath": str(build_identity.manifest_path),
+        "buildIdentityManifestSha256": build_identity.manifest_file_sha256,
+        "buildId": build_identity.build_id,
+        "repositoryPath": str(selection.repository_path),
+        "discoveryPattern": _NODE_DISCOVERY_PATTERN,
+        "discoveredTests": selected_tests + excluded_tests,
+        "selectedTests": selected_tests,
+        "discoveredFiles": list(selection.discovered_files),
+        "selectedFiles": list(selection.selected_files),
+        "excludedFiles": [
+            {
+                "path": NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE,
+                "reasonCode": "container-deployment-only",
+                "sha256": selection.excluded_file_sha256,
+                "testNames": list(selection.excluded_test_names),
+            }
+        ],
+    }
+    payload = canonical_json_bytes(document)
+    path = Path(output).resolve(strict=False)
+    try:
+        exclusive_write_bytes(path, payload)
+    except DatabaseIdentityError as error:
+        raise SuiteApplicabilityError(error.code, str(error)) from error
+    return load_node_suite_applicability_report(path)
+
+
+def load_node_suite_applicability_report(
+    path: str | os.PathLike[str],
+) -> NodeSuiteApplicabilityReport:
+    resolved = Path(path).resolve(strict=True)
+    payload = resolved.read_bytes()
+    document = _strict_node_document(payload)
+    repository_value = document["repositoryPath"]
+    build_path_value = document["buildIdentityManifestPath"]
+    if not isinstance(repository_value, str) or not isinstance(build_path_value, str):
+        raise _invalid_report()
+    try:
+        repository = Path(repository_value).resolve(strict=True)
+        build_path = Path(build_path_value).resolve(strict=True)
+        selection = select_native_windows_node_files(repository)
+    except (OSError, SuiteApplicabilityError) as error:
+        raise _invalid_report() from error
+    excluded_files = document["excludedFiles"]
+    expected_excluded = [
+        {
+            "path": NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE,
+            "reasonCode": "container-deployment-only",
+            "sha256": selection.excluded_file_sha256,
+            "testNames": list(selection.excluded_test_names),
+        }
+    ]
+    discovered_files = _sorted_unique_ids(document["discoveredFiles"])
+    selected_files = _sorted_unique_ids(document["selectedFiles"])
+    selected_tests = document["selectedTests"]
+    discovered_tests = document["discoveredTests"]
+    if (
+        document["schemaVersion"] != 1
+        or document["manifestKind"] != "suite-applicability"
+        or document["suiteKey"] != "node-suite"
+        or document["deploymentKind"] != "native-windows"
+        or document["discoveryPattern"] != _NODE_DISCOVERY_PATTERN
+        or str(repository) != repository_value
+        or str(build_path) != build_path_value
+        or discovered_files != selection.discovered_files
+        or selected_files != selection.selected_files
+        or excluded_files != expected_excluded
+        or not _is_count(selected_tests)
+        or selected_tests < 1
+        or not _is_count(discovered_tests)
+        or discovered_tests
+        != selected_tests + len(NATIVE_WINDOWS_NODE_CONTAINER_ONLY_TEST_NAMES)
+    ):
+        raise _invalid_report()
+    build_sha = _required_hex(document["buildIdentityManifestSha256"], 64)
+    build_id = _required_hex(document["buildId"], 64)
+    return NodeSuiteApplicabilityReport(
+        suite_key="node-suite",
+        manifest_path=resolved,
+        manifest_file_sha256=hashlib.sha256(payload).hexdigest(),
+        build_identity_manifest_path=build_path,
+        build_identity_manifest_sha256=build_sha,
+        build_id=build_id,
+        deployment_kind="native-windows",
+        repository_path=repository,
+        discovered_tests=discovered_tests,
+        selected_tests=selected_tests,
+        discovered_files=discovered_files,
+        selected_files=selected_files,
+        excluded_file_sha256=selection.excluded_file_sha256,
+        excluded_test_names=selection.excluded_test_names,
+        canonical_bytes=payload,
     )
 
 
@@ -314,6 +556,34 @@ def _strict_document(payload: bytes) -> dict[str, object]:
     return document
 
 
+def _strict_node_document(payload: bytes) -> dict[str, object]:
+    duplicates: list[str] = []
+
+    def pairs(values: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in values:
+            if key in result:
+                duplicates.append(key)
+            result[key] = value
+        return result
+
+    try:
+        document = json.loads(payload.decode("utf-8"), object_pairs_hook=pairs)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise _invalid_report() from error
+    if (
+        duplicates
+        or not isinstance(document, dict)
+        or tuple(document) != _NODE_REPORT_FIELDS
+        or canonical_json_bytes(document) != payload
+        or not isinstance(document.get("discoveredFiles"), list)
+        or not isinstance(document.get("selectedFiles"), list)
+        or not isinstance(document.get("excludedFiles"), list)
+    ):
+        raise _invalid_report()
+    return document
+
+
 def _validated_capabilities(
     values: Sequence[SymlinkCapability],
 ) -> tuple[SymlinkCapability, ...]:
@@ -403,12 +673,20 @@ def _invalid_report() -> SuiteApplicabilityError:
 __all__ = [
     "ExcludedTest",
     "NATIVE_WINDOWS_CONTAINER_ONLY_TEST_IDS",
+    "NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE",
+    "NATIVE_WINDOWS_NODE_CONTAINER_ONLY_FILE_SHA256",
+    "NATIVE_WINDOWS_NODE_CONTAINER_ONLY_TEST_NAMES",
     "NATIVE_WINDOWS_SYMLINK_TEST_IDS",
+    "NativeWindowsNodeSuiteSelection",
     "NativeWindowsSuiteSelection",
+    "NodeSuiteApplicabilityReport",
     "SuiteApplicabilityError",
     "SuiteApplicabilityReport",
     "SymlinkCapability",
+    "create_node_suite_applicability_report",
     "create_suite_applicability_report",
+    "load_node_suite_applicability_report",
     "load_suite_applicability_report",
+    "select_native_windows_node_files",
     "select_native_windows_tests",
 ]
