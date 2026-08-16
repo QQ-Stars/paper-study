@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -17,6 +18,36 @@ class _NamedTest:
         return self._test_id
 
 class NativeWindowsSuiteApplicabilityTests(unittest.TestCase):
+    def test_runner_strips_outer_evidence_snapshot_from_selected_tests(self) -> None:
+        from backend.app.cli import native_windows_suite
+
+        observed: dict[str, str | None] = {}
+
+        def observe_environment() -> None:
+            observed["final"] = os.environ.get("P6_FINAL_EVIDENCE_RUN_ID")
+            observed["provisional"] = os.environ.get(
+                "P6_PROVISIONAL_EVIDENCE_RUN_ID"
+            )
+            observed["build"] = os.environ.get("P6_BUILD_IDENTITY_MANIFEST")
+
+        environment = {
+            "P6_FINAL_EVIDENCE_RUN_ID": "outer-final",
+            "P6_PROVISIONAL_EVIDENCE_RUN_ID": "outer-provisional",
+            "P6_BUILD_IDENTITY_MANIFEST": "keep-build-binding",
+        }
+        with mock.patch.dict(os.environ, environment, clear=False):
+            result = native_windows_suite._run_selected_tests(
+                (unittest.FunctionTestCase(observe_environment),)
+            )
+            restored = {name: os.environ.get(name) for name in environment}
+
+        self.assertTrue(result.wasSuccessful())
+        self.assertEqual(
+            {"final": None, "provisional": None, "build": "keep-build-binding"},
+            observed,
+        )
+        self.assertEqual(environment, restored)
+
     def test_probe_classifies_invalid_function_as_unavailable(self) -> None:
         from backend.app.cli import native_windows_suite
 

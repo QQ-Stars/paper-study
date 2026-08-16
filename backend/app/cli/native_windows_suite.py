@@ -29,6 +29,7 @@ from backend.app.api.compat.suite_applicability import (
 
 _DISCOVERY_START_DIRECTORY = "backend/tests"
 _DISCOVERY_PATTERN = "test_*.py"
+_EVIDENCE_PROCESS_SNAPSHOT_PREFIXES = ("P6_FINAL_", "P6_PROVISIONAL_")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,9 +90,7 @@ def run(arguments: list[str]) -> int:
         output=applicability_output,
     )
 
-    result = unittest.TextTestRunner(verbosity=2).run(
-        unittest.TestSuite(selection.selected_tests)
-    )
+    result = _run_selected_tests(selection.selected_tests)
     failures = [test.id() for test, _traceback in result.failures]
     failures.extend(test.id() for test in result.unexpectedSuccesses)
     errors = [test.id() for test, _traceback in result.errors]
@@ -165,6 +164,25 @@ def _flatten_tests(suite: unittest.TestSuite):
             yield from _flatten_tests(item)
         else:
             yield item
+
+
+def _run_selected_tests(
+    tests: tuple[unittest.TestCase, ...],
+) -> unittest.TestResult:
+    snapshot = {
+        name: value
+        for name, value in os.environ.items()
+        if name.startswith(_EVIDENCE_PROCESS_SNAPSHOT_PREFIXES)
+    }
+    for name in snapshot:
+        os.environ.pop(name, None)
+    try:
+        return unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(tests))
+    finally:
+        for name in tuple(os.environ):
+            if name.startswith(_EVIDENCE_PROCESS_SNAPSHOT_PREFIXES):
+                os.environ.pop(name, None)
+        os.environ.update(snapshot)
 
 
 def _probe_symlink_capabilities(root: Path) -> tuple[SymlinkCapability, ...]:
