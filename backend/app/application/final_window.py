@@ -202,6 +202,8 @@ _ABORT_REASONS = frozenset(
 )
 _FILE_CAS_LOCK = threading.RLock()
 _LEASE_LOCK_STATE = threading.local()
+_WINDOWS_REPLACE_RETRY_ATTEMPTS = 20
+_WINDOWS_REPLACE_RETRY_SECONDS = 0.025
 
 
 def _with_cutover_lease_lock(method: Callable[..., object]) -> Callable[..., object]:
@@ -1861,10 +1863,27 @@ def _atomic_replace(path: Path, payload: bytes) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        _replace_with_windows_retry(temporary, path)
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def _replace_with_windows_retry(source: Path, destination: Path) -> None:
+    attempts = _WINDOWS_REPLACE_RETRY_ATTEMPTS if os.name == "nt" else 1
+    for attempt in range(attempts):
+        try:
+            os.replace(source, destination)
+            return
+        except OSError as error:
+            retryable = (
+                os.name == "nt"
+                and getattr(error, "winerror", None) in {5, 32, 33}
+                and attempt + 1 < attempts
+            )
+            if not retryable:
+                raise
+            time.sleep(_WINDOWS_REPLACE_RETRY_SECONDS)
 
 
 def _unlink_new_file(path: Path) -> None:

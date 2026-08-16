@@ -54,6 +54,54 @@ def watchdog_operations_factory() -> object:
 
 
 class FinalWindowWatchdogTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows replace semantics only")
+    def test_atomic_replace_retries_transient_windows_access_denied(self) -> None:
+        from backend.app.application import final_window
+
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "lease.json"
+            target.write_bytes(b"old")
+            real_replace = os.replace
+            calls = 0
+
+            def replace(source: Path, destination: Path) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    error = PermissionError("transient Windows replace denial")
+                    error.winerror = 5
+                    raise error
+                real_replace(source, destination)
+
+            with (
+                patch.object(final_window.os, "replace", side_effect=replace),
+                patch.object(final_window.time, "sleep") as sleep,
+            ):
+                final_window._atomic_replace(target, b"new")
+
+            self.assertEqual(b"new", target.read_bytes())
+            self.assertEqual(2, calls)
+            sleep.assert_called_once()
+
+    @unittest.skipUnless(os.name == "nt", "Windows replace semantics only")
+    def test_atomic_replace_fails_closed_after_persistent_windows_denial(self) -> None:
+        from backend.app.application import final_window
+
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "lease.json"
+            target.write_bytes(b"old")
+            error = PermissionError("persistent Windows replace denial")
+            error.winerror = 5
+            with (
+                patch.object(final_window.os, "replace", side_effect=error),
+                patch.object(final_window.time, "sleep") as sleep,
+            ):
+                with self.assertRaises(PermissionError):
+                    final_window._atomic_replace(target, b"new")
+
+            self.assertEqual(b"old", target.read_bytes())
+            self.assertGreater(sleep.call_count, 0)
+
     def test_independent_process_aborts_for_every_unowned_window_condition(self) -> None:
         now = datetime.now(timezone.utc)
         missing_pid = 1_073_741_823
