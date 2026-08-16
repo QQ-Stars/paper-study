@@ -49,28 +49,48 @@ def _canonical(document: dict[str, object]) -> bytes:
     return json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
-def _gate_fixture(root: Path, *, run_id: str = "a" * 32) -> dict[str, object]:
+def _gate_fixture(
+    root: Path,
+    *,
+    run_id: str = "a" * 32,
+    deployment_kind: str = "container",
+) -> dict[str, object]:
     run_root = root / f"run-{run_id}"
     run_root.mkdir()
-    build_unsigned = {
-        "schemaVersion": 1,
-        "manifestKind": "build",
-        "gitRevision": "a" * 40,
-        "dirty": False,
-        "sourceTreeHash": "1" * 64,
-        "sourceEntries": [],
-        "buildArtifactHash": "2" * 64,
-        "pythonArtifacts": [],
-        "frontendArtifacts": [],
-        "resolvedComposeSha256": "3" * 64,
-        "imageDigests": [],
-    }
+    if deployment_kind == "native-windows":
+        build_unsigned = {
+            "schemaVersion": 2,
+            "manifestKind": "build",
+            "deploymentKind": "native-windows",
+            "gitRevision": "a" * 40,
+            "dirty": False,
+            "sourceTreeHash": "1" * 64,
+            "sourceEntries": [],
+            "buildArtifactHash": "2" * 64,
+            "pythonArtifacts": [],
+            "frontendArtifacts": [],
+            "nativeRuntime": {},
+        }
+    else:
+        build_unsigned = {
+            "schemaVersion": 1,
+            "manifestKind": "build",
+            "gitRevision": "a" * 40,
+            "dirty": False,
+            "sourceTreeHash": "1" * 64,
+            "sourceEntries": [],
+            "buildArtifactHash": "2" * 64,
+            "pythonArtifacts": [],
+            "frontendArtifacts": [],
+            "resolvedComposeSha256": "3" * 64,
+            "imageDigests": [],
+        }
     build_id = hashlib.sha256(_canonical(build_unsigned)).hexdigest()
     build = root / f"frozen-build-identity-{build_id}.json"
     build.write_bytes(
         _canonical(
             {
-                "schemaVersion": 1,
+                "schemaVersion": build_unsigned["schemaVersion"],
                 "manifestKind": "build",
                 "buildId": build_id,
                 **{
@@ -488,6 +508,16 @@ class CompatibilityGateTests(unittest.TestCase):
             with self.assertRaises(CompatibilityGateError) as early:
                 evaluate_gate(run_root, phase="shutdown")
             self.assertEqual("COMPATIBILITY_EVIDENCE_TOPOLOGY_INVALID", early.exception.code)
+
+    def test_native_windows_gate_rejects_backend_record_without_machine_applicability(self) -> None:
+        from backend.app.api.compat.gates import CompatibilityGateError, evaluate_gate
+
+        with tempfile.TemporaryDirectory(prefix="study-app-p6-native-gate-") as raw:
+            fixture = _gate_fixture(Path(raw), deployment_kind="native-windows")
+            with self.assertRaises(CompatibilityGateError) as caught:
+                evaluate_gate(fixture["run_root"], phase="shutdown")
+
+        self.assertEqual("COMPATIBILITY_APPLICABILITY_INVALID", caught.exception.code)
 
     def test_gate_rejects_cross_run_or_copied_capture_records(self) -> None:
         from backend.app.api.compat.gates import CompatibilityGateError, evaluate_gate

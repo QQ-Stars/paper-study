@@ -9,7 +9,11 @@ from pathlib import Path
 import secrets
 from typing import Callable
 
-from backend.app.api.compat.build_identity import BuildIdentityError
+from backend.app.api.compat.build_identity import (
+    BuildIdentityError,
+    BuildIdentityManifest,
+    load_build_identity_manifest,
+)
 from backend.app.api.compat.database_identity import (
     DatabaseIdentityError,
     canonical_json_bytes,
@@ -19,6 +23,10 @@ from backend.app.api.compat.database_identity import (
 from backend.app.infrastructure.database_backup import (
     DatabaseBackupError,
     verify_origin_receipt_envelope,
+)
+from backend.app.api.compat.suite_applicability import (
+    SuiteApplicabilityError,
+    load_suite_applicability_report,
 )
 
 
@@ -186,6 +194,7 @@ def _validate_records(
             manifest_path,
             expected_file_sha256=expected_final_evidence_run_manifest_sha256,
         )
+        build = load_build_identity_manifest(run.build_identity_manifest_path)
         database_identity = load_database_evidence_identity_manifest(
             run.database_identity_manifest_path
         )
@@ -210,6 +219,11 @@ def _validate_records(
         raise CompatibilityGateError(
             "COMPATIBILITY_EVIDENCE_INVALID",
             "The evidence directory or phase does not match its strict run manifest.",
+        )
+    if build.manifest_file_sha256 != run.build_identity_manifest_sha256:
+        raise CompatibilityGateError(
+            "COMPATIBILITY_IDENTITY_MISMATCH",
+            "The evidence run BuildIdentity hash no longer matches.",
         )
     if any(key not in run.expected_keys for key in keys) or (
         phase == "shutdown" and run.expected_keys != SHUTDOWN_EVIDENCE_KEYS
@@ -304,6 +318,17 @@ def _validate_records(
             )
         if document.get("resultKind") == "machine-summary":
             _verify_isolation_binding(document, key=key, run_root=root)
+        if key == "backend-suite" and build.deployment_kind == "native-windows":
+            if document.get("resultKind") != "machine-summary":
+                raise CompatibilityGateError(
+                    "COMPATIBILITY_APPLICABILITY_INVALID",
+                    "Native-Windows backend evidence must be a machine summary.",
+                )
+            _verify_native_windows_applicability(
+                document,
+                run_root=root,
+                build=build,
+            )
     if descendant_records:
         if database_binding is None:
             raise CompatibilityGateError(
@@ -415,6 +440,71 @@ def _verify_artifact_pairs(
                 "An evidence artifact binding is invalid.",
             )
         names.add(item["name"])
+
+
+def _verify_native_windows_applicability(
+    document: dict[str, object],
+    *,
+    run_root: Path,
+    build: BuildIdentityManifest,
+) -> None:
+    artifacts = document.get("artifacts")
+    matching = (
+        [
+            item
+            for item in artifacts
+            if isinstance(item, dict) and item.get("name") == "applicability"
+        ]
+        if isinstance(artifacts, list)
+        else []
+    )
+    if len(matching) != 1:
+        raise CompatibilityGateError(
+            "COMPATIBILITY_APPLICABILITY_INVALID",
+            "Native-Windows backend evidence requires one applicability artifact.",
+        )
+    item = matching[0]
+    path_value = item.get("path")
+    sha_value = item.get("sha256")
+    if not isinstance(path_value, str) or not isinstance(sha_value, str):
+        raise CompatibilityGateError(
+            "COMPATIBILITY_APPLICABILITY_INVALID",
+            "The native-Windows applicability artifact binding is incomplete.",
+        )
+    try:
+        path = Path(path_value).resolve(strict=True)
+        report = load_suite_applicability_report(path)
+    except (OSError, SuiteApplicabilityError) as error:
+        raise CompatibilityGateError(
+            "COMPATIBILITY_APPLICABILITY_INVALID",
+            "The native-Windows applicability report could not be revalidated.",
+        ) from error
+    expected_build = (
+        str(build.manifest_path),
+        build.manifest_file_sha256,
+        build.build_id,
+    )
+    record_build = (
+        document.get("buildIdentityManifestPath"),
+        document.get("buildIdentityManifestSha256"),
+        document.get("buildId"),
+    )
+    report_build = (
+        str(report.build_identity_manifest_path),
+        report.build_identity_manifest_sha256,
+        report.build_id,
+    )
+    if (
+        not _is_below(path, run_root)
+        or report.manifest_file_sha256 != sha_value
+        or expected_build != record_build
+        or expected_build != report_build
+        or document.get("totals") != report.selected_tests
+    ):
+        raise CompatibilityGateError(
+            "COMPATIBILITY_APPLICABILITY_INVALID",
+            "The native-Windows applicability report is not bound to this suite and build.",
+        )
 
 
 def _verify_isolation_binding(
