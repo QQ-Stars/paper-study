@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import datetime, timezone
+import base64
 import hashlib
 import json
 import tempfile
@@ -140,7 +141,7 @@ def _gate_fixture(
     )
     database_sha = hashlib.sha256(database.read_bytes()).hexdigest()
     owner = root / "production-owner.json"
-    owner.write_bytes(_canonical({"ownerState": "node_quiesced", "version": 7}))
+    owner.write_bytes(_canonical({"schemaVersion": 1, "ownerState": "node_quiesced"}))
     cutover_backup = run_root / "cutover.sqlite3"
     cutover_backup.write_bytes(b"cutover-backup")
     cutover_backup_sha = hashlib.sha256(cutover_backup.read_bytes()).hexdigest()
@@ -193,16 +194,74 @@ def _gate_fixture(
         )
     )
     startup_sha = hashlib.sha256(startup.read_bytes()).hexdigest()
-    lease = root / "cutover-lease.json"
+    lease = root / f"final-window-{run_id}.json"
+    token = lease.with_suffix(".token")
+    token.write_bytes(b"t" * 32)
+    token_sha = hashlib.sha256(token.read_bytes()).hexdigest()
+    rollback_map = {
+        "imageDigest": f"sha256:{'a' * 64}",
+        "entrypointPath": str((root / "server.js").resolve()),
+        "cwd": str(root.resolve()),
+        "host": "127.0.0.1",
+        "ports": {"api": 5173},
+        "databasePath": str(database_subject.resolve()),
+        "environment": {
+            "RUNTIME_ENVIRONMENT": "live",
+            "RUNTIME_NAMESPACE": "production",
+            "API_BACKEND_MODE": "legacy",
+            "DOCUMENT_PIPELINE_MODE": "legacy",
+            "GENERATION_PIPELINE_MODE": "legacy",
+            "ARTIFACT_READ_MODE": "legacy",
+            "ARTIFACT_WRITE_MODE": "legacy",
+            "OCR_ENABLED": "0",
+            "OBSIDIAN_ENABLED": "0",
+            "PAPER_STUDY_MCP_MODE": "legacy",
+            "UI_ENTRY": "react",
+        },
+    }
+    owner_payload = owner.read_bytes()
+    lease_unsigned = {
+        "schemaVersion": 1,
+        "leaseKind": "final-window",
+        "runId": run_id,
+        "runManifestPath": str(run_manifest.resolve()),
+        "runManifestFileSha256": run_sha,
+        "startupSnapshotPath": str(startup.resolve()),
+        "startupSnapshotFileSha256": startup_sha,
+        "buildIdentityManifestPath": str(build.resolve()),
+        "buildIdentityManifestSha256": build_sha,
+        "buildId": build_id,
+        "databaseIdentityManifestPath": str(database.resolve()),
+        "databaseIdentityManifestSha256": database_sha,
+        "databaseLineageId": lineage_id,
+        "liveSubjectDatabaseId": "e" * 64,
+        "originReceiptPath": str(origin.resolve()),
+        "originReceiptFileSha256": origin_sha,
+        "ownerMarkerPath": str(owner.resolve()),
+        "cutoverLeasePath": str(lease.resolve()),
+        "nodeActiveOwnerFileSha256": hashlib.sha256(owner_payload).hexdigest(),
+        "nodeActiveOwnerPayloadBase64": base64.b64encode(owner_payload).decode("ascii"),
+        "cutoverTokenFilePath": str(token.resolve()),
+        "cutoverTokenSha256": token_sha,
+        "runtimeNamespace": "production",
+        "frozenNodeRollbackMap": rollback_map,
+        "frozenNodeRollbackMapSha256": hashlib.sha256(
+            _canonical(rollback_map)
+        ).hexdigest(),
+        "coordinatorPid": 101,
+        "operatorPid": 102,
+        "watchdogPid": 103,
+        "heartbeatDeadline": "2026-08-15T01:10:00Z",
+        "phase": "node_quiesced",
+        "version": 7,
+        "previousLeaseFileSha256": "0" * 64,
+        "updatedAt": "2026-08-15T01:01:00Z",
+    }
     lease.write_bytes(
         _canonical(
             {
-                "schemaVersion": 1,
-                "leaseId": "lease-1",
-                "runId": run_id,
-                "ownerMarkerPath": str(owner.resolve()),
-                "ownerMarkerVersion": 7,
-                "runtimeNamespace": "production",
+                **lease_unsigned,
+                "leaseSha256": hashlib.sha256(_canonical(lease_unsigned)).hexdigest(),
             }
         )
     )
@@ -245,6 +304,8 @@ def _gate_fixture(
             "startupSnapshotSha256": startup_sha,
             "cutoverLeasePath": str(lease.resolve()),
             "cutoverLeaseSha256": lease_sha,
+            "cutoverTokenFilePath": str(token.resolve()),
+            "cutoverTokenSha256": token_sha,
         }
         if key == "cutover-backup-create":
             document["artifacts"] = [
@@ -272,6 +333,8 @@ def _gate_fixture(
         "startup_sha": startup_sha,
         "lease": lease,
         "lease_sha": lease_sha,
+        "token": token,
+        "token_sha": token_sha,
         "build": build,
         "build_sha": build_sha,
         "database": database,
@@ -618,7 +681,7 @@ class CompatibilityGateTests(unittest.TestCase):
                 document["cutoverManifestSha256"],
             )
             self.assertEqual(fixture["owner"].resolve(), Path(document["nodeOwnerMarkerPath"]))
-            self.assertEqual(7, document["nodeOwnerMarkerVersion"])
+            self.assertEqual(1, document["nodeOwnerMarkerVersion"])
             self.assertEqual("production", document["runtimeNamespace"])
             self.assertEqual(["api", "worker", "scheduler", "mcp"], document["roles"])
             self.assertRegex(document["authorizationId"], r"^[0-9a-f]{32}$")
@@ -630,6 +693,44 @@ class CompatibilityGateTests(unittest.TestCase):
             with self.assertRaises(CompatibilityGateError) as mismatch:
                 evaluate_gate(**wrong)
             self.assertEqual("COMPATIBILITY_IDENTITY_MISMATCH", mismatch.exception.code)
+
+    def test_authorization_accepts_heartbeat_rotated_record_lease_hashes(self) -> None:
+        from backend.app.api.compat.gates import evaluate_gate
+
+        with tempfile.TemporaryDirectory(prefix="study-app-p6-gate-heartbeats-") as raw:
+            fixture = _gate_fixture(Path(raw))
+            records = []
+            for path in Path(fixture["run_root"]).glob("*.json"):
+                document = json.loads(path.read_text(encoding="utf-8"))
+                if document.get("producer") == "compatibility.capture-evidence":
+                    records.append((path, document))
+            self.assertEqual(len(SHUTDOWN_KEYS), len(records))
+            for index, (path, document) in enumerate(records, start=1):
+                document["cutoverLeaseSha256"] = f"{index:064x}"
+                unsigned = {
+                    key: value for key, value in document.items() if key != "recordSha256"
+                }
+                document["recordSha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+                path.write_bytes(_canonical(document))
+
+            authorization = Path(fixture["run_root"]) / "promotion-authorization.json"
+            result = evaluate_gate(
+                fixture["run_root"],
+                phase="shutdown",
+                final_evidence_run_manifest=fixture["run_manifest"],
+                expected_final_evidence_run_manifest_sha256=fixture["run_sha"],
+                startup_snapshot=fixture["startup"],
+                expected_startup_snapshot_sha256=fixture["startup_sha"],
+                cutover_lease=fixture["lease"],
+                authorization_output=authorization,
+                authorization_ttl_seconds=900,
+                clock=lambda: datetime(2026, 8, 15, 1, 4, tzinfo=timezone.utc),
+            )
+
+            self.assertTrue(result["nodeShutdownAllowed"])
+            document = json.loads(authorization.read_text(encoding="utf-8"))
+            self.assertEqual(fixture["lease_sha"], document["cutoverLeaseSha256"])
+            self.assertEqual(fixture["lease"].resolve(), Path(document["cutoverLeasePath"]))
 
 
 if __name__ == "__main__":

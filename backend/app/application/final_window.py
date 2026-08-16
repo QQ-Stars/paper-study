@@ -104,6 +104,18 @@ class CutoverLease:
 
 
 @dataclass(frozen=True, slots=True)
+class CutoverLeaseBinding:
+    path: Path
+    file_sha256: str
+    run_id: str
+    startup_snapshot_path: Path
+    startup_snapshot_sha256: str
+    token_file_path: Path
+    token_sha256: str
+    phase: str
+
+
+@dataclass(frozen=True, slots=True)
 class FrozenNodeRecovery:
     path: Path
     file_sha256: str
@@ -1129,6 +1141,40 @@ def heartbeat_cutover_lease(
     )
 
 
+def load_cutover_lease_binding(
+    cutover_lease: str | os.PathLike[str],
+) -> CutoverLeaseBinding:
+    path, payload, lease = _load_lease(cutover_lease)
+    try:
+        token_path = Path(_required_string(lease["cutoverTokenFilePath"])).resolve(
+            strict=True
+        )
+        token_sha = _required_sha(lease["cutoverTokenSha256"])
+        startup_path = Path(_required_string(lease["startupSnapshotPath"])).resolve(
+            strict=True
+        )
+        startup_sha = _required_sha(lease["startupSnapshotFileSha256"])
+        run_id = _required_string(lease["runId"])
+        phase = _required_string(lease["phase"])
+        if hashlib.sha256(token_path.read_bytes()).hexdigest() != token_sha:
+            raise ValueError("cutover token hash mismatch")
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        raise FinalWindowError(
+            "CUTOVER_LEASE_INVALID",
+            "The final-window capability binding is invalid.",
+        ) from error
+    return CutoverLeaseBinding(
+        path=path,
+        file_sha256=hashlib.sha256(payload).hexdigest(),
+        run_id=run_id,
+        startup_snapshot_path=startup_path,
+        startup_snapshot_sha256=startup_sha,
+        token_file_path=token_path,
+        token_sha256=token_sha,
+        phase=phase,
+    )
+
+
 def _verify_token(
     lease: Mapping[str, object],
     token_file: str | os.PathLike[str],
@@ -1823,6 +1869,7 @@ def _utc_now() -> datetime:
 
 __all__ = [
     "CutoverLease",
+    "CutoverLeaseBinding",
     "FinalWindowError",
     "FinalWindowCoordinator",
     "FinalWindowWatchdog",
@@ -1832,6 +1879,7 @@ __all__ = [
     "create_owner_only_token_file",
     "create_production_startup_snapshot",
     "heartbeat_cutover_lease",
+    "load_cutover_lease_binding",
     "load_production_startup_snapshot",
     "verify_owner_only_token_file",
 ]

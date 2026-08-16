@@ -311,10 +311,29 @@ def _validate_records(
                 (document.get("startupSnapshotPath"), document.get("startupSnapshotSha256")),
                 "startup snapshot",
             )
-        if "cutoverLeasePath" in document or "cutoverLeaseSha256" in document:
+        lease_fields = (
+            "cutoverLeasePath",
+            "cutoverLeaseSha256",
+            "cutoverTokenFilePath",
+            "cutoverTokenSha256",
+        )
+        if any(field in document for field in lease_fields):
+            if (
+                any(not isinstance(document.get(field), str) for field in lease_fields)
+                or not _is_sha256(str(document["cutoverLeaseSha256"]))
+                or not _is_sha256(str(document["cutoverTokenSha256"]))
+            ):
+                raise CompatibilityGateError(
+                    "COMPATIBILITY_IDENTITY_MISMATCH",
+                    "A final evidence cutover capability binding is invalid.",
+                )
             lease_binding = _same_binding(
                 lease_binding,
-                (document.get("cutoverLeasePath"), document.get("cutoverLeaseSha256")),
+                (
+                    document["cutoverLeasePath"],
+                    document["cutoverTokenFilePath"],
+                    document["cutoverTokenSha256"],
+                ),
                 "cutover lease",
             )
         if document.get("resultKind") == "machine-summary":
@@ -356,9 +375,31 @@ def _validate_records(
         startup_path = None
         startup_sha = None
     if cutover_lease is not None:
-        lease_path = Path(cutover_lease).resolve(strict=True)
-        lease_sha = _file_sha256(lease_path)
-        if lease_binding != (str(lease_path), lease_sha):
+        try:
+            from backend.app.application.final_window import (
+                FinalWindowError,
+                load_cutover_lease_binding,
+            )
+
+            current_lease = load_cutover_lease_binding(cutover_lease)
+        except (FinalWindowError, OSError, ValueError) as error:
+            raise CompatibilityGateError(
+                "COMPATIBILITY_IDENTITY_MISMATCH",
+                "The current cutover lease could not be revalidated.",
+            ) from error
+        lease_path = current_lease.path
+        lease_sha = current_lease.file_sha256
+        current_capability = (
+            str(lease_path),
+            str(current_lease.token_file_path),
+            current_lease.token_sha256,
+        )
+        if (
+            lease_binding != current_capability
+            or current_lease.run_id != run_id
+            or current_lease.startup_snapshot_path != startup_path
+            or current_lease.startup_snapshot_sha256 != startup_sha
+        ):
             raise CompatibilityGateError(
                 "COMPATIBILITY_IDENTITY_MISMATCH",
                 "The cutover lease does not match the final evidence run.",
@@ -895,6 +936,12 @@ def _timestamp(value: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError
     return parsed.astimezone(timezone.utc)
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
 
 
 def _file_sha256(path: Path) -> str:
