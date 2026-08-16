@@ -1,26 +1,69 @@
-# Paper-Study · 文献管理 · 学术搜索 · 论文精读
+<p align="center">
+  <img src="docs/assets/logo.png" alt="Paper-Study logo" width="128" height="128">
+</p>
 
-> 一个**在本地运行**的网页应用：自动检索论文 → AI 自动分类入库 → 一键生成中文**讲解 / 翻译** → **语义检索**辅助发现研究空白。
-> 论文、笔记、API 密钥**仅保存在本地**，不上传任何服务器。
+<h1 align="center">Paper-Study</h1>
+
+<p align="center"><strong>面向研究者的本地优先 AI 文献管理工作台</strong></p>
+
+<p align="center">一个 Python + React 的本地网页应用：多源自动检索论文 → AI 分类入库 → 一键生成中文讲解 / 翻译 → 语义检索辅助发现研究空白。<br/>论文、笔记、API 密钥<strong>仅保存在本地</strong>，不上传任何服务器。</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/tests-1497_passing-brightgreen" alt="tests">
+  <img src="https://img.shields.io/github/license/QQ-Stars/paper-study" alt="license">
+  <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" alt="python">
+  <img src="https://img.shields.io/badge/node-20%2B-339933?logo=nodedotjs&logoColor=white" alt="node">
+  <img src="https://img.shields.io/github/languages/code-size/QQ-Stars/paper-study" alt="code size">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/last-commit/QQ-Stars/paper-study" alt="last commit">
+  <img src="https://img.shields.io/github/commit-activity/m/QQ-Stars/paper-study" alt="commit activity">
+  <img src="https://img.shields.io/github/issues/QQ-Stars/paper-study" alt="issues">
+  <img src="https://img.shields.io/github/stars/QQ-Stars/paper-study" alt="stars">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="backend">
+  <img src="https://img.shields.io/badge/frontend-React_19-61DAFB?logo=react&logoColor=white" alt="frontend">
+  <img src="https://img.shields.io/badge/MCP-stdio_%C2%B7_9_tools-F59E0B" alt="mcp">
+  <img src="https://img.shields.io/badge/platform-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey" alt="platform">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/data-local--only-E5484D" alt="data">
+  <img src="https://img.shields.io/badge/GPU-not_required-success" alt="gpu">
+  <img src="https://img.shields.io/badge/deploy-native_%C2%B7_docker-blueviolet" alt="deploy">
+</p>
+
+---
+
+## 为什么需要它
+
+- 📥 **论文越攒越乱**：arXiv / Semantic Scholar / OpenAlex / DBLP 四个源手动检索、去重、归档，一次就要一下午——本工具一条命令完成扩词、检索、去重与入库预览。
+- 🌐 **英文阅读门槛高**：一键生成中文讲解与全文翻译，公式由 KaTeX 渲染，讲解/翻译缓存入库、随开随读。
+- 🧭 **研究空白难发现**：本地语义检索让中文描述直接匹配英文论文；洞察看板给出年份 × 方向趋势与库内引用网络，MCP 还能让 Codex / Claude 直接基于你的论文库做综述分析。
+- 🔒 **数据不想上云**：SQLite + PDF + 密钥全部留在本机 `data/`，不依赖任何外部托管。
 
 **适用于任意研究方向**：在 ⚙ 设置中填写研究主题，大模型采集时即按该主题对论文分类、评定相关度；更换主题即可用于其他领域。
 
-本次 React clean-room 重构在 `codex/react-clean-room-workspace` 分支交付。React 工作区位于独立的 `frontend/` 包中；旧版 `public/` 前端仅作为可逆回退入口保留，不会与 React 应用共同挂载或被 React 运行时加载。
+React 工作区与旧版回退入口均已合入 `main` 分支：`frontend/` 是独立的 React 19 应用（`/workspace/`），旧版 `public/` 前端仅作为可逆回退入口（`/legacy/`）保留，不会与 React 应用共同挂载或被 React 运行时加载。
 
 ---
 
 ## 目录
 
-1. [功能概览](#功能概览)
-2. [环境准备](#一环境准备)
-3. [安装与启动](#二安装与启动)
-4. [配置大模型 API Key](#三配置大模型-api-key)
-5. [日常使用](#四日常使用)
-6. [使用 Docker 部署（可选）](#五使用-docker-部署可选)
-7. [配置外部嵌入 API（可选）](#六配置外部嵌入-api可选)
-8. [MCP 服务（可选）](#七mcp-服务可选)
-9. [常见问题](#八常见问题)
-10. [开发者说明](#九开发者说明)
+1. [为什么需要它](#为什么需要它)
+2. [功能概览](#功能概览)
+3. [环境准备](#一环境准备)
+4. [安装与启动](#二安装与启动)
+5. [配置大模型 API Key](#三配置大模型-api-key)
+6. [日常使用](#四日常使用)
+7. [使用 Docker 部署（可选）](#五使用-docker-部署可选)
+8. [配置外部嵌入 API（可选）](#六配置外部嵌入-api可选)
+9. [MCP 服务（可选）](#七mcp-服务可选)
+10. [常见问题](#八常见问题)
+11. [开发者说明](#九开发者说明)
 
 ---
 
@@ -319,7 +362,7 @@ DB_PATH = '<项目路径>\data\app.db'
 
 ### React clean-room 边界与验证
 
-- 当前交付分支是 `codex/react-clean-room-workspace`。`frontend/` 是独立的 React 19 + TypeScript + Vite 应用，构建基址固定为 `/workspace/`；`public/` 是旧版实现，只通过 `/legacy/`（或根入口回退）提供。
+- 当前交付分支是 `main`。`frontend/` 是独立的 React 19 + TypeScript + Vite 应用，构建基址固定为 `/workspace/`；`public/` 是旧版实现，只通过 `/legacy/`（或根入口回退）提供。
 - React 源码、样式和构建产物不导入旧版 `public/index.html`、`public/app.js`、`public/style.css` 或旧版 vendor 资源。两套界面只共享现有 Node/SQLite/Python API 与本地数据契约。
 - `UI_ENTRY=react|legacy` 仅决定 `/` 的启动时行为。显式 `/workspace/` 与 `/legacy/` 始终有效；production 值属于冻结 runtime identity。
 - 旧版前端不会随本次切换删除。只有在 React 工作区完成**两次正式发布**或累计**14 个有记录的活跃使用日**之后，才重新审查是否删除；达到门槛不代表自动删除，仍需一次新的兼容性、数据安全与回滚评审。
