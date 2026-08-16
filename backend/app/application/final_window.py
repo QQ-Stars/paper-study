@@ -228,7 +228,18 @@ class FinalWindowCoordinator:
         self._watchdog = watchdog
         self._token_factory = token_factory or (lambda: secrets.token_bytes(32))
         self._clock = clock or _utc_now
-        self._coordinator_pid = coordinator_pid or os.getpid()
+        if coordinator_pid is not None and (
+            not isinstance(coordinator_pid, int)
+            or isinstance(coordinator_pid, bool)
+            or coordinator_pid <= 0
+        ):
+            raise FinalWindowError(
+                "CUTOVER_ARGUMENT_INVALID",
+                "The final-window coordinator process is invalid.",
+            )
+        self._coordinator_pid = (
+            coordinator_pid if coordinator_pid is not None else os.getpid()
+        )
 
     def begin_final_window(
         self,

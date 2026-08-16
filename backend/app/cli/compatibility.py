@@ -302,6 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     begin_window.add_argument("--owner-marker", required=True)
     begin_window.add_argument("--runtime-namespace", required=True)
+    begin_window.add_argument("--coordinator-pid", type=int, required=True)
     begin_window.add_argument("--operator-pid", type=int, required=True)
     begin_window.add_argument(
         "--heartbeat-timeout-seconds", type=int, required=True
@@ -700,7 +701,11 @@ def run(arguments: Sequence[str]) -> dict[str, Any]:
     if options.command == "begin-final-window":
         operations = _load_factory(options.operations_factory, label="operations")()
         watchdog = _load_factory(options.watchdog_factory, label="watchdog")()
-        coordinator = FinalWindowCoordinator(operations=operations, watchdog=watchdog)
+        coordinator = FinalWindowCoordinator(
+            operations=operations,
+            watchdog=watchdog,
+            coordinator_pid=options.coordinator_pid,
+        )
         lease = coordinator.begin_final_window(
             final_evidence_run_manifest=options.final_evidence_run_manifest,
             expected_final_evidence_run_manifest_sha256=(

@@ -517,6 +517,75 @@ class CompatibilityCliTests(unittest.TestCase):
             self.assertEqual("d" * 32, result["runId"])
             self.assertEqual(build_result["buildId"], result["buildId"])
 
+    def test_begin_final_window_uses_explicit_resident_coordinator_pid(self) -> None:
+        import backend.app.cli.compatibility as compatibility
+
+        with tempfile.TemporaryDirectory(prefix="study-app-p6-window-cli-") as raw:
+            root = Path(raw)
+            token = root / "final-window.token"
+            token.write_bytes(b"t" * 32)
+            coordinator = mock.Mock()
+            coordinator.begin_final_window.return_value = SimpleNamespace(
+                path=root / "final-window.json",
+                token_file_path=token,
+                run_id="e" * 32,
+                phase="armed",
+                version=1,
+                file_sha256="f" * 64,
+            )
+
+            with mock.patch.object(
+                compatibility,
+                "_load_factory",
+                return_value=lambda: object(),
+            ), mock.patch.object(
+                compatibility,
+                "FinalWindowCoordinator",
+                return_value=coordinator,
+            ) as coordinator_type:
+                exit_code, stdout, stderr = _invoke(
+                    "begin-final-window",
+                    "--final-evidence-run-manifest",
+                    "run.json",
+                    "--expected-final-evidence-run-manifest-sha256",
+                    "a" * 64,
+                    "--startup-snapshot",
+                    "startup.json",
+                    "--expected-startup-snapshot-sha256",
+                    "b" * 64,
+                    "--owner-marker",
+                    "owner.json",
+                    "--runtime-namespace",
+                    "production",
+                    "--coordinator-pid",
+                    "23456",
+                    "--operator-pid",
+                    "34567",
+                    "--heartbeat-timeout-seconds",
+                    "120",
+                    "--lease-output",
+                    "lease.json",
+                    "--token-file-output",
+                    "lease.token",
+                    "--operations-factory",
+                    "example:operations",
+                    "--watchdog-factory",
+                    "example:watchdog",
+                )
+
+        self.assertEqual(0, exit_code, stderr)
+        self.assertEqual("", stderr)
+        self.assertEqual(True, json.loads(stdout)["ok"])
+        coordinator_type.assert_called_once_with(
+            operations=mock.ANY,
+            watchdog=mock.ANY,
+            coordinator_pid=23456,
+        )
+        self.assertEqual(
+            34567,
+            coordinator.begin_final_window.call_args.kwargs["operator_pid"],
+        )
+
     def test_argument_errors_are_single_json_documents(self) -> None:
         exit_code, stdout, stderr = _invoke(
             "create-suite-isolation",
