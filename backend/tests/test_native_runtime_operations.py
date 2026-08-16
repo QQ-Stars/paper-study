@@ -116,6 +116,74 @@ def _live_native_role_processes(
 
 
 class NativeRuntimeOperationsTests(unittest.TestCase):
+    def test_final_window_watchdog_uses_the_final_run_recovery_output(self) -> None:
+        from backend.app.providers import native_runtime
+
+        with tempfile.TemporaryDirectory(prefix="study-app-native-watchdog-") as raw:
+            root = Path(raw)
+            run_root = root / "evidence" / "run-final"
+            run_root.mkdir(parents=True)
+            run_manifest = run_root / "evidence-run-manifest-v1.json"
+            run_manifest.write_text("{}", encoding="utf-8")
+            lease = root / "window" / "final-window.json"
+            token = root / "window" / "final-window.token"
+            launched: dict[str, object] = {}
+
+            class _WatchdogProcess:
+                pid = 43123
+
+                def poll(self) -> None:
+                    return None
+
+            def launch(argv: list[str], **kwargs: object) -> _WatchdogProcess:
+                launched["argv"] = argv
+                launched["kwargs"] = kwargs
+                return _WatchdogProcess()
+
+            launcher = native_runtime.NativeFinalWindowWatchdogLauncher(
+                python_executable=sys.executable,
+            )
+            with (
+                patch.object(
+                    native_runtime,
+                    "_load_lease",
+                    return_value=(
+                        lease,
+                        b"lease",
+                        {"runManifestPath": str(run_manifest)},
+                    ),
+                ),
+                patch.object(native_runtime.subprocess, "Popen", side_effect=launch),
+            ):
+                self.assertEqual(43123, launcher.start(lease, token))
+
+            argv = launched["argv"]
+            self.assertIsInstance(argv, list)
+            recovery_index = argv.index("--recovery-output") + 1
+            self.assertEqual(
+                str(run_root / "abort-recovery.json"),
+                argv[recovery_index],
+            )
+
+    def test_stop_watchdog_treats_an_exited_windows_pid_as_already_stopped(self) -> None:
+        from backend.app.providers import native_runtime
+
+        missing_process = OSError("watchdog process no longer exists")
+        missing_process.winerror = 87
+        with (
+            patch.object(
+                native_runtime,
+                "_load_lease",
+                return_value=(Path("lease.json"), b"lease", {"watchdogPid": 43123}),
+            ),
+            patch.object(
+                native_runtime,
+                "_AttachedChild",
+                side_effect=missing_process,
+            ),
+        ):
+            native_runtime._stop_watchdog_pid(Path("lease.json"), timeout=10)
+
     def test_recovered_frozen_node_owner_uses_the_started_process_pid(self) -> None:
         from backend.app.api.compat.database_identity import canonical_json_bytes
         from backend.app.providers import native_runtime

@@ -1971,7 +1971,9 @@ class NativeFinalWindowWatchdogLauncher:
                 "NATIVE_WATCHDOG_ALREADY_ACTIVE",
                 "A native final-window watchdog is already active.",
             )
-        recovery_output = lease_path.parent / "abort-recovery.json"
+        _resolved_lease, _lease_payload, lease = _load_lease(lease_path)
+        run_manifest = Path(str(lease["runManifestPath"])).resolve(strict=True)
+        recovery_output = run_manifest.parent / "abort-recovery.json"
         creation_flags = (
             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         )
@@ -2311,7 +2313,14 @@ def _stop_watchdog_pid(lease_path: str | os.PathLike[str], *, timeout: float) ->
         and pid > 0
         and pid != os.getpid()
     ):
-        child = _AttachedChild(pid)
+        try:
+            child = _AttachedChild(pid)
+        except ProcessLookupError:
+            return
+        except OSError as error:
+            if os.name == "nt" and getattr(error, "winerror", None) in {87, 1168}:
+                return
+            raise
         if child.poll() is None:
             child.terminate()
             child.wait(timeout=timeout)
