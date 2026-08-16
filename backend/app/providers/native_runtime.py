@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -24,7 +25,11 @@ from backend.app.api.compat.database_identity import (
     exclusive_write_bytes,
 )
 from backend.app.application.final_window import ProductionStartupSnapshot
-from backend.app.application.final_window import _load_lease, load_production_startup_snapshot
+from backend.app.application.final_window import (
+    _cas_replace,
+    _load_lease,
+    load_production_startup_snapshot,
+)
 from backend.app.application.production_rollback import validate_frozen_node_rollback_map
 
 
@@ -866,6 +871,88 @@ class NativeWindowsRuntimeOperations:
         self._node_state_payload = payload
         self._active_rollback_map = validated
         return process
+
+    def commit_frozen_node_owner(
+        self,
+        handle: object,
+        rollback_map: Mapping[str, object],
+        *,
+        owner_marker: str | os.PathLike[str],
+        expected_owner_payload: bytes,
+        previous_node_owner_payload: bytes,
+    ) -> None:
+        validated = validate_frozen_node_rollback_map(dict(rollback_map))
+        self._verify_native_rollback_map(validated)
+        if (
+            handle is not self._active_frozen_node
+            or not isinstance(handle, RuntimeProcess)
+            or handle.role != "frozen-node"
+            or handle.child.poll() is not None
+            or handle.argv != self._configuration.rollback.argv
+            or handle.cwd != self._configuration.rollback.cwd
+            or self._active_rollback_map != validated
+        ):
+            raise NativeRuntimeError(
+                "NATIVE_ROLLBACK_OWNER_INVALID",
+                "The recovered Node owner does not match the started frozen runtime.",
+            )
+        configured_marker = _configured_value(
+            self._configuration, "PRODUCTION_OWNER_MARKER"
+        )
+        marker_path = Path(owner_marker).expanduser().resolve(strict=True)
+        if configured_marker is None or marker_path != Path(configured_marker).resolve():
+            raise NativeRuntimeError(
+                "NATIVE_ROLLBACK_OWNER_INVALID",
+                "The recovered Node owner marker is not the configured production marker.",
+            )
+        from backend.app.cli.runtime_owner import _strict_owner_document
+
+        try:
+            previous = _strict_owner_document(previous_node_owner_payload)
+        except Exception as error:
+            raise NativeRuntimeError(
+                "NATIVE_ROLLBACK_OWNER_INVALID",
+                "The previous Node owner payload is invalid.",
+            ) from error
+        ports = validated["ports"]
+        assert isinstance(ports, dict)
+        expected_runtime = {
+            "entrypointPath": validated["entrypointPath"],
+            "executablePath": validated["executablePath"],
+            "cwd": validated["cwd"],
+            "argv": [validated["executablePath"], validated["entrypointPath"]],
+            "listenerHost": validated["host"],
+            "listenerPort": ports.get("api"),
+            "databasePaths": [validated["databasePath"]],
+        }
+        if any(previous.get(key) != value for key, value in expected_runtime.items()):
+            raise NativeRuntimeError(
+                "NATIVE_ROLLBACK_OWNER_INVALID",
+                "The previous owner does not match the frozen Node rollback map.",
+            )
+        unsigned = {
+            key: value
+            for key, value in previous.items()
+            if key != "ownerMarkerSha256"
+        }
+        unsigned.update(
+            {
+                **expected_runtime,
+                "processId": handle.pid,
+                "createdAt": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+            }
+        )
+        payload = canonical_json_bytes(
+            {
+                **unsigned,
+                "ownerMarkerSha256": hashlib.sha256(
+                    canonical_json_bytes(unsigned)
+                ).hexdigest(),
+            }
+        )
+        _cas_replace(marker_path, expected_owner_payload, payload)
 
     def reclaim_stale_frozen_node_state(
         self,

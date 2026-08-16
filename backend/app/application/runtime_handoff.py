@@ -17,6 +17,7 @@ from backend.app.api.compat.database_identity import (
 from backend.app.application.final_window import (
     ProductionStartupSnapshot,
     _cas_replace,
+    _commit_recovered_node_owner,
     _load_lease,
     _self_hashed,
     _timestamp,
@@ -392,10 +393,13 @@ class ProductionPromotionCoordinator:
             operations=self._operations,
             rollback_map=dict(lease["frozenNodeRollbackMap"]),
             initial_owner_state="handoff_pending",
-            commit_node_active=lambda: _cas_replace(
-                handoff.owner_marker_path,
-                current_owner,
-                original_owner,
+            commit_node_active=lambda handle: _commit_recovered_node_owner(
+                operations=self._operations,
+                handle=handle,
+                rollback_map=dict(lease["frozenNodeRollbackMap"]),
+                owner_path=handoff.owner_marker_path,
+                expected_owner_payload=current_owner,
+                previous_node_owner_payload=original_owner,
             ),
         )
         _update_lease(

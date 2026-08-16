@@ -116,6 +116,124 @@ def _live_native_role_processes(
 
 
 class NativeRuntimeOperationsTests(unittest.TestCase):
+    def test_recovered_frozen_node_owner_uses_the_started_process_pid(self) -> None:
+        from backend.app.api.compat.database_identity import canonical_json_bytes
+        from backend.app.providers import native_runtime
+
+        rollback_environment = {
+            "RUNTIME_ENVIRONMENT": "live",
+            "RUNTIME_NAMESPACE": "production",
+            "API_BACKEND_MODE": "legacy",
+            "DOCUMENT_PIPELINE_MODE": "legacy",
+            "GENERATION_PIPELINE_MODE": "legacy",
+            "ARTIFACT_READ_MODE": "legacy",
+            "ARTIFACT_WRITE_MODE": "legacy",
+            "OCR_ENABLED": "0",
+            "OBSIDIAN_ENABLED": "0",
+            "PAPER_STUDY_MCP_MODE": "legacy",
+            "UI_ENTRY": "react",
+        }
+        with tempfile.TemporaryDirectory(prefix="study-app-recovered-owner-") as raw:
+            root = Path(raw).resolve()
+            executable = root / "node.exe"
+            entrypoint = root / "server.js"
+            database = root / "app.db"
+            owner = root / "production-owner.json"
+            executable.write_bytes(b"node-runtime")
+            entrypoint.write_text("// server\n", encoding="utf-8")
+            database.write_bytes(b"sqlite-fixture")
+            expected_owner = b"node-quiesced-owner"
+            owner.write_bytes(expected_owner)
+            rollback_map = {
+                "deploymentKind": "native-windows",
+                "executablePath": str(executable),
+                "executableSha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+                "entrypointPath": str(entrypoint),
+                "entrypointSha256": hashlib.sha256(entrypoint.read_bytes()).hexdigest(),
+                "cwd": str(root),
+                "host": "127.0.0.1",
+                "ports": {"api": 5173},
+                "databasePath": str(database),
+                "environment": rollback_environment,
+            }
+            previous_unsigned = {
+                "schemaVersion": 1,
+                "markerKind": "runtime-owner",
+                "ownerState": "node_active",
+                "runtimeNamespace": "production",
+                "databaseLineageId": "lineage",
+                "subjectDatabaseId": "subject",
+                "databaseIdentityManifestPath": str(root / "identity.json"),
+                "databaseIdentityManifestFileSha256": "a" * 64,
+                "originReceiptPath": str(root / "origin.json"),
+                "originReceiptFileSha256": "b" * 64,
+                "originReceiptSha256": "c" * 64,
+                "entrypointPath": str(entrypoint),
+                "processId": 41001,
+                "executablePath": str(executable),
+                "cwd": str(root),
+                "argv": [str(executable), str(entrypoint)],
+                "listenerHost": "127.0.0.1",
+                "listenerPort": 5173,
+                "databasePaths": [str(database)],
+                "createdAt": "2026-08-15T00:00:00Z",
+            }
+            previous_owner = canonical_json_bytes(
+                {
+                    **previous_unsigned,
+                    "ownerMarkerSha256": hashlib.sha256(
+                        canonical_json_bytes(previous_unsigned)
+                    ).hexdigest(),
+                }
+            )
+            configured = SimpleNamespace(
+                executable_path=executable,
+                entrypoint_path=entrypoint,
+                cwd=root,
+                argv=(str(executable), str(entrypoint)),
+                environment=rollback_environment,
+            )
+            operations = object.__new__(native_runtime.NativeWindowsRuntimeOperations)
+            operations._configuration = SimpleNamespace(
+                rollback=configured,
+                roles=(
+                    SimpleNamespace(
+                        role="api",
+                        environment={"PRODUCTION_OWNER_MARKER": str(owner)}
+                    ),
+                ),
+            )
+            handle = native_runtime.RuntimeProcess(
+                role="frozen-node",
+                argv=configured.argv,
+                cwd=root,
+                environment=rollback_environment,
+                child=_Child(41002),
+            )
+            operations._active_frozen_node = handle
+            operations._active_rollback_map = rollback_map
+
+            operations.commit_frozen_node_owner(
+                handle,
+                rollback_map,
+                owner_marker=owner,
+                expected_owner_payload=expected_owner,
+                previous_node_owner_payload=previous_owner,
+            )
+
+            document = json.loads(owner.read_text(encoding="utf-8"))
+            self.assertEqual(41002, document["processId"])
+            self.assertNotEqual(41001, document["processId"])
+            unsigned = {
+                key: value
+                for key, value in document.items()
+                if key != "ownerMarkerSha256"
+            }
+            self.assertEqual(
+                hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest(),
+                document["ownerMarkerSha256"],
+            )
+
     def test_native_legacy_probe_requires_all_frozen_node_paths(self) -> None:
         from backend.app.providers.native_runtime import (
             NativeLegacyReadinessProbe,

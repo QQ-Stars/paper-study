@@ -1129,10 +1129,14 @@ class RuntimeOwnershipTests(unittest.TestCase):
             self.assertEqual((), tuple(lease_root.glob("*.fence")))
 
     def test_filesystem_drain_reclaims_expired_dead_api_presence(self) -> None:
+        from backend.app.cli import runtime_owner
         from backend.app.cli.runtime_owner import FilesystemCandidateRuntimeDrain
         from backend.app.providers.runtime_lease import ApiRuntimePresence
 
         with p4_identity_fixture() as fixture:
+            with subprocess.Popen([sys.executable, "-B", "-c", "pass"]) as child:
+                exited_pid = child.pid
+                child.wait(timeout=10)
             identity_type, _owner_type, _process_type, _snapshot_type = _api()
             identity_path = _candidate_identity(fixture, identity_type)
             lease_root = fixture.root / "leases"
@@ -1144,7 +1148,7 @@ class RuntimeOwnershipTests(unittest.TestCase):
                 environment="candidate",
                 runtime_namespace="p4-dead-api",
                 owner_id="dead-api",
-                pid=2_000_000_000,
+                pid=exited_pid,
                 lease_seconds=1,
             )
             drain = FilesystemCandidateRuntimeDrain(
@@ -1153,13 +1157,18 @@ class RuntimeOwnershipTests(unittest.TestCase):
                 timeout_seconds=0.2,
             )
             try:
-                self.assertEqual(
-                    ("api", "worker", "scheduler"),
-                    drain.stop_and_wait(
-                        database=fixture.candidate_database_path,
-                        runtime_namespace="p4-dead-api",
-                    ),
-                )
+                with mock.patch.object(
+                    runtime_owner,
+                    "runtime_pid_is_alive",
+                    return_value=False,
+                ):
+                    self.assertEqual(
+                        ("api", "worker", "scheduler"),
+                        drain.stop_and_wait(
+                            database=fixture.candidate_database_path,
+                            runtime_namespace="p4-dead-api",
+                        ),
+                    )
                 self.assertFalse(expired.path.exists())
             finally:
                 drain.release_fence()

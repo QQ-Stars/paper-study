@@ -506,10 +506,13 @@ class FinalWindowCoordinator:
                     operations=self._operations,
                     rollback_map=dict(lease["frozenNodeRollbackMap"]),
                     initial_owner_state="node_quiesced",
-                    commit_node_active=lambda: _cas_replace(
-                        owner_path,
-                        quiesced_owner,
-                        original_owner,
+                    commit_node_active=lambda handle: _commit_recovered_node_owner(
+                        operations=self._operations,
+                        handle=handle,
+                        rollback_map=dict(lease["frozenNodeRollbackMap"]),
+                        owner_path=owner_path,
+                        expected_owner_payload=quiesced_owner,
+                        previous_node_owner_payload=original_owner,
                     ),
                 )
                 events = list(ordered_events)
@@ -1322,6 +1325,28 @@ def _runtime_owner_state_payload(
         "updatedAt": _timestamp(clock()),
     }
     return _self_hashed(unsigned, "ownerMarkerSha256")
+
+
+def _commit_recovered_node_owner(
+    *,
+    operations: object,
+    handle: object,
+    rollback_map: Mapping[str, object],
+    owner_path: Path,
+    expected_owner_payload: bytes,
+    previous_node_owner_payload: bytes,
+) -> None:
+    native_commit = getattr(operations, "commit_frozen_node_owner", None)
+    if callable(native_commit):
+        native_commit(
+            handle,
+            rollback_map,
+            owner_marker=owner_path,
+            expected_owner_payload=expected_owner_payload,
+            previous_node_owner_payload=previous_node_owner_payload,
+        )
+        return
+    _cas_replace(owner_path, expected_owner_payload, previous_node_owner_payload)
 
 
 def _load_recovery(

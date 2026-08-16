@@ -572,7 +572,7 @@ def execute_rollback_tail(
     rollback_map: Mapping[str, object],
     initial_owner_state: str,
     commit_nonactive_owner: Callable[[], None] | None = None,
-    commit_node_active: Callable[[], None],
+    commit_node_active: Callable[[object], None],
     on_event: Callable[[str], None] | None = None,
 ) -> tuple[tuple[str, ...], Mapping[str, object]]:
     frozen_map = validate_frozen_node_rollback_map(rollback_map)
@@ -630,7 +630,7 @@ def execute_rollback_tail(
             "The frozen Node legacy smoke did not pass.",
         )
     record("legacy_smoked")
-    commit_node_active()
+    commit_node_active(handle)
     record("owner_node_active")
     validate_rollback_tail(
         initial_owner_state=initial_owner_state,
