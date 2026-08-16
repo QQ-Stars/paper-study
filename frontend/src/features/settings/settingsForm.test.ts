@@ -31,6 +31,11 @@ const view: SettingsView = {
   embedApiModel: 'embed-model',
   embedKeyTail: '9012',
   hasEmbedKey: true,
+  pdfTextProvider: 'default',
+  ocrBaseUrl: '',
+  ocrModel: '',
+  ocrKeyTail: '',
+  hasOcrKey: false,
 };
 
 describe('settings payload', () => {
@@ -50,6 +55,7 @@ describe('settings payload', () => {
       apiKey: ' new-primary ',
       s2ApiKey: ' new-s2 ',
       embedApiKey: ' new-embed ',
+      ocrApiKey: '',
     });
 
     expect(update).toEqual({
@@ -66,6 +72,9 @@ describe('settings payload', () => {
       embedApiBase: 'https://embed.example.test/v1',
       embedApiModel: 'embed-model',
       embedApiKey: 'new-embed',
+      pdfTextProvider: 'default',
+      ocrBaseUrl: '',
+      ocrModel: '',
       obsidianEnabled: false,
       obsidianVaultPath: '',
       obsidianRootFolder: 'Research',

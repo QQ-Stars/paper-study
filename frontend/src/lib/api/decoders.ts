@@ -507,6 +507,15 @@ export const decodeSettingsView: Decoder<SettingsView> = (value, path = '$') => 
     researchTheme: text('researchTheme'), embedProvider: text('embedProvider'), embedApiBase: text('embedApiBase'),
     embedApiModel: text('embedApiModel'), embedKeyTail: text('embedKeyTail'),
     hasEmbedKey: boolean(field(input, 'hasEmbedKey'), `${path}.hasEmbedKey`),
+    pdfTextProvider: optionalString(
+      field(input, 'pdfTextProvider'), `${path}.pdfTextProvider`, 'default',
+    ),
+    ocrBaseUrl: optionalString(field(input, 'ocrBaseUrl'), `${path}.ocrBaseUrl`, ''),
+    ocrModel: optionalString(field(input, 'ocrModel'), `${path}.ocrModel`, ''),
+    ocrKeyTail: optionalString(field(input, 'ocrKeyTail'), `${path}.ocrKeyTail`, ''),
+    hasOcrKey: optionalStrictBoolean(
+      field(input, 'hasOcrKey'), `${path}.hasOcrKey`, false,
+    ),
     obsidianEnabled: optionalStrictBoolean(
       field(input, 'obsidianEnabled'), `${path}.obsidianEnabled`, false,
     ),

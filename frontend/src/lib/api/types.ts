@@ -239,6 +239,11 @@ export interface SettingsView {
   embedApiModel: string;
   embedKeyTail: string;
   hasEmbedKey: boolean;
+  pdfTextProvider: string;
+  ocrBaseUrl: string;
+  ocrModel: string;
+  ocrKeyTail: string;
+  hasOcrKey: boolean;
   obsidianEnabled?: boolean;
   obsidianVaultPath?: string;
   obsidianRootFolder?: string;
@@ -343,6 +348,10 @@ export interface SettingsUpdate {
   embedApiBase?: string;
   embedApiModel?: string;
   embedApiKey?: string;
+  pdfTextProvider?: string;
+  ocrBaseUrl?: string;
+  ocrModel?: string;
+  ocrApiKey?: string;
   obsidianEnabled?: boolean;
   obsidianVaultPath?: string;
   obsidianRootFolder?: string;

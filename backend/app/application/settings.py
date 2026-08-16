@@ -39,6 +39,7 @@ _STRING_FIELDS = frozenset(
         "ocrBaseUrl",
         "ocrApiBase",
         "ocrModel",
+        "pdfTextProvider",
         "embedProvider",
         "embedApiBase",
         "embedApiModel",
@@ -280,6 +281,8 @@ class SettingsService:
             "ocrProvider": _value(document, "ocrProvider", env, "OCR_PROVIDER", ""),
             "ocrBaseUrl": _value(document, "ocrBaseUrl", env, "OCR_BASE_URL", ""),
             "ocrModel": _value(document, "ocrModel", env, "OCR_MODEL", ""),
+            # PDF 文本提取方式：default=本地 pymupdf4llm（默认），ocr=OCR 模型 API。
+            "pdfTextProvider": _value(document, "pdfTextProvider", env, "PDF_TEXT_PROVIDER", "default"),
             "ocrTimeout": _integer_value(document, "ocrTimeout", env, "OCR_TIMEOUT", 60000),
             "ocrEnabled": _boolean_value(document, "ocrEnabled", env, "OCR_ENABLED", False),
             "ocrPageBatchSize": _integer_value(

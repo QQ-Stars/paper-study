@@ -182,6 +182,57 @@ function SettingsForm({ settings }: { readonly settings: SettingsView }) {
         </div>
       </section>
 
+      <section className="settings-section" aria-labelledby="settings-pdftext-heading">
+        <header>
+          <p>PDF TEXT</p>
+          <h2 id="settings-pdftext-heading">PDF 文本提取</h2>
+          <span>影响讲解 / 翻译的全文读取；默认本地解析，扫描件或排版复杂的 PDF 可改用 OCR 模型 API。</span>
+        </header>
+        <div className="settings-grid">
+          <Field label="提取方式">
+            <select
+              value={draft.pdfTextProvider}
+              onChange={(event) => updateDraft(
+                'pdfTextProvider',
+                event.currentTarget.value as SettingsDraft['pdfTextProvider'],
+              )}
+            >
+              <option value="default">默认（本地解析）</option>
+              <option value="ocr">OCR 模型 API</option>
+            </select>
+          </Field>
+          {draft.pdfTextProvider === 'ocr' ? (
+            <>
+              <Field label="OCR Base URL" hint="OpenAI 兼容接口根地址，如 https://api.openai.com/v1">
+                <input
+                  type="url"
+                  value={draft.ocrBaseUrl}
+                  placeholder="https://api.example.com/v1"
+                  onChange={(event) => updateDraft('ocrBaseUrl', event.currentTarget.value)}
+                />
+              </Field>
+              <Field label="OCR Model" hint="支持图片输入的视觉/OCR 模型名">
+                <input
+                  value={draft.ocrModel}
+                  placeholder="如 gpt-4o / qwen-vl-max"
+                  onChange={(event) => updateDraft('ocrModel', event.currentTarget.value)}
+                />
+              </Field>
+              <Field label="OCR API Key" hint={secretPlaceholder(settings.hasOcrKey, settings.ocrKeyTail)}>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  aria-label="OCR API Key"
+                  value={secrets.ocrApiKey}
+                  placeholder={secretPlaceholder(settings.hasOcrKey, settings.ocrKeyTail)}
+                  onChange={(event) => updateSecret('ocrApiKey', event.currentTarget.value)}
+                />
+              </Field>
+            </>
+          ) : null}
+        </div>
+      </section>
+
       <section className="settings-section" aria-labelledby="settings-obsidian-heading">
         <header>
           <p>OBSIDIAN</p>

@@ -11,6 +11,9 @@ export interface SettingsDraft {
   embedProvider: string;
   embedApiBase: string;
   embedApiModel: string;
+  pdfTextProvider: 'default' | 'ocr';
+  ocrBaseUrl: string;
+  ocrModel: string;
   obsidianEnabled: boolean;
   obsidianVaultPath: string;
   obsidianRootFolder: string;
@@ -25,6 +28,7 @@ export interface SecretDraft {
   apiKey: string;
   s2ApiKey: string;
   embedApiKey: string;
+  ocrApiKey: string;
 }
 
 export function createSettingsDraft(view: SettingsView): SettingsDraft {
@@ -39,6 +43,9 @@ export function createSettingsDraft(view: SettingsView): SettingsDraft {
     embedProvider: view.embedProvider,
     embedApiBase: view.embedApiBase,
     embedApiModel: view.embedApiModel,
+    pdfTextProvider: view.pdfTextProvider === 'ocr' ? 'ocr' : 'default',
+    ocrBaseUrl: view.ocrBaseUrl,
+    ocrModel: view.ocrModel,
     obsidianEnabled: view.obsidianEnabled ?? false,
     obsidianVaultPath: view.obsidianVaultPath ?? '',
     obsidianRootFolder: view.obsidianRootFolder ?? 'Research',
@@ -51,7 +58,7 @@ export function createSettingsDraft(view: SettingsView): SettingsDraft {
 }
 
 export function emptySecrets(): SecretDraft {
-  return { apiKey: '', s2ApiKey: '', embedApiKey: '' };
+  return { apiKey: '', s2ApiKey: '', embedApiKey: '', ocrApiKey: '' };
 }
 
 export function buildSettingsUpdate(
@@ -69,6 +76,9 @@ export function buildSettingsUpdate(
     embedProvider: draft.embedProvider,
     embedApiBase: draft.embedApiBase,
     embedApiModel: draft.embedApiModel,
+    pdfTextProvider: draft.pdfTextProvider,
+    ocrBaseUrl: draft.ocrBaseUrl,
+    ocrModel: draft.ocrModel,
     obsidianEnabled: draft.obsidianEnabled,
     obsidianVaultPath: draft.obsidianVaultPath,
     obsidianRootFolder: draft.obsidianRootFolder,
@@ -82,6 +92,9 @@ export function buildSettingsUpdate(
   if (secrets.s2ApiKey.trim()) update.s2ApiKey = secrets.s2ApiKey.trim();
   if (secrets.embedApiKey.trim()) {
     update.embedApiKey = secrets.embedApiKey.trim();
+  }
+  if (secrets.ocrApiKey.trim()) {
+    update.ocrApiKey = secrets.ocrApiKey.trim();
   }
   return update;
 }

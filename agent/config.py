@@ -48,6 +48,19 @@ RESEARCH_THEME = _S.get("researchTheme") or os.getenv("RESEARCH_THEME") or ""
 # 仅为防超长综述撑爆模型上下文而设，可经 settings.json: explainMaxChars 调整。
 EXPLAIN_MAX_CHARS = int(_S.get("explainMaxChars") or os.getenv("EXPLAIN_MAX_CHARS") or 120000)
 
+# PDF 文本提取方式：default=本地 pymupdf4llm 解析（默认，行为不变）；
+# ocr=调用 OCR 模型 API（OpenAI 兼容 chat/vision 接口）提取文本，失败自动回退本地解析。
+# 在网页 ⚙ 设置里改；只影响讲解/翻译的全文读取（full_text），不影响采集分类。
+PDF_TEXT_PROVIDER = (_S.get("pdfTextProvider") or os.getenv("PDF_TEXT_PROVIDER") or "default").strip().lower()
+OCR_API_BASE = (_S.get("ocrBaseUrl") or _S.get("ocrApiBase") or os.getenv("OCR_BASE_URL") or "").strip().rstrip("/")
+OCR_API_KEY = (_S.get("ocrApiKey") or os.getenv("OCR_API_KEY") or "").strip()
+OCR_MODEL = (_S.get("ocrModel") or os.getenv("OCR_MODEL") or "").strip()
+OCR_DPI = int(_S.get("ocrDpi") or os.getenv("OCR_DPI") or 200)
+# 每次 OCR 请求携带的页数（多页一次请求，减少往返）；0/缺省按 4 页。
+OCR_PAGE_BATCH = int(_S.get("ocrPageBatchSize") or os.getenv("OCR_PAGE_BATCH_SIZE") or 4) or 4
+# OCR 最多处理的页数；0=不限（仍受 EXPLAIN_MAX_CHARS 截断保护）。
+OCR_MAX_PAGES = int(_S.get("ocrMaxPages") or os.getenv("OCR_MAX_PAGES") or 0)
+
 # 语义检索的嵌入模型（本地 model2vec 静态嵌入，纯 numpy，无需 GPU/torch/onnx）。
 # 默认多语种 → 中文 query 可直接匹配英文论文。可在 settings.json: embedModel 换。
 EMBED_MODEL = _S.get("embedModel") or os.getenv("EMBED_MODEL") or "minishlab/potion-multilingual-128M"
