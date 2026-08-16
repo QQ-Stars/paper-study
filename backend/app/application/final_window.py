@@ -756,6 +756,10 @@ def _required_positive_int(value: object) -> int:
 
 
 def _pid_is_alive(pid: int) -> bool:
+    if os.name == "nt":
+        from backend.app.providers.runtime_lease import runtime_pid_is_alive
+
+        return runtime_pid_is_alive(pid)
     try:
         os.kill(pid, 0)
     except (OSError, ValueError):

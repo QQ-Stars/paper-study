@@ -209,6 +209,16 @@ class FinalWindowWatchdogTests(unittest.TestCase):
             self.assertEqual("CUTOVER_TOKEN_PERMISSIONS_INVALID", denied.exception.code)
             self.assertFalse(failed.exists())
 
+    @unittest.skipUnless(os.name == "nt", "Windows PID semantics only")
+    def test_windows_pid_probe_handles_live_and_exited_processes(self) -> None:
+        from backend.app.application.final_window import _pid_is_alive
+
+        self.assertTrue(_pid_is_alive(os.getpid()))
+        with subprocess.Popen([sys.executable, "-B", "-c", "pass"]) as child:
+            exited_pid = child.pid
+            child.wait(timeout=10)
+        self.assertFalse(_pid_is_alive(exited_pid))
+
 
 def _write_window(
     root: Path,

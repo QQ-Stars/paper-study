@@ -498,19 +498,30 @@ def _pid_is_alive(pid: int) -> bool:
             return error.errno != errno.ESRCH
         return True
     import ctypes
+    from ctypes import wintypes
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    process = kernel32.OpenProcess(
-        0x1000,
-        False,
-        pid,
-    )
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    get_exit_code = kernel32.GetExitCodeProcess
+    get_exit_code.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    get_exit_code.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    process = open_process(0x1000, False, pid)
     if not process:
         # ERROR_INVALID_PARAMETER is how OpenProcess reports a PID that does
         # not exist. Access-denied and indeterminate failures must fail closed.
         return ctypes.get_last_error() != 87
-    kernel32.CloseHandle(process)
-    return True
+    try:
+        exit_code = wintypes.DWORD()
+        if not get_exit_code(process, ctypes.byref(exit_code)):
+            return True
+        return exit_code.value == 259
+    finally:
+        close_handle(process)
 
 
 def runtime_pid_is_alive(pid: int) -> bool:

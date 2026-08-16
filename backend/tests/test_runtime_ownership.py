@@ -1173,6 +1173,7 @@ class RuntimeOwnershipTests(unittest.TestCase):
 
             kernel32 = SimpleNamespace(
                 OpenProcess=mock.Mock(return_value=0),
+                GetExitCodeProcess=mock.Mock(),
                 CloseHandle=mock.Mock(),
             )
             with (
