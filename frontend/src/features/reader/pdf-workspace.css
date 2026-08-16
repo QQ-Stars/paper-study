@@ -262,14 +262,18 @@
 }
 
 .pdf-workspace__translation-popover {
-  z-index: var(--z-overlay);
+  position: fixed;
+  z-index: var(--z-overlay, 60);
   display: grid;
   width: min(26rem, calc(100vw - 1.5rem));
+  max-height: min(24rem, calc(100vh - 1.5rem));
   gap: var(--space-3);
+  overflow: auto;
   padding: var(--space-4);
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-overlay);
   background: var(--color-surface-strong);
+  color: var(--color-text);
   box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 0.52);
 }
 
@@ -288,8 +292,13 @@
 .pdf-workspace__translation-popover header button {
   padding: 0;
   border-color: transparent;
-  color: var(--color-text-muted);
+  color: var(--color-text);
+  opacity: 0.72;
   font-size: 1.25rem;
+}
+
+.pdf-workspace__translation-popover header button:hover {
+  opacity: 1;
 }
 
 .pdf-workspace__translation-popover p {

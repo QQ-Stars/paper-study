@@ -433,19 +433,37 @@ export function PdfWorkspace({
     closePopover();
   };
 
+  // Clamp the translation popover into the visible window: selections near the
+  // bottom/right edge used to push it fully off-screen ("invisible bubble").
+  // Sizes are bounded by css (width min(26rem,…), max-height min(24rem,…)), so
+  // the bounds alone are enough to decide placement without measuring the DOM.
   const popoverStyle = useMemo<CSSProperties | undefined>(() => {
     if (!ownsSelection) return undefined;
-    if (!selection.popoverRect) {
+    const margin = 12;
+    const gap = 10;
+    const innerWidth = window.innerWidth;
+    const innerHeight = window.innerHeight;
+    const width = Math.min(416, innerWidth - margin * 2);
+    const height = Math.min(384, innerHeight - margin * 2);
+    const clampLeft = (value: number) =>
+      Math.round(
+        Math.min(Math.max(margin, value), Math.max(margin, innerWidth - width - margin)),
+      );
+    const rect = selection.popoverRect;
+    if (!rect) {
       return {
         position: 'fixed',
-        right: 12,
-        bottom: 12,
+        left: clampLeft(innerWidth - width - margin),
+        top: Math.round(Math.max(margin, innerHeight - height - margin)),
       };
     }
+    const belowTop = rect.bottom + gap;
+    const fitsBelow = belowTop + height <= innerHeight - margin;
+    const top = fitsBelow ? belowTop : Math.max(margin, rect.top - height - gap);
     return {
       position: 'fixed',
-      left: Math.max(12, selection.popoverRect.left),
-      top: Math.max(12, selection.popoverRect.bottom + 10),
+      left: clampLeft(rect.left),
+      top: Math.round(top),
     };
   }, [ownsSelection, selection.popoverRect]);
 

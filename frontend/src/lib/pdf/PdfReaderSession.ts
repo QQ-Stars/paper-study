@@ -145,7 +145,9 @@ function defaultIntersectionObserver(
           notify(entry.target, entry.isIntersecting);
         }
       },
-      { root },
+      // Pre-render pages just outside the viewport so scrolling never hits an
+      // empty placeholder; keeps page geometry stable during fast scrolls.
+      { root, rootMargin: '300px 0px' },
     );
   }
 
@@ -480,6 +482,16 @@ export class PdfReaderSession {
     else this.#cancelPage(page);
   }
 
+  #retainedSize(page: MountedPageOwner): { width: number; height: number } {
+    // Keep the last rendered box size while a page is cancelled/re-rendered so
+    // the document layout never jumps between placeholder and rendered sizes.
+    const previous = this.#snapshot.pages[page.surface.pageNumber];
+    if (previous && previous.width > 0 && previous.height > 0) {
+      return { width: previous.width, height: previous.height };
+    }
+    return { width: 0, height: 0 };
+  }
+
   #startPageRender(page: MountedPageOwner): Promise<void> {
     const document = this.#owner?.document;
     if (!document || page.released || !page.visible) return Promise.resolve();
@@ -513,11 +525,12 @@ export class PdfReaderSession {
     page.renderGeneration = generation;
     page.renderZoom = zoom;
     page.abortController = controller;
+    const retained = this.#retainedSize(page);
     this.#publishPage(page, {
       pageNumber: page.surface.pageNumber,
       status: 'loading',
-      width: 0,
-      height: 0,
+      width: retained.width,
+      height: retained.height,
       error: null,
     });
 
@@ -569,11 +582,12 @@ export class PdfReaderSession {
     } catch (error) {
       if (!this.#isPageCurrent(page, revision, generation)) return;
       if (isAbortError(error)) {
+        const retained = this.#retainedSize(page);
         this.#publishPage(page, {
           pageNumber: page.surface.pageNumber,
           status: 'idle',
-          width: 0,
-          height: 0,
+          width: retained.width,
+          height: retained.height,
           error: null,
         });
         return;
@@ -607,10 +621,10 @@ export class PdfReaderSession {
   }
 
   #resetSurface(surface: PdfPageSurface): void {
+    // Zero the backing store but keep the CSS box size: the page element must
+    // not reflow between renders, otherwise scrolling resizes pages visibly.
     surface.canvas.width = 0;
     surface.canvas.height = 0;
-    surface.canvas.style.width = '';
-    surface.canvas.style.height = '';
     surface.textLayer.replaceChildren();
   }
 
@@ -625,11 +639,12 @@ export class PdfReaderSession {
     page.renderHandle?.dispose();
     page.renderHandle = null;
     this.#resetSurface(page.surface);
+    const retained = this.#retainedSize(page);
     this.#publishPage(page, {
       pageNumber: page.surface.pageNumber,
       status: 'idle',
-      width: 0,
-      height: 0,
+      width: retained.width,
+      height: retained.height,
       error: null,
     });
   }
