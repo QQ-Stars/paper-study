@@ -322,7 +322,10 @@ export function Component() {
         : null;
 
   return (
-    <div className="acquire-workspace">
+    <div className="acquire-page">
+      {/* sticky 表单卡的包含块仅限双列区：下方的全宽卡片（后台任务/本地 PDF）
+          在 .acquire-workspace 之外排布，滚动时不会被钉住的表单卡遮挡。 */}
+      <div className="acquire-workspace">
       <section className="acquire-command" aria-label="研究采集命令">
         <header className="acquire-command__header">
           <div>
@@ -490,6 +493,7 @@ export function Component() {
           </pre>
         ) : null}
       </section>
+      </div>
 
       <section className="acquire-jobs" aria-label="后台任务">
         <header>
