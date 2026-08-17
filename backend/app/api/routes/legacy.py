@@ -318,12 +318,35 @@ def create_legacy_router() -> APIRouter:
         if not str(body.get("query") or "").strip() or not _valid_sources(body.get("sources")):
             return _json_response({"ok": False, "error": "缺少搜索方向或数据源"}, 400)
         args = ["--query", str(body["query"]), "--sources", ",".join(_valid_sources(body["sources"]))]
-        if body.get("years") is not None:
-            args.extend(("--years", str(body["years"])))
-        if body.get("max") is not None:
-            args.extend(("--max", str(body["max"])))
+        # 与旧 Node 对齐：years/max/min-relevance/expand/only-a/queries 必须全部透传，
+        # 否则前端生成/编辑的检索词与高级选项会被静默丢弃。
+        years = body.get("years")
+        args.extend(("--years", str(years) if years not in (None, "") else "2024-2026"))
+        try:
+            max_candidates = min(int(body.get("max") or 10), 60)
+        except (TypeError, ValueError):
+            max_candidates = 10
+        args.extend(("--max", str(max_candidates)))
+        if body.get("minRelevance") is not None:
+            args.extend(("--min-relevance", str(body["minRelevance"])))
+        if body.get("expand"):
+            args.append("--expand")
+        if body.get("onlyA"):
+            args.append("--only-a")
+        queries = body.get("queries")
+        if isinstance(queries, list) and [item for item in queries if str(item or "").strip()]:
+            args.extend(
+                ("--queries", json.dumps([str(item) for item in queries], ensure_ascii=False))
+            )
         return ndjson_response(
-            _agent_events(request, "search", args, terminal_fields={"candidates": []})
+            _agent_events(
+                request,
+                "search",
+                args,
+                terminal_fields={"candidates": []},
+                # agent search 的 stdout 是纯 JSON 数组，需包装进 candidates 字段。
+                stdout_array_field="candidates",
+            )
         )
 
     @router.post("/api/ingest-selected")
@@ -867,6 +890,7 @@ async def _agent_events(
     terminal_type: str = "result",
     terminal_fields: dict[str, object] | None = None,
     stdin: str | bytes | None = None,
+    stdout_array_field: str | None = None,
 ):
     provider = _legacy_agent(request)
     fields = dict(terminal_fields or {})
@@ -875,13 +899,26 @@ async def _agent_events(
         return
     stream = getattr(provider, "stream_events", None)
     if callable(stream):
-        result = stream(
-            command,
-            args,
-            terminal_type=terminal_type,
-            terminal_fields=fields,
-            stdin=stdin,
-        )
+        extra: dict[str, object] = {}
+        if stdout_array_field is not None:
+            extra["stdout_array_field"] = stdout_array_field
+        try:
+            result = stream(
+                command,
+                args,
+                terminal_type=terminal_type,
+                terminal_fields=fields,
+                stdin=stdin,
+                **extra,
+            )
+        except TypeError:
+            result = stream(
+                command,
+                args,
+                terminal_type=terminal_type,
+                terminal_fields=fields,
+                stdin=stdin,
+            )
         async for event in result:
             yield event
         return
@@ -902,6 +939,8 @@ async def _agent_events(
             parsed = json.loads(raw_stdout) if raw_stdout.strip() else {}
             if isinstance(parsed, dict):
                 decoded.update(parsed)
+            elif isinstance(parsed, list) and stdout_array_field is not None:
+                decoded[stdout_array_field] = parsed
         except (TypeError, ValueError):
             pass
         for key, value in fields.items():

@@ -96,6 +96,7 @@ class LegacyAgentProvider:
         terminal_type: str = "result",
         terminal_fields: Mapping[str, object] | None = None,
         stdin: str | bytes | None = None,
+        stdout_array_field: str | None = None,
     ):
         process = await self._start(command, args, stdin=stdin)
         assert process.stdout is not None
@@ -157,6 +158,10 @@ class LegacyAgentProvider:
             decoded = json.loads(stdout_text) if stdout_text.strip() else {}
             if isinstance(decoded, dict):
                 payload.update(decoded)
+            elif isinstance(decoded, list) and stdout_array_field is not None:
+                # Some agent commands (e.g. `search`) emit a bare JSON array;
+                # wrap it into the expected terminal field for the frontend.
+                payload[stdout_array_field] = decoded
         except (TypeError, ValueError):
             pass
         for key, value in dict(terminal_fields or {}).items():
