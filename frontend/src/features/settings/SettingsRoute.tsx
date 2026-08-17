@@ -495,11 +495,7 @@ export function Component() {
   const fingerprint = JSON.stringify(query.data);
   return (
     <section className="settings-route" aria-label="设置">
-      <header className="settings-route__intro">
-        <p>LOCAL CONTROL PLANE</p>
-        <h2>配置研究工作区</h2>
-        <span>服务器事实与本机外观分开管理，敏感值不会回显。</span>
-      </header>
+      {/* 页标题已在顶部命令栏展示；原大块 intro 移除，把纵向空间让给设置表单。 */}
       <SettingsForm key={fingerprint} settings={query.data} />
     </section>
   );

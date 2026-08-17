@@ -132,12 +132,9 @@ export function Component() {
 
   return (
     <section className="reviews-route" aria-label="复习队列">
+      {/* 页标题已在顶部命令栏展示；intro 压缩为单行状态栏，把纵向空间让给队列。 */}
       <header className="reviews-route__intro">
-        <div>
-          <p>REVIEW / AUTHORITY SNAPSHOT</p>
-          <h2>复习队列</h2>
-          <span>{reviews.today} · {dueCount} 篇当前需要处理</span>
-        </div>
+        <span>{reviews.today} · {dueCount} 篇当前需要处理</span>
         <button
           type="button"
           disabled={query.isFetching}

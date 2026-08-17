@@ -4,13 +4,6 @@
   gap: var(--space-4);
 }
 
-.settings-route__intro {
-  display: grid;
-  gap: var(--space-1);
-  padding-inline: var(--space-1);
-}
-
-.settings-route__intro > p,
 .settings-section header > p {
   color: var(--color-accent-hover);
   font-family: var(--font-mono);
@@ -19,12 +12,6 @@
   letter-spacing: 0.11em;
 }
 
-.settings-route__intro h2 {
-  font-size: 1.25rem;
-  font-weight: 620;
-}
-
-.settings-route__intro span,
 .settings-section header span {
   color: var(--color-text-muted);
   font-size: var(--font-size-3);

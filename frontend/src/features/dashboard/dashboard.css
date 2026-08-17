@@ -6,55 +6,23 @@
 
 .dashboard-route__intro {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-5);
+  gap: var(--space-3);
   padding: 0 var(--space-1);
 }
 
-.dashboard-route__intro > div {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  column-gap: var(--space-2);
-}
-
 .dashboard-route__page-title {
-  width: fit-content;
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-1);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  text-transform: uppercase;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: var(--font-size-4);
+  font-weight: 640;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.dashboard-route__page-title::after {
-  margin-inline-start: var(--space-2);
-  color: var(--color-line-strong);
-  content: '/';
-}
-
-.dashboard-route__intro h2 {
-  grid-column: 1 / -1;
-  margin-top: var(--space-1);
-  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
-  font-weight: 620;
-  letter-spacing: -0.025em;
-  line-height: 1.12;
-}
-
-.dashboard-route__intro > div > p:last-child {
-  grid-column: 1 / -1;
-  margin-top: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-3);
-  line-height: 1.35;
-}
-
-.dashboard-route__kicker,
 .paper-deck__eyebrow,
 .paper-inspector__header p,
 .research-timeline__header p {
@@ -67,11 +35,11 @@
 
 .dashboard-route__context-trigger,
 .dashboard-route__state button {
-  min-height: 2.75rem;
-  padding-inline: var(--space-4);
+  min-height: 2.35rem;
+  padding-inline: var(--space-3);
   border-color: var(--color-accent);
   color: var(--color-text);
-  font-size: var(--font-size-3);
+  font-size: var(--font-size-2);
 }
 
 .dashboard-route__refresh {
@@ -817,10 +785,6 @@
 
   .research-timeline {
     order: 4;
-  }
-
-  .dashboard-route__intro > div > p:last-child {
-    max-width: 34ch;
   }
 
   .dashboard-route__context-trigger {

@@ -445,24 +445,8 @@ export function Component() {
 
   return (
     <section className="library-route" aria-label="文献库">
-      <header className="library-route__intro">
-        <div>
-          <p className="library-route__eyebrow">LIBRARY / EVIDENCE LEDGER</p>
-          <h2>文献台账</h2>
-          <p>{papers.length} 篇论文 · {visiblePapers.length} 篇当前可见</p>
-        </div>
-        <button
-          type="button"
-          className="library-route__add"
-          onClick={() => {
-            mutations.add.reset();
-            setAddEditorOpen(true);
-          }}
-        >
-          添加论文
-        </button>
-      </header>
-
+      {/* 页标题已在顶部命令栏展示；原「文献台账」大块 intro 移除，
+          「添加论文」并入筛选行，把纵向空间让给列表本身。 */}
       <div className="library-filters" aria-label="文献筛选">
         <label className="library-filters__search">
           <span>检索</span>
@@ -570,6 +554,16 @@ export function Component() {
           {semanticSearch.isPending
             ? '语义检索中…'
             : semanticScores == null ? '语义检索' : '返回普通检索'}
+        </button>
+        <button
+          type="button"
+          className="library-route__add"
+          onClick={() => {
+            mutations.add.reset();
+            setAddEditorOpen(true);
+          }}
+        >
+          添加论文
         </button>
       </div>
 

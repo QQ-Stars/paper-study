@@ -6,30 +6,13 @@
 
 .reviews-route__intro {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-5);
+  gap: var(--space-3);
   padding-inline: var(--space-1);
 }
 
-.reviews-route__intro p {
-  color: var(--color-accent-hover);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-1);
-  font-weight: 650;
-  letter-spacing: 0.11em;
-}
-
-.reviews-route__intro h2 {
-  margin-top: var(--space-1);
-  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
-  font-weight: 650;
-  letter-spacing: -0.03em;
-}
-
-.reviews-route__intro span {
-  display: block;
-  margin-top: var(--space-1);
+.reviews-route__intro > span {
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: var(--font-size-2);
@@ -37,9 +20,10 @@
 }
 
 .reviews-route__intro button {
-  min-height: 2.75rem;
-  padding-inline: var(--space-4);
+  min-height: 2.35rem;
+  padding-inline: var(--space-3);
   color: var(--color-text-muted);
+  font-size: var(--font-size-2);
 }
 
 .reviews-route__groups {

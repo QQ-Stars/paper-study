@@ -245,15 +245,12 @@ export function DashboardView({
 
   return (
     <section className="dashboard-route" aria-label="研究概览">
+      {/* intro 压缩为单行：页标题 + 上下文开关；原 kicker/副标题/描述移除，
+          把纵向空间让给今日摘要与工作台。 */}
       <header className="dashboard-route__intro">
-        <div>
-          <h1 id="workspace-page-title" className="dashboard-route__page-title" tabIndex={-1}>
-            研究概览
-          </h1>
-          <p className="dashboard-route__kicker">TODAY / RESEARCH CONTROL</p>
-          <h2>今天回到研究现场</h2>
-          <p>从当前论文继续，或处理已经到期的复习。</p>
-        </div>
+        <h1 id="workspace-page-title" className="dashboard-route__page-title" tabIndex={-1}>
+          研究概览
+        </h1>
         {inspectorMode !== 'rail' ? (
           <button
             id="dashboard-inspector-trigger"
