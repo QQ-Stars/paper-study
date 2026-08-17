@@ -240,6 +240,17 @@ describe('LibraryRoute', () => {
     await waitFor(() => expect(restart).toBeEnabled());
   });
 
+  it('explains why batch explainers cannot start when every pending paper lacks a PDF', async () => {
+    apiMocks.getExplainerPending.mockResolvedValue({ pending: 39, withPdf: 0, noPdf: 39 });
+    renderLibrary();
+
+    const manager = await screen.findByRole('region', { name: '批量讲解管理' });
+    const start = await within(manager).findByRole('button', { name: '批量生成缺失讲解' });
+    expect(start).toBeDisabled();
+    expect(within(manager).getByText(/待生成讲解的论文都缺少本地 PDF/)).toBeInTheDocument();
+    expect(apiMocks.explainBatch).not.toHaveBeenCalled();
+  });
+
   it('stops receiving a batch without accepting late progress or claiming server cancellation', async () => {
     const user = userEvent.setup();
     const request = deferred<SuccessfulExplainBatch>();

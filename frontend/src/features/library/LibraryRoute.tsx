@@ -447,6 +447,9 @@ export function Component() {
     <section className="library-route" aria-label="文献库">
       {/* 页标题已在顶部命令栏展示；原「文献台账」大块 intro 移除，
           「添加论文」并入筛选行，把纵向空间让给列表本身。 */}
+      {/* 批量讲解保持紧凑单行卡并置顶：入口需随时可见，不能藏在列表底部。 */}
+      <ExplainerBatchManager />
+
       <div className="library-filters" aria-label="文献筛选">
         <label className="library-filters__search">
           <span>检索</span>
@@ -625,9 +628,6 @@ export function Component() {
           </div>
         </>
       )}
-
-      {/* 批量讲解不再把台账列表顶到首屏之外：移到列表下方，功能不变。 */}
-      <ExplainerBatchManager />
 
       {addEditorOpen ? (
         <PaperEditor

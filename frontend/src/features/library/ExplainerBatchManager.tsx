@@ -215,6 +215,14 @@ export function ExplainerBatchManager() {
           待生成统计读取失败：{errorMessage(pendingQuery.error)}
         </p>
       ) : null}
+      {/* 禁用原因明示：待讲解论文全部缺 PDF 时按钮不可点，
+          若不解释用户会以为“点了没反应”。 */}
+      {session.phase === 'idle' && !pendingQuery.isPending && !pendingQuery.isError
+        && (pending?.pending ?? 0) > 0 && (pending?.withPdf ?? 0) === 0 ? (
+        <p className="library-explainer-batch__feedback" role="status">
+          暂无法开始：待生成讲解的论文都缺少本地 PDF（批量讲解需通读 PDF 全文），请先在「采集 → 本地 PDF」补齐 PDF。
+        </p>
+      ) : null}
       {session.phase === 'running' && session.progress ? (
         <p className="library-explainer-batch__feedback">{session.progress}</p>
       ) : null}
