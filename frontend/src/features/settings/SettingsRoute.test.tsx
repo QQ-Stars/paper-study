@@ -17,6 +17,9 @@ const apiMocks = vi.hoisted(() => ({
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
   testLlm: vi.fn(),
+  embed: vi.fn(),
+  getTitleTranslationStatus: vi.fn(),
+  translateTitles: vi.fn(),
 }));
 
 const obsidianMocks = vi.hoisted(() => ({
@@ -29,6 +32,17 @@ const obsidianMocks = vi.hoisted(() => ({
 
 vi.mock('../../lib/api/settingsGateway', () => ({
   settingsGateway: apiMocks,
+}));
+
+vi.mock('../../lib/api/insightsGateway', () => ({
+  insightsGateway: { embed: apiMocks.embed },
+}));
+
+vi.mock('../../lib/api/artifactGateway', () => ({
+  artifactGateway: {
+    getTitleTranslationStatus: apiMocks.getTitleTranslationStatus,
+    translateTitles: apiMocks.translateTitles,
+  },
 }));
 
 vi.mock('../../lib/api/obsidianGateway', () => ({
@@ -111,6 +125,12 @@ beforeEach(() => {
   apiMocks.getSettings.mockReset().mockResolvedValue(settings);
   apiMocks.saveSettings.mockReset().mockResolvedValue(undefined);
   apiMocks.testLlm.mockReset().mockResolvedValue({ output: '连接正常' });
+  apiMocks.embed.mockReset().mockResolvedValue({ type: 'result', ok: true, indexed: 3, total: 42 });
+  apiMocks.getTitleTranslationStatus.mockReset().mockResolvedValue({ pending: 2, running: false });
+  apiMocks.translateTitles.mockReset().mockResolvedValue({
+    type: 'result', ok: true,
+    summary: { total: 2, done: 2, failed: [], cancelled: false },
+  });
   obsidianMocks.getStatus.mockReset().mockResolvedValue(obsidianStatusFixture);
   obsidianMocks.testAccess.mockReset().mockResolvedValue(obsidianTestFixture);
   obsidianMocks.exportPaper.mockReset().mockResolvedValue(obsidianJobResponseFixture);
@@ -169,6 +189,26 @@ describe('Settings route', () => {
     await waitFor(() => expect(apiMocks.saveSettings).toHaveBeenCalledOnce());
     expect(screen.getByText('设置已由服务器确认。')).toBeInTheDocument();
     expect(screen.getByText('模型连接失败')).toBeInTheDocument();
+  });
+
+  it('rebuilds the semantic index and generates missing Chinese titles from the settings page', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    // 语义索引维护（对齐旧版 reindexBtn）
+    await user.click(await screen.findByRole('button', { name: '重建全库索引' }));
+    expect(await screen.findByText('索引完成：3 / 42。')).toBeInTheDocument();
+    expect(apiMocks.embed).toHaveBeenCalledWith('all');
+
+    await user.click(screen.getByRole('button', { name: '补齐缺失索引' }));
+    await waitFor(() => expect(apiMocks.embed).toHaveBeenCalledTimes(2));
+    expect(apiMocks.embed).toHaveBeenLastCalledWith('missing');
+
+    // 中文题名批量生成（对齐旧版 titleZhBatchBtn）
+    expect(await screen.findByText('待生成 2 篇')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '生成中文题名' }));
+    expect(await screen.findByText('已生成 2 / 2。')).toBeInTheDocument();
+    expect(apiMocks.translateTitles).toHaveBeenCalledOnce();
   });
 
   it('shows and saves all eight non-secret Obsidian settings', async () => {

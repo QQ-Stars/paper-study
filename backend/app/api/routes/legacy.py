@@ -858,28 +858,50 @@ async def _durable_artifact_events(
 
 
 async def _durable_embedding_events(request: Request, scope: str):
+    # 优先走 durable processing 管道；它对存量 legacy 论文常因缺少 ready
+    # source document 而失败（如 SOURCE_IDENTITY_MISSING）——此时回退到旧 Node
+    # 同款行为：spawn `python -m agent embed`，写入 paper_vectors，即
+    # /api/semsearch 与 MCP semantic_search 实际读取的语义索引。
     service = _processing_streams(request)
     stream = getattr(service, "embedding_events", None)
-    if not callable(stream):
-        yield {
-            "type": "result",
-            "ok": False,
-            "indexed": 0,
-            "total": 0,
-            "error": "processing service unavailable",
-        }
-        return
-    try:
-        async for event in stream(scope):
-            yield event
-    except Exception as error:
-        yield {
-            "type": "result",
-            "ok": False,
-            "indexed": 0,
-            "total": 0,
-            "error": _safe_error(error),
-        }
+    durable_terminal: dict[str, object] | None = None
+    if callable(stream):
+        try:
+            async for event in stream(scope):
+                if isinstance(event, dict) and event.get("type") == "result":
+                    durable_terminal = event
+                    if event.get("ok"):
+                        yield event
+                        return
+                    continue
+                yield event
+        except Exception as error:
+            durable_terminal = {"ok": False, "error": _safe_error(error)}
+    else:
+        durable_terminal = {"ok": False, "error": "processing service unavailable"}
+    async for event in _agent_events(
+        request,
+        "embed",
+        ["--scope", scope],
+        terminal_fields={"indexed": 0, "total": 0},
+    ):
+        # agent 通道完全不可用时，返回 durable 管道的原始失败原因。
+        if (
+            isinstance(event, dict)
+            and event.get("type") == "result"
+            and not event.get("ok")
+            and event.get("error") == "provider unavailable"
+            and durable_terminal is not None
+        ):
+            yield {
+                "type": "result",
+                "ok": False,
+                "indexed": 0,
+                "total": 0,
+                "error": str(durable_terminal.get("error") or "embedding failed"),
+            }
+            return
+        yield event
 
 
 async def _agent_events(

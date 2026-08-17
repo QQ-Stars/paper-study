@@ -23,6 +23,10 @@ class LegacyAgentResult:
 
 
 class LegacyAgentProvider:
+    # 这些命令的 stdout 是逐行结构化 JSON 事件流（progress… + 终止 result），
+    # 需逐行解析透传，不能走“stderr=进度行、stdout=单个终止 JSON”的默认通道。
+    _STRUCTURED_STDOUT_COMMANDS = frozenset({"title-translations"})
+
     def __init__(
         self,
         *,
@@ -98,6 +102,15 @@ class LegacyAgentProvider:
         stdin: str | bytes | None = None,
         stdout_array_field: str | None = None,
     ):
+        if command in self._STRUCTURED_STDOUT_COMMANDS:
+            async for event in self._stream_stdout_json_events(
+                command,
+                args,
+                terminal_type=terminal_type,
+                terminal_fields=terminal_fields,
+            ):
+                yield event
+            return
         process = await self._start(command, args, stdin=stdin)
         assert process.stdout is not None
         assert process.stderr is not None
@@ -174,6 +187,68 @@ class LegacyAgentProvider:
             else ("" if returncode == 0 else "legacy agent failed"),
         )
         yield {"type": terminal_type, **payload}
+
+    async def _stream_stdout_json_events(
+        self,
+        command: str,
+        args: Sequence[str],
+        *,
+        terminal_type: str,
+        terminal_fields: Mapping[str, object] | None,
+    ):
+        """逐行读 stdout 的结构化 JSON 事件并透传（title-translations 等命令）。
+        子进程未发出终止事件（崩溃/超时/被 kill）时补发失败终态。"""
+        process = await self._start(command, args, stdin=None)
+        assert process.stdout is not None
+        deadline = asyncio.get_running_loop().time() + self.timeout_seconds
+        fields = dict(terminal_fields or {})
+        drain_task = (
+            asyncio.create_task(process.stderr.read())
+            if process.stderr is not None
+            else None
+        )
+        background = tuple(task for task in (drain_task,) if task is not None)
+        saw_terminal = False
+        timed_out = False
+        try:
+            while True:
+                line_bytes = await _wait_before_deadline(
+                    process.stdout.readline(), deadline
+                )
+                if not line_bytes:
+                    break
+                line = line_bytes.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(event, dict):
+                    if event.get("type") == terminal_type:
+                        saw_terminal = True
+                    yield event
+            await _wait_before_deadline(process.wait(), deadline)
+            if drain_task is not None:
+                await drain_task
+        except asyncio.TimeoutError:
+            timed_out = True
+            await _finish_process(process, background, kill=True)
+        except BaseException:
+            await _finish_process(process, background, kill=True)
+            raise
+        else:
+            await _finish_process(process, background, kill=False)
+        if not saw_terminal:
+            returncode = 124 if timed_out else int(process.returncode or 0)
+            yield {
+                "type": terminal_type,
+                "ok": False,
+                **fields,
+                "error": "legacy agent timed out"
+                if timed_out
+                else ("" if returncode == 0 else "legacy agent failed"),
+            }
 
     async def confirm_candidates(
         self,

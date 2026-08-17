@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { settingsKeys } from '../../lib/api/keys';
 import type { SettingsUpdate, SettingsView } from '../../lib/api/types';
+import { artifactGateway } from '../../lib/api/artifactGateway';
+import { insightsGateway } from '../../lib/api/insightsGateway';
 import { settingsGateway } from '../../lib/api/settingsGateway';
 import { useObsidianProjection } from '../../lib/api/useObsidianProjection';
 import {
@@ -69,6 +71,18 @@ function SettingsForm({ settings }: { readonly settings: SettingsView }) {
   });
   const test = useMutation({
     mutationFn: () => settingsGateway.testLlm(),
+  });
+  // 语义索引维护（对齐旧版 reindexBtn）：missing=只补缺失，all=全库重建。
+  const embedIndex = useMutation({
+    mutationFn: (scope: 'all' | 'missing') => insightsGateway.embed(scope),
+  });
+  // 中文题名批量生成（对齐旧版 titleZhBatchBtn）。
+  const translateTitles = useMutation({
+    mutationFn: () => artifactGateway.translateTitles(0),
+  });
+  const titleStatus = useQuery({
+    queryKey: ['title-translations', 'status'],
+    queryFn: ({ signal }) => artifactGateway.getTitleTranslationStatus(signal),
   });
   const obsidian = useObsidianProjection();
 
@@ -179,6 +193,61 @@ function SettingsForm({ settings }: { readonly settings: SettingsView }) {
               onChange={(event) => updateSecret('embedApiKey', event.currentTarget.value)}
             />
           </Field>
+        </div>
+        <div className="settings-actions">
+          <button
+            type="button"
+            disabled={embedIndex.isPending}
+            onClick={() => embedIndex.mutate('missing')}
+          >
+            {embedIndex.isPending && embedIndex.variables === 'missing' ? '索引中…' : '补齐缺失索引'}
+          </button>
+          <button
+            type="button"
+            disabled={embedIndex.isPending}
+            onClick={() => embedIndex.mutate('all')}
+          >
+            {embedIndex.isPending && embedIndex.variables === 'all' ? '重建中…' : '重建全库索引'}
+          </button>
+          {embedIndex.isSuccess ? (
+            <output className="settings-status settings-status--ok">
+              索引完成：{embedIndex.data.indexed} / {embedIndex.data.total}。
+            </output>
+          ) : null}
+          {embedIndex.isError ? (
+            <output className="settings-status settings-status--error">{message(embedIndex.error)}</output>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="settings-section" aria-labelledby="settings-maintenance-heading">
+        <header>
+          <p>MAINTENANCE</p>
+          <h2 id="settings-maintenance-heading">数据维护</h2>
+          <span>新入库论文不会自动生成中文题名，可在这里一键补齐（新论文入库后语义索引会自动补建）。</span>
+        </header>
+        <div className="settings-actions">
+          <button
+            type="button"
+            disabled={translateTitles.isPending}
+            onClick={() => translateTitles.mutate()}
+          >
+            {translateTitles.isPending ? '生成中…' : '生成中文题名'}
+          </button>
+          {titleStatus.data && titleStatus.data.pending > 0 ? (
+            <small className="settings-status">待生成 {titleStatus.data.pending} 篇</small>
+          ) : null}
+          {translateTitles.isSuccess ? (
+            <output className="settings-status settings-status--ok">
+              已生成 {translateTitles.data.summary.done} / {translateTitles.data.summary.total}
+              {translateTitles.data.summary.failed.length > 0
+                ? `，失败 ${translateTitles.data.summary.failed.length} 篇`
+                : ''}。
+            </output>
+          ) : null}
+          {translateTitles.isError ? (
+            <output className="settings-status settings-status--error">{message(translateTitles.error)}</output>
+          ) : null}
         </div>
       </section>
 

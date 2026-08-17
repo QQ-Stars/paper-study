@@ -63,6 +63,9 @@ def main():
 
     sub.add_parser("translate-text", help="划词翻译：从 stdin 读一段英文 → 译成中文 → stdout")
 
+    tt = sub.add_parser("title-translations", help="批量为缺中文题名的论文生成 title_zh(LLM)；结构化事件→stdout")
+    tt.add_argument("--limit", type=int, default=0, help="本次最多处理多少篇，0=全部")
+
     rc = sub.add_parser("recommend", help="相似论文推荐(S2 Recommendations)：据库内一篇 → 候选JSON→stdout")
     rc.add_argument("--id", required=True, help="作为种子的库内论文 id")
     rc.add_argument("--limit", type=int, default=14)
@@ -147,6 +150,9 @@ def main():
             raw = raw[1:]
         sys.stdout.write(llm.translate_snippet(raw))
         sys.stdout.flush()
+    elif args.cmd == "title-translations":
+        from . import titles
+        titles.run_batch(limit=args.limit)
     elif args.cmd == "recommend":
         from . import recommend
         recommend.recommend_paper(args.id, args.limit)

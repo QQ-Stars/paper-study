@@ -198,6 +198,8 @@ class LegacyIngestService:
             payload.setdefault("ok", False)
             payload.setdefault("added", 0)
             payload.setdefault("error", "" if payload["ok"] else "legacy agent failed")
+            if payload["ok"] and _bounded_int(payload.get("added"), default=0, upper=100000) > 0:
+                self._start_embed_backfill()
             yield {"type": "done", **payload}
             return
 
@@ -222,8 +224,15 @@ class LegacyIngestService:
                         added = max(0, int(line.split("::", 1)[1]))
                     except ValueError:
                         pass
-            elif rendered.get("type") == "done" and added is not None:
-                rendered["added"] = added
+            elif rendered.get("type") == "done":
+                if added is not None:
+                    rendered["added"] = added
+                # 新论文入库成功后后台补建语义索引（对齐旧版「新采集自动补索引」）；
+                # confirm_events 复用本生成器，两条入库路径都能命中。
+                if rendered.get("ok") and _bounded_int(
+                    rendered.get("added"), default=0, upper=100000
+                ) > 0:
+                    self._start_embed_backfill()
             yield rendered
 
     async def confirm(
@@ -442,6 +451,29 @@ class LegacyIngestService:
         task = asyncio.create_task(self._run_background(identifier, runner))
         self._background.add(task)
         task.add_done_callback(self._background.discard)
+
+    def _start_embed_backfill(self) -> None:
+        """入库新增论文后，后台补建语义向量（embed --scope missing）。
+
+        与 HTTP 响应解耦：失败仅意味着下次语义检索时由 embed.rank 自愈，
+        不影响入库结果。
+        """
+        runner = getattr(self._provider, "run", None) if self._provider is not None else None
+        if not callable(runner):
+            return
+        task = asyncio.create_task(self._run_embed_backfill(runner))
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    async def _run_embed_backfill(self, runner: Any) -> None:
+        try:
+            result = runner("embed", ("--scope", "missing"))
+            if asyncio.iscoroutine(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
 
     async def _run_background(self, identifier: int, runner: Any) -> None:
         result: Any = None
