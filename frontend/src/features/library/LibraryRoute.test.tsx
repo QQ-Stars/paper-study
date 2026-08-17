@@ -631,4 +631,47 @@ describe('LibraryRoute', () => {
     expect(queryClient.getQueryState(artifactKeys.note('one'))).toBeUndefined();
     expect(apiMocks.deletePaper).toHaveBeenCalledWith('one');
   });
+
+  it('paginates the ledger client-side, keeps filters usable, and resets to page one on filter change', async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 65 }, (_, index) => (
+      paper(`p${String(index + 1).padStart(2, '0')}`)
+    ));
+    apiMocks.listPapers.mockResolvedValue(many);
+    renderLibrary();
+
+    // 默认每页 30 条：第 1 页渲染 30 行 + 表头
+    await screen.findByRole('row', { name: /Paper p01/ });
+    expect(screen.getAllByRole('row')).toHaveLength(31);
+    expect(screen.getByText('第 1–30 条 · 共 65 篇')).toBeInTheDocument();
+
+    // 翻页后不再渲染上一页的行
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    expect(await screen.findByRole('row', { name: /Paper p31/ })).toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: /Paper p01/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('row')).toHaveLength(31);
+
+    // 末页只有 5 条
+    await user.click(screen.getByRole('button', { name: '第 3 页' }));
+    expect(await screen.findByRole('row', { name: /Paper p61/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('row')).toHaveLength(6);
+
+    // 检索变化 → 回到第 1 页，命中可见
+    await user.type(screen.getByRole('searchbox', { name: '搜索文献' }), 'p65');
+    await waitFor(() => {
+      expect(screen.getByRole('row', { name: /Paper p65/ })).toBeInTheDocument();
+    });
+    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(screen.getByText('第 1–1 条 · 共 1 篇')).toBeInTheDocument();
+
+    // 清空检索恢复全量；切换每页条数不影响筛选状态
+    await user.clear(screen.getByRole('searchbox', { name: '搜索文献' }));
+    await waitFor(() => {
+      expect(screen.getByText('第 1–30 条 · 共 65 篇')).toBeInTheDocument();
+    });
+    await user.selectOptions(screen.getByRole('combobox', { name: '每页条数' }), '50');
+    await waitFor(() => {
+      expect(screen.getAllByRole('row')).toHaveLength(51);
+    });
+  });
 });

@@ -2,7 +2,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
-  gap: var(--space-3);
+  /* 紧凑间距：让台账列表尽量靠上，减少首屏前的纵向占用。 */
+  gap: var(--space-2);
   container-type: inline-size;
 }
 
@@ -15,14 +16,14 @@
 }
 
 .library-route__intro h2 {
-  margin-top: var(--space-1);
-  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+  margin-top: 0.15rem;
+  font-size: clamp(1.2rem, 1.9vw, 1.5rem);
   font-weight: 650;
   letter-spacing: -0.03em;
 }
 
 .library-route__intro > div > p:last-child {
-  margin-top: var(--space-1);
+  margin-top: 0.15rem;
   color: var(--color-text-muted);
   font-size: var(--font-size-3);
   font-variant-numeric: tabular-nums;
@@ -146,7 +147,7 @@
   display: grid;
   grid-template-columns: minmax(15rem, 2fr) repeat(7, minmax(7rem, 0.72fr)) auto auto;
   gap: var(--space-2);
-  padding: var(--space-3);
+  padding: var(--space-2);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-panel);
   background: var(--color-surface);
@@ -200,11 +201,19 @@
   white-space: nowrap;
 }
 
+.library-route__table-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
 .library-route__batch {
   display: flex;
   min-height: 2rem;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-2);
   padding-inline: var(--space-2);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
@@ -218,6 +227,64 @@
   border: 0;
   color: var(--color-text-muted);
   font-size: inherit;
+}
+
+.library-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-2);
+}
+
+.library-pager__range {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-pager__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.library-pager__controls button {
+  min-height: 2rem;
+  min-width: 2rem;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-pager__page[aria-current="page"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-muted);
+  color: var(--color-text);
+}
+
+.library-pager__gap {
+  padding-inline: var(--space-1);
+  color: var(--color-text-weak);
+}
+
+.library-pager__size {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.library-pager__size span {
+  color: var(--color-text-weak);
+  font-size: var(--font-size-1);
+}
+
+.library-pager__size select {
+  min-height: 2rem;
+  font-size: var(--font-size-2);
 }
 
 .paper-table-shell {

@@ -26,6 +26,7 @@ import {
   type LibrarySourceFilter,
 } from './filters';
 import { ExplainerBatchManager } from './ExplainerBatchManager';
+import { LibraryPager } from './LibraryPager';
 import { PaperDeleteConfirmation, PaperEditor } from './PaperEditor';
 import { PaperPreview } from './PaperPreview';
 import { PaperTable } from './PaperTable';
@@ -382,6 +383,34 @@ export function Component() {
     () => applyLibraryFilters(papers, filters),
     [filters, papers],
   );
+  // 客户端分页：筛选/语义检索变化或论文增删时回到第 1 页。
+  // 用渲染期派生重置（对比签名引用），避免在 effect 里 setState 引发级联渲染；
+  // 删除导致总页数变少时由 currentPage 的 clamp 保底。
+  const [pagerState, setPagerState] = useState(() => ({
+    page: 1,
+    pageSize: 30,
+    filtersSignature: null as LibraryFilters | null,
+    papersSignature: null as readonly PaperListItem[] | null,
+  }));
+  if (pagerState.filtersSignature !== filters || pagerState.papersSignature !== papers) {
+    setPagerState((current) => ({
+      ...current,
+      page: 1,
+      filtersSignature: filters,
+      papersSignature: papers,
+    }));
+  }
+  const page = pagerState.page;
+  const pageSize = pagerState.pageSize;
+  const setPage = (next: number) => setPagerState((current) => ({ ...current, page: next }));
+  // 切换每页条数时回到第 1 页，避免页码语义漂移（如 30 条/页的第 2 页变成 50 条/页的中段）。
+  const setPageSize = (next: number) => setPagerState((current) => ({ ...current, page: 1, pageSize: next }));
+  const pageCount = Math.max(1, Math.ceil(visiblePapers.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pagedPapers = useMemo(
+    () => visiblePapers.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [currentPage, pageSize, visiblePapers],
+  );
   const validBatchSelection = useMemo(() => {
     const availableIds = new Set(papers.map((paper) => paper.id));
     return new Set([...batchSelection].filter((paperId) => availableIds.has(paperId)));
@@ -433,8 +462,6 @@ export function Component() {
           添加论文
         </button>
       </header>
-
-      <ExplainerBatchManager />
 
       <div className="library-filters" aria-label="文献筛选">
         <label className="library-filters__search">
@@ -548,13 +575,6 @@ export function Component() {
 
       {semanticError ? <p className="library-route__audit library-route__audit--error" role="alert">语义检索失败：{semanticError}</p> : null}
 
-      <div className="library-route__batch" aria-live="polite">
-        <span>已选择 {validBatchSelection.size} 篇</span>
-        {validBatchSelection.size > 0 ? (
-          <button type="button" onClick={() => setBatchSelection(new Set())}>清除选择</button>
-        ) : null}
-      </div>
-
       {mutations.audit.phase !== 'idle' ? (
         <p
           className={`library-route__audit library-route__audit--${mutations.audit.phase}`}
@@ -574,23 +594,46 @@ export function Component() {
       ) : visiblePapers.length === 0 ? (
         <EmptyLibrary filters={filters} />
       ) : (
-        <PaperTable
-          papers={visiblePapers}
-          selectedId={selectedId}
-          batchSelection={validBatchSelection}
-          semanticScores={semanticScores}
-          pendingPaperIds={mutations.pendingPaperIds}
-          onSelect={setSelectedId}
-          onToggleBatch={toggleBatch}
-          onToggleFavorite={(paperId, favorite) => {
-            mutations.favorite.mutate({ paperId, favorite });
-          }}
-          onStatusChange={(paperId, status) => {
-            mutations.status.mutate({ paperId, status });
-          }}
-          onOpen={openPaper}
-        />
+        <>
+          <PaperTable
+            papers={pagedPapers}
+            selectedId={selectedId}
+            batchSelection={validBatchSelection}
+            semanticScores={semanticScores}
+            pendingPaperIds={mutations.pendingPaperIds}
+            onSelect={setSelectedId}
+            onToggleBatch={toggleBatch}
+            onToggleFavorite={(paperId, favorite) => {
+              mutations.favorite.mutate({ paperId, favorite });
+            }}
+            onStatusChange={(paperId, status) => {
+              mutations.status.mutate({ paperId, status });
+            }}
+            onOpen={openPaper}
+          />
+          <div className="library-route__table-footer">
+            <div className="library-route__batch" aria-live="polite">
+              <span>已选择 {validBatchSelection.size} 篇</span>
+              {validBatchSelection.size > 0 ? (
+                <button type="button" onClick={() => setBatchSelection(new Set())}>清除选择</button>
+              ) : null}
+            </div>
+            <LibraryPager
+              page={currentPage}
+              pageCount={pageCount}
+              pageSize={pageSize}
+              total={visiblePapers.length}
+              rangeStart={(currentPage - 1) * pageSize + 1}
+              rangeEnd={Math.min(currentPage * pageSize, visiblePapers.length)}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          </div>
+        </>
       )}
+
+      {/* 批量讲解不再把台账列表顶到首屏之外：移到列表下方，功能不变。 */}
+      <ExplainerBatchManager />
 
       {addEditorOpen ? (
         <PaperEditor
