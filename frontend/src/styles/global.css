@@ -4,8 +4,11 @@ body {
   color-scheme: dark;
   font-family: var(--font-sans);
   font-size: var(--font-size-4);
+  font-weight: 420;
   line-height: 1.5;
+  letter-spacing: 0.004em;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 html,
@@ -62,6 +65,13 @@ button {
   border-radius: var(--radius-control);
   background: var(--color-surface-raised);
   cursor: pointer;
+  font-weight: 520;
+  letter-spacing: 0.004em;
+  transition:
+    border-color var(--duration-feedback) var(--ease-out),
+    background var(--duration-feedback) var(--ease-out),
+    color var(--duration-feedback) var(--ease-out),
+    box-shadow var(--duration-feedback) var(--ease-out);
 }
 
 button:hover {
@@ -162,7 +172,7 @@ input[type="radio"]:disabled {
   height: 100dvh;
   padding: var(--space-4) var(--space-3);
   border-right: 1px solid var(--color-line);
-  background: var(--color-bg-subtle);
+  background: var(--color-bg);
 }
 
 .global-nav__brand {
@@ -179,10 +189,14 @@ input[type="radio"]:disabled {
   width: 2rem;
   height: 2rem;
   place-items: center;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-control);
-  background: var(--color-accent-muted);
-  color: var(--color-accent-hover);
+  border-radius: 0.5625rem;
+  background: linear-gradient(
+    140deg,
+    var(--color-accent) 0%,
+    var(--color-accent-pressed) 100%
+  );
+  box-shadow: 0 4px 14px rgb(255 77 77 / 0.28);
+  color: #fff;
   font-family: var(--font-mono);
   font-size: var(--font-size-2);
   font-weight: 700;
@@ -220,35 +234,42 @@ input[type="radio"]:disabled {
   border-radius: var(--radius-control);
   color: var(--color-text-muted);
   text-decoration: none;
+  transition:
+    border-color var(--duration-feedback) var(--ease-out),
+    background var(--duration-feedback) var(--ease-out),
+    color var(--duration-feedback) var(--ease-out);
 }
 
 .global-nav__link:hover {
-  border-color: var(--color-line);
-  background: var(--color-surface);
+  background: var(--color-surface-hover);
   color: var(--color-text);
 }
 
 .global-nav__link--active {
-  border-color: var(--color-accent-line);
-  background: var(--color-accent-muted);
+  background: var(--color-surface-active);
   color: var(--color-text);
 }
 
 .global-nav__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-weak);
   font-family: var(--font-mono);
   font-size: var(--font-size-2);
   font-weight: 650;
+  transition: color var(--duration-feedback) var(--ease-out);
 }
 
 .global-nav__link--active .global-nav__glyph {
-  color: var(--color-accent-hover);
+  color: var(--color-accent);
 }
 
 .global-nav__label {
   overflow: hidden;
   font-size: var(--font-size-3);
-  font-weight: 540;
+  font-weight: 500;
+  letter-spacing: 0.006em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -264,12 +285,12 @@ input[type="radio"]:disabled {
   display: grid;
   grid-template-columns: minmax(10rem, 15rem) minmax(14rem, 28rem) minmax(0, 1fr);
   min-width: 0;
-  min-height: 4rem;
+  min-height: 3.75rem;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--color-line);
-  background: var(--color-bg-subtle);
+  background: var(--color-bg);
 }
 
 .workspace-command-bar__route {
@@ -303,7 +324,8 @@ input[type="radio"]:disabled {
   overflow: hidden;
   color: var(--color-text);
   font-size: var(--font-size-4);
-  font-weight: 640;
+  font-weight: 600;
+  letter-spacing: -0.006em;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -317,20 +339,29 @@ input[type="radio"]:disabled {
   justify-content: space-between;
   gap: var(--space-4);
   padding-inline: var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-hover);
   color: var(--color-text-muted);
+  font-weight: 460;
   text-align: left;
 }
 
+.workspace-command-bar__command:hover {
+  background: var(--color-surface-active);
+}
+
 .workspace-command-bar__command[aria-expanded="true"] {
-  border-color: var(--color-accent);
+  border-color: var(--color-accent-line);
   background: var(--color-accent-muted);
   color: var(--color-text);
 }
 
 .workspace-command-bar kbd {
-  padding: 0.125rem 0.35rem;
+  padding: 0.125rem 0.4rem;
   border: 1px solid var(--color-line);
-  border-radius: 0.3rem;
+  border-bottom-width: 2px;
+  border-radius: 0.3125rem;
+  background: var(--color-bg-subtle);
   color: var(--color-text-weak);
   font-size: var(--font-size-1);
   white-space: nowrap;
@@ -350,7 +381,8 @@ input[type="radio"]:disabled {
 }
 
 .workspace-command-bar__panels button[aria-expanded="true"] {
-  border-color: var(--color-accent);
+  border-color: var(--color-accent-line);
+  background: var(--color-accent-muted);
   color: var(--color-text);
 }
 
@@ -371,13 +403,13 @@ input[type="radio"]:disabled {
   min-height: 100%;
   padding: var(--space-4);
   border-left: 1px solid var(--color-line);
-  background: var(--color-bg-subtle);
+  background: var(--color-bg);
 }
 
 .workspace-timeline {
   padding: var(--space-3) var(--space-5);
   border-top: 1px solid var(--color-line);
-  background: var(--color-bg-subtle);
+  background: var(--color-bg);
 }
 
 .workspace-slot-error {
@@ -445,7 +477,9 @@ input[type="radio"]:disabled {
   display: flex;
   justify-content: flex-end;
   padding: var(--space-3);
-  background: rgb(5 7 6 / 0.74);
+  background: rgb(4 4 6 / 0.6);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
 }
 
 .workspace-overlay__panel {
@@ -456,7 +490,7 @@ input[type="radio"]:disabled {
   overflow: hidden;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-overlay);
-  box-shadow: 0 1.5rem 4rem var(--color-shadow);
+  box-shadow: var(--shadow-overlay);
 }
 
 .workspace-overlay__header {
@@ -470,7 +504,8 @@ input[type="radio"]:disabled {
 
 .workspace-overlay__header h2 {
   font-size: 1rem;
-  font-weight: 640;
+  font-weight: 600;
+  letter-spacing: -0.006em;
 }
 
 .workspace-overlay__header p {
@@ -504,7 +539,7 @@ input[type="radio"]:disabled {
   padding-inline: var(--space-3);
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-control);
-  background: var(--color-bg-subtle);
+  background: var(--color-bg);
 }
 
 .workspace-command-panel input::placeholder {
@@ -529,8 +564,8 @@ input[type="radio"]:disabled {
 
 .workspace-command-panel__results button:hover,
 .workspace-command-panel__results button:focus-visible {
-  border-color: var(--color-accent-line);
-  background: var(--color-accent-muted);
+  border-color: transparent;
+  background: var(--color-surface-active);
   color: var(--color-text);
 }
 

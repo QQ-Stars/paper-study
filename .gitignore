@@ -23,6 +23,7 @@ data/compatibility/
 data/pdfs/
 data/explainers/
 data/translations/
+data/ocr_markdown/
 data/settings.json
 
 # 系统/编辑器

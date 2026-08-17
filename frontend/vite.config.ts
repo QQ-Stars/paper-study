@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 import { cleanRoomGuard } from './build/cleanRoomGuard.ts';
@@ -13,7 +14,7 @@ export default defineConfig({
   build: {
     manifest: true,
   },
-  plugins: [cleanRoomGuard({ repositoryRoot }), react()],
+  plugins: [cleanRoomGuard({ repositoryRoot }), react(), tailwindcss()],
   server: {
     port: 5174,
     strictPort: true,

@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { Button, Surface } from '@cloudflare/kumo';
 
 import type { ReviewItem } from '../../lib/api/types';
 
@@ -32,7 +33,8 @@ export function ReviewGroup({
   const descriptionId = useId();
 
   return (
-    <section
+    <Surface
+      as="section"
       className="review-group"
       data-tone={tone}
       aria-labelledby={titleId}
@@ -76,16 +78,18 @@ export function ReviewGroup({
                 </dl>
 
                 <div className="review-item__actions">
-                  <button type="button" onClick={() => onOpen(item.paperId)}>打开阅读</button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => onOpen(item.paperId)}>打开阅读</Button>
                   {actionable ? (
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="sm"
                       className="review-item__complete"
                       disabled={pending}
                       onClick={() => onComplete(item.paperId)}
                     >
                       {pending ? '提交中…' : '完成本轮'}
-                    </button>
+                    </Button>
                   ) : null}
                 </div>
               </li>
@@ -93,6 +97,6 @@ export function ReviewGroup({
           })}
         </ul>
       )}
-    </section>
+    </Surface>
   );
 }

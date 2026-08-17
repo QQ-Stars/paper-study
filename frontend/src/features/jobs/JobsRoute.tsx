@@ -1,4 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- React Router lazy modules export route metadata and polling policy with their component. */
+import { Badge, Button, Checkbox, Input, Loader } from '@cloudflare/kumo';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -26,6 +27,22 @@ export function jobPollingIntervalFor(jobs: JobSummary[] | undefined): 2500 | fa
   return jobs?.some((job) => job.status === 'pending' || job.status === 'running')
     ? 2500
     : false;
+}
+
+function jobStatusBadgeVariant(status: JobSummary['status']) {
+  switch (status) {
+    case 'pending':
+    case 'running':
+      return 'warning';
+    case 'review':
+      return 'primary';
+    case 'done':
+      return 'success';
+    case 'failed':
+      return 'error';
+    default:
+      return 'outline';
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -125,61 +142,58 @@ export function Component() {
           </div>
         </header>
         <div className="jobs-create-form">
-          <label className="jobs-create-form__query">
-            <span>后台研究方向</span>
-            <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
-          </label>
-          <label>
-            <span>年份</span>
-            <input value={years} onChange={(event) => setYears(event.currentTarget.value)} />
-          </label>
-          <label>
-            <span>最多候选</span>
-            <input
-              type="number"
-              min="1"
-              max="60"
-              value={maxPapers}
-              onChange={(event) => setMaxPapers(Number(event.currentTarget.value))}
-            />
-          </label>
-          <label>
-            <span>最低相关度</span>
-            <input
-              type="number"
-              min="0"
-              max="1"
-              step="0.05"
-              value={minRelevance}
-              onChange={(event) => setMinRelevance(Number(event.currentTarget.value))}
-            />
-          </label>
+          <Input
+            label="后台研究方向"
+            className="w-full jobs-create-form__query"
+            value={query}
+            onChange={(event) => setQuery((event.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="年份"
+            className="w-full"
+            value={years}
+            onChange={(event) => setYears((event.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="最多候选"
+            type="number"
+            min={1}
+            max={60}
+            className="w-full"
+            value={maxPapers}
+            onChange={(event) => setMaxPapers(Number((event.target as HTMLInputElement).value))}
+          />
+          <Input
+            label="最低相关度"
+            type="number"
+            min={0}
+            max={1}
+            step={0.05}
+            className="w-full"
+            value={minRelevance}
+            onChange={(event) => setMinRelevance(Number((event.target as HTMLInputElement).value))}
+          />
         </div>
         <fieldset className="jobs-source-picker">
           <legend>学术来源</legend>
           {ACADEMIC_SOURCES.map((source) => (
-            <label key={source}>
-              <input
-                type="checkbox"
-                checked={sources.includes(source)}
-                onChange={(event) => {
-                  // 先在 handler 内捕获 checked，避免 updater 延迟执行时读空 currentTarget。
-                  const checked = event.currentTarget.checked;
-                  setSources((current) => checked
-                    ? [...current, source]
-                    : current.filter((item) => item !== source));
-                }}
-              />
-              {SOURCE_LABELS[source]}
-            </label>
+            <Checkbox
+              key={source}
+              label={SOURCE_LABELS[source]}
+              checked={sources.includes(source)}
+              onCheckedChange={(checked) => setSources((current) => checked
+                ? [...current, source]
+                : current.filter((item) => item !== source))}
+            />
           ))}
         </fieldset>
         <div className="jobs-create-actions">
-          <label>
-            <input type="checkbox" checked={onlyA} onChange={(event) => setOnlyA(event.currentTarget.checked)} />
-            仅 CCF-A
-          </label>
-          <button type="button" onClick={createJob} disabled={creating}>创建后台任务</button>
+          <Checkbox
+            label="仅 CCF-A"
+            checked={onlyA}
+            onCheckedChange={(checked) => setOnlyA(checked)}
+          />
+          <Button type="button" variant="primary" onClick={() => void createJob()} disabled={creating}>创建后台任务</Button>
         </div>
         {createError ? <p className="jobs-error" role="alert">{createError}</p> : null}
       </section>
@@ -192,7 +206,9 @@ export function Component() {
           </div>
           <strong>{jobsQuery.data?.length ?? 0}</strong>
         </header>
-        {jobsQuery.isPending ? <p className="jobs-list-panel__loading">读取任务…</p> : null}
+        {jobsQuery.isPending ? (
+          <p className="jobs-list-panel__loading"><Loader size="sm" />读取任务…</p>
+        ) : null}
         {jobsQuery.isError ? <p className="jobs-error" role="alert">{errorMessage(jobsQuery.error)}</p> : null}
         {jobsQuery.data?.length === 0 ? (
           <div className="jobs-zero">
@@ -214,7 +230,7 @@ export function Component() {
                     <strong>{job.query || `任务 ${job.id}`}</strong>
                     <small>{jobYears(job)} · {job.sources.join(' · ')}</small>
                   </span>
-                  <span className={`job-status job-status--${job.status}`}>{job.status}</span>
+                  <Badge className={`job-status job-status--${job.status}`} variant={jobStatusBadgeVariant(job.status)}>{job.status}</Badge>
                   <span className="jobs-list__counts">{job.added} / {job.found}</span>
                 </Link>
               </li>

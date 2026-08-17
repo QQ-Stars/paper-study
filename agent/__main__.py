@@ -55,6 +55,12 @@ def main():
     exp.add_argument("--id", required=True, help="论文 id (slug)")
     exp.add_argument("--deep", action="store_true", help="读取本地PDF正文(更准，更慢)")
 
+    oc = sub.add_parser("ocr-md", help="PDF→Markdown(OCR)：官方提示词+grounding清理，md→stdout，进度OCRPG→stderr")
+    oc.add_argument("--id", required=True, help="论文 id (slug)")
+
+    ob = sub.add_parser("ocr-md-batch", help="批量PDF→Markdown(OCR)：只补有PDF且无OCR落库的；进度→stderr，汇总JSON→stdout")
+    ob.add_argument("--limit", type=int, default=0, help="本次最多转换多少篇，0=全部")
+
     eb = sub.add_parser("explain-batch", help="批量为缺讲解的论文生成讲解(通读本地PDF全文)；无本地PDF的跳过。进度→stderr，汇总JSON→stdout")
     eb.add_argument("--limit", type=int, default=0, help="本次最多生成多少篇，0=全部")
 
@@ -138,6 +144,12 @@ def main():
     elif args.cmd == "explain":
         from . import explain
         explain.explain_paper(args.id, args.deep)
+    elif args.cmd == "ocr-md":
+        from . import ocrmd
+        ocrmd.ocr_to_markdown(args.id)
+    elif args.cmd == "ocr-md-batch":
+        from . import ocrmd
+        ocrmd.ocr_batch(limit=args.limit)
     elif args.cmd == "explain-batch":
         from . import explain
         explain.explain_batch(limit=args.limit)

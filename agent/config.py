@@ -48,6 +48,25 @@ RESEARCH_THEME = _S.get("researchTheme") or os.getenv("RESEARCH_THEME") or ""
 # 仅为防超长综述撑爆模型上下文而设，可经 settings.json: explainMaxChars 调整。
 EXPLAIN_MAX_CHARS = int(_S.get("explainMaxChars") or os.getenv("EXPLAIN_MAX_CHARS") or 120000)
 
+# 全文翻译管道（网页 ⚙ 设置「大模型与翻译管道」分区）：
+# translateMode=chunked 分块并发翻译（默认，稳）；full 整篇一次送入（需大上下文模型）。
+TRANSLATE_MODE = (_S.get("translateMode") or os.getenv("TRANSLATE_MODE") or "chunked").strip().lower()
+if TRANSLATE_MODE not in ("chunked", "full"):
+    TRANSLATE_MODE = "chunked"
+# 分块大小（字符，仅 chunked 模式生效）；翻译全文截断上限（独立于讲解）；分块翻译并发数。
+TRANSLATE_CHUNK_SIZE = max(500, int(_S.get("translateChunkSize") or os.getenv("TRANSLATE_CHUNK_SIZE") or 3800))
+TRANSLATE_MAX_CHARS = int(_S.get("translateMaxChars") or os.getenv("TRANSLATE_MAX_CHARS") or EXPLAIN_MAX_CHARS)
+TRANSLATE_WORKERS = max(1, int(_S.get("translateWorkers") or os.getenv("TRANSLATE_WORKERS") or 4))
+# 翻译前是否剔除参考文献/致谢（默认开，对应 extract.strip_references）。
+_v = _S.get("translateSkipReferences")
+if _v is None:
+    TRANSLATE_SKIP_REFERENCES = os.getenv("TRANSLATE_SKIP_REFERENCES", "1") not in ("0", "false", "False", "")
+else:
+    TRANSLATE_SKIP_REFERENCES = bool(_v)
+
+# LLM 请求超时（毫秒）：OpenAI 兼容客户端全局请求超时；0/缺省 → SDK 默认（约 600s）。
+LLM_TIMEOUT = int(_S.get("llmTimeout") or os.getenv("LLM_TIMEOUT") or 0)
+
 # PDF 文本提取方式：default=本地 pymupdf4llm 解析（默认，行为不变）；
 # ocr=调用 OCR 模型 API（OpenAI 兼容 chat/vision 接口）提取文本，失败自动回退本地解析。
 # 在网页 ⚙ 设置里改；只影响讲解/翻译的全文读取（full_text），不影响采集分类。
@@ -82,6 +101,7 @@ DB_PATH = os.getenv("DB_PATH") or str(ROOT / "data" / "app.db")
 PDF_DIR = _dir_from_settings("pdfDir", "data/pdfs")
 EXPLAINER_DIR = _dir_from_settings("explainerDir", "data/explainers")
 TRANSLATION_DIR = _dir_from_settings("translationDir", "data/translations")
+OCR_MARKDOWN_DIR = _dir_from_settings("ocrMarkdownDir", "data/ocr_markdown")
 
 # Unpaywall 联系邮箱（按 DOI 找开放获取 PDF 时需带一个联系邮箱；可在设置 contactEmail 覆盖）
 UNPAYWALL_EMAIL = (_S.get("contactEmail") or "paper-study@users.noreply.github.com").strip()
@@ -92,6 +112,7 @@ def artifact_path(kind: str, paper_id: str, ext: str = ".md") -> Path:
         "pdf": PDF_DIR,
         "explainer": EXPLAINER_DIR,
         "translation": TRANSLATION_DIR,
+        "ocr_markdown": OCR_MARKDOWN_DIR,
     }[kind]
     safe = "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in str(paper_id or "paper"))
     safe = safe.strip(".-_") or "paper"

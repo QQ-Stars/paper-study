@@ -11,7 +11,9 @@ _client = None
 def client():
     global _client
     if _client is None:
-        _client = OpenAI(api_key=config.API_KEY, base_url=config.BASE_URL)
+        # LLM_TIMEOUT（毫秒，设置页「大模型与翻译管道」）>0 时作为请求超时；0/缺省用 SDK 默认。
+        timeout = config.LLM_TIMEOUT / 1000 if config.LLM_TIMEOUT > 0 else None
+        _client = OpenAI(api_key=config.API_KEY, base_url=config.BASE_URL, timeout=timeout)
     return _client
 
 

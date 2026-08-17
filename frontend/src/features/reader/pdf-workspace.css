@@ -38,11 +38,11 @@
 }
 
 .pdf-workspace__identity p {
-  color: var(--color-accent-hover);
+  color: var(--color-text-weak);
   font-family: var(--font-mono);
   font-size: var(--font-size-1);
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
 }
 
 .pdf-workspace__identity strong {
@@ -61,10 +61,7 @@
   white-space: nowrap;
 }
 
-.pdf-workspace__toolbar button,
-.pdf-workspace__toolbar input,
-.pdf-workspace__selection-buffer button,
-.pdf-workspace__translation-popover button {
+.pdf-workspace__toolbar input {
   min-width: 2.75rem;
   min-height: 2.75rem;
 }
@@ -78,21 +75,6 @@
   font-family: var(--font-mono);
   font-size: var(--font-size-2);
   font-variant-numeric: tabular-nums;
-}
-
-.pdf-workspace__pagination button,
-.pdf-workspace__zoom button {
-  padding: 0;
-  border-color: transparent;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-5);
-}
-
-.pdf-workspace__pagination button:hover:not(:disabled),
-.pdf-workspace__zoom button:hover:not(:disabled) {
-  border-color: var(--color-line-strong);
-  background: var(--color-surface-raised);
-  color: var(--color-text);
 }
 
 .pdf-workspace__pagination input {
@@ -249,18 +231,6 @@
   white-space: pre-wrap;
 }
 
-.pdf-workspace__selection-buffer button,
-.pdf-workspace__translation-popover button {
-  padding-inline: var(--space-3);
-}
-
-.pdf-workspace__selection-buffer button:first-child,
-.pdf-workspace__translation-popover > button {
-  border-color: var(--color-accent-line-strong);
-  background: var(--color-accent-muted);
-  color: var(--color-accent-hover);
-}
-
 .pdf-workspace__translation-popover {
   position: fixed;
   z-index: var(--z-overlay, 60);
@@ -287,18 +257,6 @@
 .pdf-workspace__translation-popover header strong {
   color: var(--color-text);
   font-size: var(--font-size-3);
-}
-
-.pdf-workspace__translation-popover header button {
-  padding: 0;
-  border-color: transparent;
-  color: var(--color-text);
-  opacity: 0.72;
-  font-size: 1.25rem;
-}
-
-.pdf-workspace__translation-popover header button:hover {
-  opacity: 1;
 }
 
 .pdf-workspace__translation-popover p {

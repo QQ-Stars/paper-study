@@ -9,6 +9,8 @@ import {
 } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
+import { Button, Checkbox, Empty, Input, Select } from '@cloudflare/kumo';
+
 import {
   type WorkspaceRouteHandle,
   useWorkspaceStore,
@@ -78,8 +80,7 @@ function EmptyLibrary({ filters }: { readonly filters: LibraryFilters }) {
   }
   return (
     <div className="library-route__empty" role="status">
-      <strong>{title}</strong>
-      <span>{detail}</span>
+      <Empty title={title} description={detail} />
     </div>
   );
 }
@@ -451,94 +452,106 @@ export function Component() {
       <ExplainerBatchManager />
 
       <div className="library-filters" aria-label="文献筛选">
-        <label className="library-filters__search">
-          <span>检索</span>
-          <input
-            type="search"
-            aria-label="搜索文献"
-            value={filters.query}
-            placeholder="题名 / 中文题名 / venue / type / topic"
-            onChange={(event) => {
-              semanticGeneration.current += 1;
-              setSemanticScores(null);
-              setSemanticError('');
-              patchFilters({ query: event.target.value });
-            }}
-          />
-        </label>
-        <label>
-          <span>来源</span>
-          <select
-            aria-label="来源"
-            value={filters.source}
-            onChange={(event) => patchFilters({ source: event.target.value as LibrarySourceFilter })}
-          >
-            <option value="all">全部来源</option>
-            <option value="seed">种子文献</option>
-            <option value="collected">后续采集</option>
-          </select>
-        </label>
-        <label>
-          <span>状态</span>
-          <select
-            aria-label="状态"
-            value={filters.status}
-            onChange={(event) => patchFilters({ status: event.target.value as 'all' | StudyStatus })}
-          >
-            <option value="all">全部状态</option>
-            <option value="未开始">未开始</option>
-            <option value="学习中">学习中</option>
-            <option value="已理解">已理解</option>
-          </select>
-        </label>
-        <label>
-          <span>年份</span>
-          <select aria-label="年份" value={filters.year} onChange={(event) => patchFilters({ year: event.target.value })}>
-            <option value="all">全部年份</option>
-            {facets.years.map((year) => <option key={year} value={year}>{year}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>会议</span>
-          <select aria-label="会议" value={filters.venue} onChange={(event) => patchFilters({ venue: event.target.value })}>
-            <option value="all">全部会议</option>
-            {facets.venues.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>类型</span>
-          <select aria-label="类型" value={filters.type} onChange={(event) => patchFilters({ type: event.target.value })}>
-            <option value="all">全部类型</option>
-            {facets.types.map((type) => <option key={type} value={type}>{type}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>主题</span>
-          <select aria-label="主题" value={filters.topic} onChange={(event) => patchFilters({ topic: event.target.value })}>
-            <option value="all">全部主题</option>
-            {facets.topics.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>排序</span>
-          <select aria-label="排序" value={filters.sort} onChange={(event) => patchFilters({ sort: event.target.value as LibrarySort })}>
-            <option value="added">最近加入</option>
-            <option value="relevance">相关度</option>
-            <option value="year">年份</option>
-            <option value="citations">引用数</option>
-            <option value="title">题名</option>
-          </select>
-        </label>
-        <label className="library-filters__favorite">
-          <input
-            type="checkbox"
+        <Input
+          label="检索"
+          type="search"
+          className="w-full library-filters__search"
+          aria-label="搜索文献"
+          value={filters.query}
+          placeholder="题名 / 中文题名 / venue / type / topic"
+          onChange={(event) => {
+            semanticGeneration.current += 1;
+            setSemanticScores(null);
+            setSemanticError('');
+            patchFilters({ query: (event.target as HTMLInputElement).value });
+          }}
+        />
+        <Select
+          label="来源"
+          aria-label="来源"
+          className="w-full"
+          value={filters.source}
+          onValueChange={(value) => patchFilters({ source: value as LibrarySourceFilter })}
+        >
+          <Select.Option value="all">全部来源</Select.Option>
+          <Select.Option value="seed">种子文献</Select.Option>
+          <Select.Option value="collected">后续采集</Select.Option>
+        </Select>
+        <Select
+          label="状态"
+          aria-label="状态"
+          className="w-full"
+          value={filters.status}
+          onValueChange={(value) => patchFilters({ status: value as 'all' | StudyStatus })}
+        >
+          <Select.Option value="all">全部状态</Select.Option>
+          <Select.Option value="未开始">未开始</Select.Option>
+          <Select.Option value="学习中">学习中</Select.Option>
+          <Select.Option value="已理解">已理解</Select.Option>
+        </Select>
+        <Select
+          label="年份"
+          aria-label="年份"
+          className="w-full"
+          value={filters.year}
+          onValueChange={(value) => patchFilters({ year: value ?? 'all' })}
+        >
+          <Select.Option value="all">全部年份</Select.Option>
+          {facets.years.map((year) => <Select.Option key={year} value={year}>{year}</Select.Option>)}
+        </Select>
+        <Select
+          label="会议"
+          aria-label="会议"
+          className="w-full"
+          value={filters.venue}
+          onValueChange={(value) => patchFilters({ venue: value ?? 'all' })}
+        >
+          <Select.Option value="all">全部会议</Select.Option>
+          {facets.venues.map((venue) => <Select.Option key={venue} value={venue}>{venue}</Select.Option>)}
+        </Select>
+        <Select
+          label="类型"
+          aria-label="类型"
+          className="w-full"
+          value={filters.type}
+          onValueChange={(value) => patchFilters({ type: value ?? 'all' })}
+        >
+          <Select.Option value="all">全部类型</Select.Option>
+          {facets.types.map((type) => <Select.Option key={type} value={type}>{type}</Select.Option>)}
+        </Select>
+        <Select
+          label="主题"
+          aria-label="主题"
+          className="w-full"
+          value={filters.topic}
+          onValueChange={(value) => patchFilters({ topic: value ?? 'all' })}
+        >
+          <Select.Option value="all">全部主题</Select.Option>
+          {facets.topics.map((topic) => <Select.Option key={topic} value={topic}>{topic}</Select.Option>)}
+        </Select>
+        <Select
+          label="排序"
+          aria-label="排序"
+          className="w-full"
+          value={filters.sort}
+          onValueChange={(value) => patchFilters({ sort: value as LibrarySort })}
+        >
+          <Select.Option value="added">最近加入</Select.Option>
+          <Select.Option value="relevance">相关度</Select.Option>
+          <Select.Option value="year">年份</Select.Option>
+          <Select.Option value="citations">引用数</Select.Option>
+          <Select.Option value="title">题名</Select.Option>
+        </Select>
+        <div className="library-filters__favorite">
+          <Checkbox
+            label="仅看收藏"
             checked={filters.favorite}
-            onChange={(event) => patchFilters({ favorite: event.target.checked })}
+            onCheckedChange={(checked) => patchFilters({ favorite: checked })}
           />
-          <span>仅看收藏</span>
-        </label>
-        <button
+        </div>
+        <Button
           type="button"
+          variant="outline"
           className="library-filters__semantic"
           disabled={semanticSearch.isPending || (semanticScores == null && !filters.query.trim())}
           onClick={() => {
@@ -557,9 +570,10 @@ export function Component() {
           {semanticSearch.isPending
             ? '语义检索中…'
             : semanticScores == null ? '语义检索' : '返回普通检索'}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="primary"
           className="library-route__add"
           onClick={() => {
             mutations.add.reset();
@@ -567,7 +581,7 @@ export function Component() {
           }}
         >
           添加论文
-        </button>
+        </Button>
       </div>
 
       {semanticError ? <p className="library-route__audit library-route__audit--error" role="alert">语义检索失败：{semanticError}</p> : null}
@@ -586,7 +600,7 @@ export function Component() {
       ) : query.isError ? (
         <div className="library-route__state" role="alert">
           <strong>无法载入文献库</strong>
-          <button type="button" onClick={() => void query.refetch()}>重试</button>
+          <Button type="button" onClick={() => void query.refetch()}>重试</Button>
         </div>
       ) : visiblePapers.length === 0 ? (
         <EmptyLibrary filters={filters} />
@@ -612,7 +626,7 @@ export function Component() {
             <div className="library-route__batch" aria-live="polite">
               <span>已选择 {validBatchSelection.size} 篇</span>
               {validBatchSelection.size > 0 ? (
-                <button type="button" onClick={() => setBatchSelection(new Set())}>清除选择</button>
+                <Button type="button" variant="ghost" onClick={() => setBatchSelection(new Set())}>清除选择</Button>
               ) : null}
             </div>
             <LibraryPager

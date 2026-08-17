@@ -1,3 +1,4 @@
+import { Button, Checkbox, Input } from '@cloudflare/kumo';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   useEffect,
@@ -176,61 +177,51 @@ export function LocalPdfPanel() {
           <span className="section-kicker">LOCAL INDEX</span>
           <h2>本地 PDF</h2>
         </div>
-        <button type="button" onClick={downloadMissing} disabled={busy}>
+        <Button type="button" variant="outline" onClick={() => void downloadMissing()} disabled={busy}>
           补齐馆藏 PDF
-        </button>
+        </Button>
       </header>
       <p className="local-pdf__hint">导入 / 补齐为流式任务，请停留在本页直到完成。</p>
 
       <div className="local-pdf__controls">
-        <label>
-          <span>PDF 文件夹</span>
-          <input
-            value={directory}
-            onChange={(event) => setDirectory(event.currentTarget.value)}
-            placeholder="C:/Research/Papers"
-          />
-        </label>
-        <button type="button" onClick={scan} disabled={busy}>扫描文件夹</button>
-        {busy ? <button type="button" onClick={stop}>停止接收</button> : null}
+        <Input
+          label="PDF 文件夹"
+          className="w-full local-pdf__directory"
+          value={directory}
+          onChange={(event) => setDirectory((event.target as HTMLInputElement).value)}
+          placeholder="C:/Research/Papers"
+        />
+        <Button type="button" variant="outline" onClick={() => void scan()} disabled={busy}>扫描文件夹</Button>
+        {busy ? <Button type="button" variant="ghost" onClick={stop}>停止接收</Button> : null}
       </div>
 
       {files.length > 0 ? (
         <div className="local-pdf__files">
           <div className="local-pdf__select-all">
-            <label>
-              <input
-                type="checkbox"
-                checked={files.every((file) => selected.has(file.path))}
-                onChange={(event) => {
-                  setSelectedPaths(event.currentTarget.checked ? files.map((file) => file.path) : []);
-                }}
-              />
-              选择全部 {files.length} 个文件
-            </label>
-            <button type="button" onClick={importSelected} disabled={busy || selectedPaths.length === 0}>
+            <Checkbox
+              label={`选择全部 ${files.length} 个文件`}
+              checked={files.every((file) => selected.has(file.path))}
+              onCheckedChange={(checked) => {
+                setSelectedPaths(checked ? files.map((file) => file.path) : []);
+              }}
+            />
+            <Button type="button" variant="primary" onClick={() => void importSelected()} disabled={busy || selectedPaths.length === 0}>
               导入选中 PDF
-            </button>
+            </Button>
           </div>
           <ul>
             {files.map((file) => (
               <li key={file.path}>
-                <label>
-                  <input
-                    type="checkbox"
-                    aria-label={`选择 ${file.name}`}
-                    checked={selected.has(file.path)}
-                    onChange={(event) => {
-                      // 先在 handler 内捕获 checked，避免 updater 延迟执行时读空 currentTarget。
-                      const checked = event.currentTarget.checked;
-                      setSelectedPaths((current) => checked
-                        ? [...new Set([...current, file.path])]
-                        : current.filter((path) => path !== file.path));
-                    }}
-                  />
-                  <span>{file.name}</span>
-                  <small>{formatBytes(file.size)}</small>
-                </label>
+                <Checkbox
+                  className="local-pdf__file-toggle"
+                  aria-label={`选择 ${file.name}`}
+                  checked={selected.has(file.path)}
+                  onCheckedChange={(checked) => setSelectedPaths((current) => checked
+                    ? [...new Set([...current, file.path])]
+                    : current.filter((path) => path !== file.path))}
+                />
+                <span>{file.name}</span>
+                <small>{formatBytes(file.size)}</small>
               </li>
             ))}
           </ul>

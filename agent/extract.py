@@ -24,13 +24,21 @@ _TAIL_RE = re.compile(
 _BLANK_RUN = re.compile(r'\n{3,}')
 _TRAIL_WS = re.compile(r'[ \t]+\n')
 
-# OCR 转录指令：要求忠实逐字转录，保留结构，不翻译不评论。
-_OCR_SYSTEM = (
-    "你是学术论文 OCR 引擎。用户给你论文页面的图片，请按阅读顺序逐字转录页面上的全部文本。\n"
-    "- 输出 Markdown：保留标题层级与列表；数学公式用 LaTeX（$...$ / $$...$$）。\n"
-    "- 不要添加任何解释、评论、总结或翻译；不要遗漏正文；页眉页脚页码可忽略。\n"
-    "- 多张图片时严格按图片顺序转录，页与页之间空一行。"
-)
+# OCR 转录指令：DeepSeek-OCR 系列模型必须用厂商官方提示词激活解码模式，
+# 通用指令会让模型停留在“视觉压缩 token”输出态（返回大量 } 乱码，实测验证）。
+# 官方 Markdown 提示词输出 Markdown + grounding 标记（<|ref|>/<|det|> 边界框），
+# 由 _ocr_clean_grounding 剔除；其他 OpenAI 兼容 vision 模型同样适用该提示词。
+_OCR_GROUND_PROMPT = "<|grounding|>Convert the document to markdown."
+
+_OCR_REF_RE = re.compile(r"<\|ref\|>.*?<\|/ref\|>")
+_OCR_DET_RE = re.compile(r"<\|det\|>.*?<\|/det\|>")
+
+
+def _ocr_clean_grounding(md: str) -> str:
+    """剔除 DeepSeek-OCR grounding 标记（<|ref|>标签<|/ref|> 与 <|det|>[[x,y,w,h]]<|/det|> 边界框）。"""
+    md = _OCR_REF_RE.sub("", md)
+    md = _OCR_DET_RE.sub("", md)
+    return md
 
 
 def _tidy(md: str) -> str:
@@ -160,18 +168,18 @@ def _ocr_page_images(path, dpi: int, max_pages: int) -> list:
 
 
 def _ocr_transcribe(images_b64: list, cfg: dict) -> str:
-    """把若干页图片一次交给 OpenAI 兼容 chat 接口转录为文本。"""
-    content = [{"type": "text", "text": "请按顺序转录这些论文页面的全部文本。"}]
+    """把若干页图片一次交给 OpenAI 兼容 chat 接口转录为 Markdown（官方提示词）。"""
+    content = []
     for b64 in images_b64:
         content.append({
             "type": "image_url",
             "image_url": {"url": f"data:image/png;base64,{b64}"},
         })
+    content.append({"type": "text", "text": _OCR_GROUND_PROMPT})
     payload = {
         "model": cfg["model"],
         "temperature": 0,
         "messages": [
-            {"role": "system", "content": _OCR_SYSTEM},
             {"role": "user", "content": content},
         ],
     }
@@ -185,11 +193,14 @@ def _ocr_transcribe(images_b64: list, cfg: dict) -> str:
         req.add_header("Authorization", "Bearer " + cfg["key"])
     with urllib.request.urlopen(req, timeout=600) as resp:
         doc = json.loads(resp.read().decode("utf-8"))
-    return (doc.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+    text = (doc.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+    return _ocr_clean_grounding(text)
 
 
-def _ocr_full_text(path) -> str:
-    """整篇 PDF → OCR 文本；进度 → stderr（OCRPG::i/n）。配置不全直接抛错由调用方回退。"""
+def _ocr_full_text(path, paper_id=None) -> str:
+    """整篇 PDF → OCR 文本；进度 → stderr（OCRPG::i/n）。配置不全直接抛错由调用方回退。
+    传入 paper_id 且转换成功（≥200 字阈值防乱码落库）时写入 DB ocr_markdown 表，
+    供讲解/翻译管道与阅读页复用。"""
     cfg = _ocr_settings()
     if not cfg["base"] or not cfg["model"]:
         raise RuntimeError("OCR API 未配置（需在设置中填写 OCR 地址与模型）")
@@ -202,4 +213,16 @@ def _ocr_full_text(path) -> str:
         chunk = images[start:start + cfg["batch"]]
         print(f"OCRPG::{min(start + len(chunk), total)}/{total}", file=sys.stderr, flush=True)
         parts.append(_ocr_transcribe(chunk, cfg))
-    return "\n\n".join((p or "").strip() for p in parts if (p or "").strip())
+    text = "\n\n".join((p or "").strip() for p in parts if (p or "").strip())
+    if paper_id and len(text.strip()) >= 200:
+        try:
+            from . import db as _db
+            con = _db.connect()
+            try:
+                _db.set_ocr_markdown(con, paper_id, text)
+            finally:
+                con.close()
+            print(f"OCRSAVE::已落库（{len(text)} 字）", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"OCRSAVE-ERR::{e}（落库失败，不影响本次结果）", file=sys.stderr, flush=True)
+    return text

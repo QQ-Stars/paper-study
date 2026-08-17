@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react';
+import { Button, Input } from '@cloudflare/kumo';
 
 import {
   focusFirstWithin,
@@ -487,54 +488,66 @@ export function PdfWorkspace({
           {displayStatus(snapshot, ownsPaper)}
         </p>
         <div aria-label="PDF 页码" className="pdf-workspace__pagination" role="group">
-          <button
+          <Button
             aria-label="上一页"
             disabled={pageCount < 1 || currentPage <= 1}
             onClick={() => scrollToPage(currentPage - 1)}
+            shape="square"
+            size="sm"
             type="button"
+            variant="ghost"
           >
             ←
-          </button>
+          </Button>
           <label>
             <span className="visually-hidden">当前页</span>
-            <input
+            <Input
               aria-label="当前页"
               disabled={pageCount < 1}
               max={Math.max(pageCount, 1)}
               min={1}
-              onChange={(event) => scrollToPage(Number(event.currentTarget.value))}
+              onChange={(event) => scrollToPage(Number((event.target as HTMLInputElement).value))}
               type="number"
               value={currentPage}
             />
           </label>
           <span aria-hidden="true">/ {pageCount}</span>
-          <button
+          <Button
             aria-label="下一页"
             disabled={pageCount < 1 || currentPage >= pageCount}
             onClick={() => scrollToPage(currentPage + 1)}
+            shape="square"
+            size="sm"
             type="button"
+            variant="ghost"
           >
             →
-          </button>
+          </Button>
         </div>
         <div aria-label="PDF 缩放" className="pdf-workspace__zoom" role="group">
-          <button
+          <Button
             aria-label="缩小 PDF"
             disabled={snapshot.zoom <= 0.5}
             onClick={() => changeZoom(Math.round((snapshot.zoom - 0.1) * 10) / 10)}
+            shape="square"
+            size="sm"
             type="button"
+            variant="ghost"
           >
             −
-          </button>
+          </Button>
           <output aria-label="当前缩放比例">{Math.round(snapshot.zoom * 100)}%</output>
-          <button
+          <Button
             aria-label="放大 PDF"
             disabled={snapshot.zoom >= 3}
             onClick={() => changeZoom(Math.round((snapshot.zoom + 0.1) * 10) / 10)}
+            shape="square"
+            size="sm"
             type="button"
+            variant="ghost"
           >
             +
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -593,13 +606,16 @@ export function PdfWorkspace({
           </div>
           <blockquote>{bufferedSelection}</blockquote>
           <div>
-            <button
+            <Button
               onClick={() => selectionController.beginContinuation()}
+              size="sm"
               type="button"
             >
               续选
-            </button>
-            <button onClick={clearSelection} type="button">清空选文</button>
+            </Button>
+            <Button onClick={clearSelection} size="sm" type="button" variant="outline">
+              清空选文
+            </Button>
           </div>
         </aside>
       ) : null}
@@ -615,13 +631,23 @@ export function PdfWorkspace({
         >
           <header>
             <strong>选文翻译</strong>
-            <button aria-label="关闭选文翻译" onClick={closePopover} type="button">×</button>
+            <Button
+              aria-label="关闭选文翻译"
+              onClick={closePopover}
+              shape="square"
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              ×
+            </Button>
           </header>
-          <button
+          <Button
             aria-disabled={activeTranslation.status === 'loading'}
             data-panel-autofocus="true"
             onClick={translateSelection}
             type="button"
+            variant="primary"
           >
             {activeTranslation.status === 'loading'
               ? '正在翻译…'
@@ -630,7 +656,7 @@ export function PdfWorkspace({
                 : activeTranslation.status === 'error'
                   ? '重试翻译'
                   : '翻译选文'}
-          </button>
+          </Button>
           {activeTranslation.status === 'loading' ? (
             <p role="status">正在翻译选文…</p>
           ) : null}

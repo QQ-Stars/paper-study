@@ -79,7 +79,16 @@ def create_frontend_assets_handler(
     ui_entry: str | None = None,
 ) -> Callable[[Request, str], Awaitable[Response]]:
     repository_root = Path(root or Path(__file__).resolve().parents[4]).resolve()
-    react = Path(react_root or repository_root / "frontend" / "dist").resolve()
+    if react_root is not None:
+        react = Path(react_root).resolve()
+    else:
+        # 默认前端：新前端 ui-redesign（纸墨风 React+Vite，构建时 base=/workspace/）；
+        # 无构建产物时回退旧 frontend/dist，保证升级过渡期不白屏。
+        candidate = repository_root / "ui-redesign" / "dist"
+        if (candidate / "index.html").is_file():
+            react = candidate.resolve()
+        else:
+            react = (repository_root / "frontend" / "dist").resolve()
     legacy = Path(legacy_root or repository_root / "public").resolve()
     react_index = react / "index.html"
     legacy_index = legacy / "index.html"

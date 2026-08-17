@@ -9,22 +9,18 @@
 
 .library-route__eyebrow,
 .paper-preview__eyebrow {
-  color: var(--color-accent-hover);
+  color: var(--color-text-weak);
   font-family: var(--font-mono);
   font-size: var(--font-size-1);
-  font-weight: 650;
-  letter-spacing: 0.11em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
 }
 
 .library-route__add {
   min-height: 2.35rem;
   align-self: end;
   padding-inline: var(--space-4);
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-bg);
   font-size: var(--font-size-2);
-  font-weight: 650;
   white-space: nowrap;
 }
 
@@ -50,10 +46,10 @@
 
 .library-explainer-batch__identity > p {
   flex: none;
-  color: var(--color-accent-hover);
+  color: var(--color-text-weak);
   font-family: var(--font-mono);
   font-size: var(--font-size-1);
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.09em;
 }
 
@@ -101,15 +97,6 @@
   white-space: nowrap;
 }
 
-.library-explainer-batch__start {
-  border-color: var(--color-accent);
-  color: var(--color-text);
-}
-
-.library-explainer-batch__stop {
-  color: var(--color-text-muted);
-}
-
 .library-explainer-batch__feedback {
   grid-column: 1 / -1;
   overflow: hidden;
@@ -146,7 +133,6 @@
   font-size: var(--font-size-1);
 }
 
-.library-filters input,
 .library-filters select {
   min-width: 0;
   min-height: 2.35rem;
@@ -165,19 +151,9 @@
   white-space: nowrap;
 }
 
-.library-filters__favorite input {
-  min-height: auto;
-}
-
-.library-filters__favorite span {
-  color: var(--color-text-muted) !important;
-}
-
 .library-filters__semantic {
   min-height: 2.35rem;
   align-self: end;
-  border-color: var(--color-accent);
-  color: var(--color-text);
   font-size: var(--font-size-2);
   white-space: nowrap;
 }
@@ -205,8 +181,6 @@
 .library-route__batch button {
   min-height: auto;
   padding: var(--space-1) var(--space-2);
-  border: 0;
-  color: var(--color-text-muted);
   font-size: inherit;
 }
 
@@ -420,8 +394,6 @@
   min-height: 2rem;
   gap: 0.05rem;
   padding: var(--space-1) var(--space-2);
-  border-color: var(--color-line);
-  color: var(--color-text);
   font-size: var(--font-size-1);
   line-height: 1.15;
   text-align: start;
@@ -443,8 +415,6 @@
   min-width: 2rem;
   min-height: 2rem;
   padding: 0;
-  border: 0;
-  color: var(--color-text-weak);
   font-size: 1rem;
 }
 
@@ -507,11 +477,7 @@
 }
 
 .paper-preview__status {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-accent);
-  border-radius: 999px;
-  color: var(--color-accent-hover);
-  font-size: var(--font-size-1);
+  width: fit-content;
 }
 
 .paper-preview__identity {
@@ -596,17 +562,6 @@
   min-height: 2.75rem;
 }
 
-.paper-preview__open {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-bg);
-  font-weight: 650;
-}
-
-.paper-preview__delete {
-  color: var(--color-text-muted);
-}
-
 .paper-editor-backdrop {
   position: fixed;
   inset: 0;
@@ -643,11 +598,11 @@
 }
 
 .paper-editor__header p {
-  color: var(--color-accent-hover);
+  color: var(--color-text-weak);
   font-family: var(--font-mono);
   font-size: var(--font-size-1);
-  font-weight: 650;
-  letter-spacing: 0.11em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
 }
 
 .paper-editor__header h2 {
@@ -667,7 +622,6 @@
 .paper-editor__header button {
   flex: none;
   padding-inline: var(--space-3);
-  color: var(--color-text-muted);
 }
 
 .paper-editor__form {
@@ -703,17 +657,6 @@
   font-weight: 560;
 }
 
-.paper-editor__field input,
-.paper-editor__field textarea {
-  width: 100%;
-  min-height: 2.5rem;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-control);
-  background: var(--color-bg-subtle);
-  color: var(--color-text);
-}
-
 .paper-editor__field textarea {
   resize: vertical;
 }
@@ -741,14 +684,7 @@
 }
 
 .paper-editor__feedback [role="alert"] {
-  color: var(--color-accent-hover);
-}
-
-.paper-editor__save {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-bg);
-  font-weight: 650;
+  color: var(--color-error);
 }
 
 .paper-delete-confirmation {
@@ -770,13 +706,6 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-3);
   line-height: 1.55;
-}
-
-.paper-delete-confirmation__confirm {
-  border-color: var(--color-error);
-  background: var(--color-error);
-  color: var(--color-bg);
-  font-weight: 650;
 }
 
 @supports not (background: color-mix(in srgb, black, white)) {

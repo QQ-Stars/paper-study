@@ -1,3 +1,4 @@
+import { Badge, Button, Checkbox, Input, Loader } from '@cloudflare/kumo';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
@@ -110,71 +111,68 @@ export function SchedulesPanel() {
       </header>
 
       <div className="schedule-form">
-        <label className="schedule-form__query">
-          <span>计划研究方向</span>
-          <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
-        </label>
-        <label>
-          <span>年份</span>
-          <input value={years} onChange={(event) => setYears(event.currentTarget.value)} />
-        </label>
-        <label>
-          <span>最多候选</span>
-          <input
-            type="number"
-            min="1"
-            max="60"
-            value={maxPapers}
-            onChange={(event) => setMaxPapers(Number(event.currentTarget.value))}
-          />
-        </label>
-        <label>
-          <span>间隔天数</span>
-          <input
-            type="number"
-            min="1"
-            value={everyDays}
-            onChange={(event) => setEveryDays(Math.max(1, Number(event.currentTarget.value)))}
-          />
-        </label>
-        <label>
-          <span>最低相关度</span>
-          <input
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            value={minRelevance}
-            onChange={(event) => setMinRelevance(Number(event.currentTarget.value))}
-          />
-        </label>
+        <Input
+          label="计划研究方向"
+          className="w-full schedule-form__query"
+          value={query}
+          onChange={(event) => setQuery((event.target as HTMLInputElement).value)}
+        />
+        <Input
+          label="年份"
+          className="w-full"
+          value={years}
+          onChange={(event) => setYears((event.target as HTMLInputElement).value)}
+        />
+        <Input
+          label="最多候选"
+          type="number"
+          min={1}
+          max={60}
+          className="w-full"
+          value={maxPapers}
+          onChange={(event) => setMaxPapers(Number((event.target as HTMLInputElement).value))}
+        />
+        <Input
+          label="间隔天数"
+          type="number"
+          min={1}
+          className="w-full"
+          value={everyDays}
+          onChange={(event) => setEveryDays(Math.max(1, Number((event.target as HTMLInputElement).value)))}
+        />
+        <Input
+          label="最低相关度"
+          type="number"
+          min={0}
+          max={1}
+          step={0.05}
+          className="w-full"
+          value={minRelevance}
+          onChange={(event) => setMinRelevance(Number((event.target as HTMLInputElement).value))}
+        />
         <fieldset>
           <legend>来源</legend>
           {ACADEMIC_SOURCES.map((source) => (
-            <label key={source}>
-              <input
-                type="checkbox"
-                checked={sources.includes(source)}
-                onChange={(event) => {
-                  // 先在 handler 内捕获 checked，避免 updater 延迟执行时读空 currentTarget。
-                  const checked = event.currentTarget.checked;
-                  setSources((current) => checked
-                    ? [...current, source]
-                    : current.filter((item) => item !== source));
-                }}
-              />
-              {SOURCE_LABELS[source]}
-            </label>
+            <Checkbox
+              key={source}
+              label={SOURCE_LABELS[source]}
+              checked={sources.includes(source)}
+              onCheckedChange={(checked) => setSources((current) => checked
+                ? [...current, source]
+                : current.filter((item) => item !== source))}
+            />
           ))}
         </fieldset>
-        <label className="schedule-form__only-a">
-          <input type="checkbox" checked={onlyA} onChange={(event) => setOnlyA(event.currentTarget.checked)} />
-          仅 CCF-A
-        </label>
-        <button type="button" onClick={createSchedule} disabled={busyId !== null}>创建计划</button>
+        <Checkbox
+          className="schedule-form__only-a"
+          label="仅 CCF-A"
+          checked={onlyA}
+          onCheckedChange={(checked) => setOnlyA(checked)}
+        />
+        <Button type="button" variant="primary" className="schedule-form__create" onClick={() => void createSchedule()} disabled={busyId !== null}>创建计划</Button>
       </div>
 
-      {schedulesQuery.isPending ? <p>读取定时计划…</p> : null}
+      {schedulesQuery.isPending ? <p><Loader size="sm" />读取定时计划…</p> : null}
       {schedulesQuery.isError ? <p role="alert">{errorMessage(schedulesQuery.error)}</p> : null}
       {schedulesQuery.data?.length === 0 ? (
         <p className="schedules-panel__empty">没有定时计划。新建计划会由服务端调度器执行。</p>
@@ -189,26 +187,34 @@ export function SchedulesPanel() {
                 <small>上次：{schedule.lastRun || '尚未运行'}</small>
                 <small>下次：{schedule.nextRun || '等待服务端排期'}</small>
               </div>
-              <span className={schedule.enabled ? 'schedule-enabled' : 'schedule-disabled'}>
+              <Badge
+                className={schedule.enabled ? 'schedule-enabled' : 'schedule-disabled'}
+                variant={schedule.enabled ? 'success' : 'neutral'}
+                appearance="dot"
+              >
                 {schedule.enabled ? '已启用' : '已停用'}
-              </span>
+              </Badge>
               <div className="schedule-list__actions">
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   aria-label={`${schedule.enabled ? '停用' : '启用'}计划 ${schedule.id}`}
                   disabled={busyId !== null}
-                  onClick={() => toggle(schedule.id, !schedule.enabled)}
+                  onClick={() => void toggle(schedule.id, !schedule.enabled)}
                 >
                   {schedule.enabled ? '停用' : '启用'}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   aria-label={`删除计划 ${schedule.id}`}
                   disabled={busyId !== null}
-                  onClick={() => remove(schedule.id)}
+                  onClick={() => void remove(schedule.id)}
                 >
                   删除
-                </button>
+                </Button>
               </div>
             </li>
           ))}

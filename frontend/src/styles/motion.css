@@ -33,7 +33,7 @@
 @keyframes workspace-panel-in {
   from {
     opacity: 0;
-    transform: translateX(0.75rem);
+    transform: translateX(0.75rem) scale(0.98);
   }
 }
 

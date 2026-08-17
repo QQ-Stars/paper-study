@@ -3,6 +3,7 @@ import { useState } from 'react';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { Button, Select, Surface } from '@cloudflare/kumo';
 
 import {
   type WorkspaceRouteHandle,
@@ -113,7 +114,7 @@ export function Component() {
       <div className="reviews-route__state" role="alert">
         <strong>无法载入复习快照</strong>
         <span>{query.isError ? errorText(query.error) : '快照内容为空'}</span>
-        <button type="button" onClick={() => void query.refetch()}>重试</button>
+        <Button type="button" onClick={() => void query.refetch()}>重试</Button>
       </div>
     );
   }
@@ -135,13 +136,14 @@ export function Component() {
       {/* 页标题已在顶部命令栏展示；intro 压缩为单行状态栏，把纵向空间让给队列。 */}
       <header className="reviews-route__intro">
         <span>{reviews.today} · {dueCount} 篇当前需要处理</span>
-        <button
+        <Button
           type="button"
+          variant="ghost"
           disabled={query.isFetching}
           onClick={() => void query.refetch()}
         >
           {query.isFetching ? '同步中…' : '刷新快照'}
-        </button>
+        </Button>
       </header>
 
       {audit.phase !== 'idle' ? (
@@ -153,45 +155,44 @@ export function Component() {
         </p>
       ) : null}
 
-      <section className="reviews-route__start" aria-labelledby="reviews-start-title">
+      <Surface as="section" className="reviews-route__start" aria-labelledby="reviews-start-title">
         <div>
           <p>NEW PLAN</p>
           <h2 id="reviews-start-title">开始复习计划</h2>
           <span>选择尚未进入四组权威快照的论文，由服务端创建固定七轮计划。</span>
         </div>
-        <label>
-          <span>未安排论文</span>
-          <select
-            aria-label="选择未安排复习的论文"
-            value={startPaperId}
-            disabled={papersQuery.isPending || start.isPending}
-            onChange={(event) => setStartPaperId(event.currentTarget.value)}
-          >
-            <option value="">请选择论文</option>
-            {eligiblePapers.map((paper) => (
-              <option key={paper.id} value={paper.id}>
-                {paper.titleZh || paper.title} · {paper.id}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
+        <Select
+          label="未安排论文"
+          aria-label="选择未安排复习的论文"
+          value={startPaperId}
+          disabled={papersQuery.isPending || start.isPending}
+          onValueChange={(value) => setStartPaperId(value ?? '')}
+        >
+          <Select.Option value="">请选择论文</Select.Option>
+          {eligiblePapers.map((paper) => (
+            <Select.Option key={paper.id} value={paper.id}>
+              {paper.titleZh || paper.title} · {paper.id}
+            </Select.Option>
+          ))}
+        </Select>
+        <Button
           type="button"
+          variant="primary"
           disabled={!startPaperId || papersQuery.isPending || start.isPending || complete.isPending}
           onClick={() => start.mutate({ paperId: startPaperId })}
         >
           {start.isPending ? '开始中…' : '开始计划'}
-        </button>
+        </Button>
         {papersQuery.isError ? (
           <p className="reviews-route__start-error" role="alert">
             无法读取可安排论文：{errorText(papersQuery.error)}
-            <button type="button" onClick={() => void papersQuery.refetch()}>重试</button>
+            <Button type="button" variant="ghost" onClick={() => void papersQuery.refetch()}>重试</Button>
           </p>
         ) : null}
         {!papersQuery.isPending && !papersQuery.isError && eligiblePapers.length === 0 ? (
           <p className="reviews-route__start-empty">当前所有论文都已安排复习计划。</p>
         ) : null}
-      </section>
+      </Surface>
 
       <div className="reviews-route__groups">
         <ReviewGroup

@@ -7,6 +7,8 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { Button, Input, InputArea } from '@cloudflare/kumo';
+
 import { focusFirstWithin, focusSafely, trapTabKey } from '../../lib/accessibility/focus';
 import type { PaperDraft } from '../../lib/api/paperApi';
 
@@ -158,69 +160,69 @@ export function PaperEditor({
             <h2 id={titleId}>{dialogTitle}</h2>
             <span id={descriptionId}>维护论文的可核验元数据，不会自动改写阅读与复习状态。</span>
           </div>
-          <button type="button" disabled={pending} onClick={onCancel} aria-label={`关闭${dialogTitle}`}>
+          <Button type="button" variant="ghost" disabled={pending} onClick={onCancel} aria-label={`关闭${dialogTitle}`}>
             关闭
-          </button>
+          </Button>
         </header>
 
         <form className="paper-editor__form" onSubmit={submit}>
           <div className="paper-editor__fields">
             <label className="paper-editor__field paper-editor__field--wide">
               <span>英文题名</span>
-              <input
+              <Input
                 data-panel-autofocus="true"
                 required
                 value={fields.title}
-                onChange={(event) => update('title', event.target.value)}
+                onChange={(event) => update('title', (event.target as HTMLInputElement).value)}
               />
             </label>
             <label className="paper-editor__field paper-editor__field--wide">
               <span>中文题名</span>
-              <input value={fields.titleZh} onChange={(event) => update('titleZh', event.target.value)} />
+              <Input value={fields.titleZh} onChange={(event) => update('titleZh', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field paper-editor__field--wide">
               <span>作者</span>
-              <input value={fields.authors} onChange={(event) => update('authors', event.target.value)} />
+              <Input value={fields.authors} onChange={(event) => update('authors', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field">
               <span>会议或来源</span>
-              <input value={fields.venue} onChange={(event) => update('venue', event.target.value)} />
+              <Input value={fields.venue} onChange={(event) => update('venue', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field">
               <span>年份</span>
-              <input inputMode="numeric" value={fields.year} onChange={(event) => update('year', event.target.value)} />
+              <Input inputMode="numeric" value={fields.year} onChange={(event) => update('year', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field">
               <span>类型</span>
-              <input value={fields.type} onChange={(event) => update('type', event.target.value)} />
+              <Input value={fields.type} onChange={(event) => update('type', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field">
               <span>主题</span>
-              <input value={fields.topic} onChange={(event) => update('topic', event.target.value)} />
+              <Input value={fields.topic} onChange={(event) => update('topic', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field paper-editor__field--wide">
               <span>论文链接</span>
-              <input type="url" value={fields.url} onChange={(event) => update('url', event.target.value)} />
+              <Input type="url" value={fields.url} onChange={(event) => update('url', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field paper-editor__field--wide">
               <span>PDF 链接</span>
-              <input type="url" value={fields.pdfUrl} onChange={(event) => update('pdfUrl', event.target.value)} />
+              <Input type="url" value={fields.pdfUrl} onChange={(event) => update('pdfUrl', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field paper-editor__field--wide">
               <span>本地 PDF 路径</span>
-              <input value={fields.pdfPath} onChange={(event) => update('pdfPath', event.target.value)} />
+              <Input value={fields.pdfPath} onChange={(event) => update('pdfPath', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field paper-editor__field--wide">
               <span>一句话总结</span>
-              <input value={fields.tldr} onChange={(event) => update('tldr', event.target.value)} />
+              <Input value={fields.tldr} onChange={(event) => update('tldr', (event.target as HTMLInputElement).value)} />
             </label>
             <label className="paper-editor__field paper-editor__field--wide">
               <span>摘要</span>
-              <textarea rows={4} value={fields.abstract} onChange={(event) => update('abstract', event.target.value)} />
+              <InputArea rows={4} value={fields.abstract} onChange={(event) => update('abstract', (event.target as HTMLTextAreaElement).value)} />
             </label>
             <label className="paper-editor__field paper-editor__field--wide">
               <span>核心贡献</span>
-              <textarea rows={3} value={fields.contribution} onChange={(event) => update('contribution', event.target.value)} />
+              <InputArea rows={3} value={fields.contribution} onChange={(event) => update('contribution', (event.target as HTMLTextAreaElement).value)} />
             </label>
           </div>
 
@@ -229,10 +231,10 @@ export function PaperEditor({
               {visibleError ? <p role="alert">保存失败：{visibleError}</p> : pending ? <p>正在保存论文记录…</p> : null}
             </div>
             <div>
-              <button type="button" disabled={pending} onClick={onCancel}>取消</button>
-              <button type="submit" className="paper-editor__save" disabled={pending}>
+              <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>取消</Button>
+              <Button type="submit" variant="primary" className="paper-editor__save" disabled={pending}>
                 {pending ? '保存中…' : '保存论文'}
-              </button>
+              </Button>
             </div>
           </footer>
         </form>
@@ -310,9 +312,9 @@ export function PaperDeleteConfirmation({
             <h2 id={titleId}>删除 {paperTitle}</h2>
             <span id={descriptionId}>提交前可以取消。服务端失败时会保留论文与全部本地上下文。</span>
           </div>
-          <button type="button" disabled={pending} onClick={onCancel} aria-label="关闭删除确认">
+          <Button type="button" variant="ghost" disabled={pending} onClick={onCancel} aria-label="关闭删除确认">
             关闭
-          </button>
+          </Button>
         </header>
 
         <div className="paper-delete-confirmation__body">
@@ -325,15 +327,16 @@ export function PaperDeleteConfirmation({
             {error ? <p role="alert">删除失败：{error}</p> : pending ? <p>正在等待服务端确认…</p> : null}
           </div>
           <div>
-            <button type="button" disabled={pending} onClick={onCancel}>取消</button>
-            <button
+            <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>取消</Button>
+            <Button
               type="button"
+              variant="destructive"
               className="paper-delete-confirmation__confirm"
               disabled={pending}
               onClick={onConfirm}
             >
               {pending ? '删除中…' : '确认删除'}
-            </button>
+            </Button>
           </div>
         </footer>
       </section>

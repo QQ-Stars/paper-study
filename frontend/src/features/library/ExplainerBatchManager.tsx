@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef } from 'react';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Button } from '@cloudflare/kumo';
 
 import { artifactGateway } from '../../lib/api/artifactGateway';
 import { isAbortError } from '../../lib/api/errors';
@@ -182,31 +183,34 @@ export function ExplainerBatchManager() {
 
       <div className="library-explainer-batch__actions">
         {session.phase === 'running' ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
             className="library-explainer-batch__stop"
             onClick={stop}
           >
             停止接收
-          </button>
+          </Button>
         ) : pendingQuery.isError ? (
-          <button
+          <Button
             type="button"
+            variant="outline"
             className="library-explainer-batch__start"
             disabled={pendingQuery.isFetching}
             onClick={() => { void pendingQuery.refetch(); }}
           >
             {pendingQuery.isFetching ? '正在重读统计…' : '重新读取统计'}
-          </button>
+          </Button>
         ) : (
-          <button
+          <Button
             type="button"
+            variant="primary"
             className="library-explainer-batch__start"
             disabled={!canStart}
             onClick={() => { void start(); }}
           >
             批量生成缺失讲解
-          </button>
+          </Button>
         )}
       </div>
 

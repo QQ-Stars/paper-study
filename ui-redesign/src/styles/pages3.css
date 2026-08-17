@@ -1,0 +1,447 @@
+/* ══════════════ 通用：流控制台 / 文档查看 / PDF 阅读器 ══════════════ */
+
+.stream-console {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-deep);
+}
+
+.stream-console__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.4rem var(--space-3);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+}
+
+.stream-console__dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--ink-ghost);
+}
+
+.stream-console__dot--live {
+  background: var(--seal);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.stream-console__lines {
+  max-height: 9rem;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  margin: 0;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.7;
+  list-style: none;
+}
+
+.doc-viewer {
+  overflow-y: auto;
+  max-height: 20rem;
+  padding: var(--space-4);
+  border-left: 2px solid var(--seal-line);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    background: var(--paper-deep);
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pdf-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: hsl(24 14% 12% / 0.42);
+  animation: fade-in var(--duration-fast) var(--ease-out) both;
+}
+
+.pdf-viewer {
+  display: flex;
+  flex-direction: column;
+  width: min(64rem, 100%);
+  height: min(88dvh, 60rem);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  animation: pop-in var(--duration-base) var(--ease-spring) both;
+}
+
+.pdf-viewer__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.pdf-viewer__bar strong {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-viewer__bar .btn {
+  flex: none;
+  color: var(--ink-faint);
+  text-decoration: none;
+}
+
+.pdf-viewer__status {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+}
+
+.pdf-viewer__frame {
+  flex: 1;
+  border: 0;
+}
+
+/* ══════════════ 错误边界 ══════════════ */
+
+.workspace-error-panel {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  padding: var(--space-8);
+  margin-top: var(--space-6);
+}
+
+/* ══════════════ 文献库：详情 tab / 检索结果 ══════════════ */
+
+.library__mode-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+
+.library__semhits {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0;
+  margin: 0 0 var(--space-4);
+  list-style: none;
+}
+
+.library__semhit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.library__semhit:hover {
+  border-color: var(--seal-line);
+}
+
+.library__semhit-score {
+  flex: none;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--seal-wash);
+  color: var(--seal-deep);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.library__chunks {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.library__chunk {
+  padding: var(--space-4) var(--space-5);
+}
+
+.library__chunk header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+
+.library__chunk small {
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+}
+
+.library__chunk p {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+
+.library__row-glyphs {
+  display: grid;
+  gap: 0.15rem;
+  color: var(--ink-ghost);
+}
+
+.glyph-star {
+  color: var(--amber);
+}
+
+.glyph-pdf {
+  color: var(--seal);
+}
+
+.glyph-note {
+  color: var(--info);
+}
+
+.detail-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--paper-deep);
+}
+
+.detail-tabs__item {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.detail-tabs__item--active {
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+}
+
+.library__detail-facts--full {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.library__fact-wide {
+  grid-column: 1 / -1;
+}
+
+.library__fact-wide dd {
+  overflow: hidden;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library__fact-wide a {
+  color: var(--seal-deep);
+}
+
+.library__detail-actions-mini {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.library__detail-actions-mini .is-favorite {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.library__detail-pdffact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin: calc(-1 * var(--space-2)) 0 0;
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+}
+
+.library__detail-pdffact > span {
+  min-width: 0;
+}
+
+.library__detail-abstract--contribution {
+  border-left-color: var(--info);
+}
+
+/* ══════════════ 讲解/翻译/笔记 与 深度处理 ══════════════ */
+
+.artifacts {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.artifacts__block {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.artifacts__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.artifacts__head h4 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.artifacts__log {
+  margin: 0;
+  color: var(--seal-deep);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.artifacts__empty {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.7;
+}
+
+.artifacts__note {
+  min-height: 6rem;
+  padding: var(--space-3);
+  resize: vertical;
+}
+
+.artifacts__piece {
+  max-height: 8rem;
+  margin-top: var(--space-2);
+}
+
+.deep {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.deep__block {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.deep__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.deep__fact {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.7;
+}
+
+.deep__list {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.deep__list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--ink-soft);
+  font-size: var(--text-2xs);
+}
+
+.deep__list small {
+  margin-left: auto;
+  color: var(--ink-ghost);
+}
+
+.deep__code {
+  overflow: auto;
+  max-height: 10rem;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+}
+
+.deep__recs {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.deep__rec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+.deep__rec strong {
+  display: block;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.deep__rec small {
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+}

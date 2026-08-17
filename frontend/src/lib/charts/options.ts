@@ -11,13 +11,13 @@ type InsightPaper = Pick<
 >;
 
 const colors = {
-  accent: '#2fe586',
-  accentSoft: '#59eda0',
-  text: '#f2f6f3',
-  muted: '#9ca8a1',
-  weak: '#667069',
-  line: 'rgba(255,255,255,0.09)',
-  surface: '#141916',
+  accent: '#ff4d4d',
+  accentSoft: '#ff6b6b',
+  text: '#f4f4f6',
+  muted: '#9a9aa3',
+  weak: '#63636e',
+  line: 'rgba(255,255,255,0.1)',
+  surface: '#1a1a1e',
 } as const;
 
 const tooltip = {
@@ -102,7 +102,7 @@ export function buildYearTrendOption(
       smooth: 0.28,
       symbol: 'circle',
       symbolSize: 7,
-      areaStyle: { color: 'rgba(210,96,96,0.13)' },
+      areaStyle: { color: 'rgba(239,68,68,0.13)' },
       lineStyle: { width: 2 },
       data: rows.map(([, count]) => count),
     }],
@@ -133,7 +133,7 @@ export function buildTopicTreemapOption(
 
   return {
     animationDuration: 320,
-    color: [colors.accent, colors.accentSoft, '#278d5c', '#37664d'],
+    color: [colors.accent, colors.accentSoft, '#dc2626', '#991b1b'],
     tooltip,
     series: [{
       type: 'treemap',
@@ -160,7 +160,7 @@ export function buildVenueCompositionOption(
 
   return {
     animationDuration: 320,
-    color: [colors.accent, colors.accentSoft, '#278d5c', '#37664d', '#344b3e'],
+    color: [colors.accent, colors.accentSoft, '#dc2626', '#991b1b', '#7f1d1d'],
     tooltip,
     series: [{
       name: '发表场所',

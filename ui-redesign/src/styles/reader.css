@@ -1,0 +1,682 @@
+/* ══════════════ 论文阅读页 ══════════════ */
+
+.reader {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.reader__missing {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  padding: var(--space-10);
+}
+
+.reader__topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.reader__switch {
+  display: flex;
+  flex: 1;
+  min-width: 16rem;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.reader__picker {
+  flex: 1;
+  min-width: 0;
+}
+
+.reader__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.reader__filters .input {
+  min-height: 1.9rem;
+  font-size: var(--text-xs);
+}
+
+.reader__main {
+  width: min(48rem, 100%);
+  margin-inline: auto;
+}
+
+.reader__head {
+  display: grid;
+  gap: var(--space-3);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.reader__head .display-title {
+  font-size: var(--text-2xl);
+  line-height: 1.35;
+}
+
+.reader__origin {
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.reader__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.reader__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-6);
+  padding: var(--space-4) 0;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.reader__meta dt {
+  color: var(--ink-ghost);
+  font-size: var(--text-2xs);
+}
+
+.reader__meta dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader__meta a {
+  color: var(--seal-deep);
+}
+
+.reader__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-3) 0 0;
+}
+
+.reader__tab {
+  padding: 0.4rem var(--space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  font-weight: 540;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.reader__tab:hover {
+  background: transparent;
+  color: var(--ink);
+}
+
+.reader__tab--active,
+.reader__tab--active:hover {
+  border-bottom-color: var(--seal);
+  background: transparent;
+  color: var(--seal-deep);
+  font-weight: 600;
+}
+
+.reader__content {
+  min-height: 16rem;
+  padding: var(--space-5) 0 var(--space-8);
+}
+
+.reader__block {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.reader__block h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 640;
+}
+
+.reader__block p {
+  color: var(--ink-soft);
+  font-size: var(--text-md);
+  line-height: 1.85;
+}
+
+.reader__empty {
+  padding: var(--space-6);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  text-align: center;
+}
+
+.reader__empty--error {
+  border-color: var(--seal-line);
+  background: var(--seal-wash);
+  color: var(--seal-deep);
+}
+
+.reader__select-hint {
+  margin-top: var(--space-4);
+  color: var(--ink-ghost);
+  font-size: var(--text-2xs);
+}
+
+.reader__doc {
+  max-height: none;
+}
+
+/* ── Markdown 排版（纸墨语言） ── */
+
+.md-body {
+  color: var(--ink-soft);
+  font-size: var(--text-md);
+  line-height: 1.85;
+  /* 重置外层 .doc-viewer 的 pre-wrap，保证 Markdown HTML 正常折叠空白 */
+  white-space: normal;
+  word-break: normal;
+}
+
+.md-body > :first-child {
+  margin-top: 0;
+}
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  margin: 1.4em 0 0.5em;
+  color: var(--ink);
+  font-family: var(--font-display);
+  line-height: 1.35;
+}
+
+.md-body h1 {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-xl);
+}
+
+.md-body h2 {
+  font-size: var(--text-lg);
+}
+
+.md-body h3 {
+  font-size: var(--text-md);
+}
+
+.md-body h2::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: var(--space-2);
+  border-radius: 2px;
+  background: var(--seal);
+}
+
+.md-body p {
+  margin: 0.6em 0;
+}
+
+.md-body ul,
+.md-body ol {
+  padding-left: 1.4em;
+  margin: 0.6em 0;
+}
+
+.md-body li {
+  margin: 0.25em 0;
+}
+
+.md-body li::marker {
+  color: var(--seal-deep);
+}
+
+.md-body strong {
+  color: var(--ink);
+  font-weight: 620;
+}
+
+.md-body a {
+  color: var(--seal-deep);
+}
+
+.md-body blockquote {
+  padding: var(--space-2) var(--space-4);
+  margin: 0.8em 0;
+  border-left: 2px solid var(--seal-line);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--seal-wash);
+  color: var(--ink-soft);
+}
+
+.md-body code {
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+  background: var(--paper-deep);
+  color: var(--seal-deep);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+.md-body pre {
+  overflow-x: auto;
+  padding: var(--space-3) var(--space-4);
+  margin: 0.8em 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-deep);
+}
+
+.md-body pre code {
+  padding: 0;
+  background: transparent;
+  color: var(--ink-soft);
+}
+
+.md-body table {
+  width: 100%;
+  margin: 0.8em 0;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.md-body th,
+.md-body td {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.md-body th {
+  background: var(--paper-deep);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.md-body hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 1.2em 0;
+}
+
+.md-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: var(--space-2) 0;
+}
+
+/* ── PDF.js 阅读视图 ── */
+
+.pdfviewer {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.pdfviewer__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pdfviewer__pager,
+.pdfviewer__zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pdfviewer__pageno {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.pdfviewer__hint {
+  margin-left: auto;
+  color: var(--ink-ghost);
+  font-size: var(--text-2xs);
+}
+
+.pdfviewer__convert {
+  border-color: var(--seal-line);
+  color: var(--seal-deep);
+  font-weight: 600;
+}
+
+.pdfviewer__convert:hover:not(:disabled) {
+  border-color: var(--seal);
+  background: var(--seal-wash);
+  color: var(--seal-deep);
+}
+
+/* ── OCR 结果面板 ── */
+
+.ocr-panel {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.ocr-panel--loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-color: var(--seal-line);
+  background: var(--seal-wash);
+  color: var(--seal-deep);
+  font-size: var(--text-sm);
+}
+
+.ocr-panel--error {
+  border-color: var(--seal-line);
+  background: var(--seal-wash);
+}
+
+.ocr-panel--error p {
+  margin: 0;
+  color: var(--seal-deep);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.ocr-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* ── 讲解/翻译 tab 操作栏 ── */
+
+.reader__tab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-deep);
+}
+
+.reader__tab-hint {
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+}
+
+/* OCR 全文 tab 空状态 */
+
+.ocr-empty {
+  display: grid;
+  gap: var(--space-4);
+  justify-items: center;
+  padding: var(--space-10) var(--space-6);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.ocr-empty p {
+  max-width: 30rem;
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+}
+
+.ocr-empty__error {
+  color: var(--seal-deep) !important;
+}
+
+.pdfviewer__scroll {
+  overflow: auto;
+  max-height: 75dvh;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-sunken);
+}
+
+.pdfviewer__page {
+  position: relative;
+  width: fit-content;
+  margin-inline: auto;
+  background: var(--card);
+  box-shadow: var(--shadow-md);
+}
+
+.pdfviewer__page canvas {
+  display: block;
+}
+
+/* textLayer：透明文字覆盖在 canvas 上，可被选中且选区可见。
+ * 以下为 pdfjs-dist v6 官方 textLayer 规则的命名空间移植：
+ * render() 会向容器注入 --total-scale-factor，向每个 span 注入
+ * --font-height/--scale-x/--rotate 内联变量，必须配合这里的
+ * font-size/transform 计算规则，文本层才能与 canvas 精确对齐。 */
+
+.pdfviewer__textlayer {
+  color-scheme: only light;
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  text-align: initial;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 1;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor, 1) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.pdfviewer__textlayer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.pdfviewer__textlayer > :not(.markedContent),
+.pdfviewer__textlayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.pdfviewer__textlayer .markedContent {
+  display: contents;
+}
+
+.pdfviewer__textlayer span[role='img'] {
+  cursor: default;
+  user-select: none;
+}
+
+.pdfviewer__textlayer ::selection {
+  background: color-mix(in srgb, var(--seal) 30%, transparent);
+  color: transparent;
+}
+
+.reader__next {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.reader__next:hover {
+  border-color: var(--seal-line);
+  box-shadow: var(--shadow-sm);
+}
+
+.reader__next strong {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══════════════ 划词翻译 ══════════════ */
+
+.seltrans-trigger {
+  position: fixed;
+  z-index: var(--z-overlay);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.3rem var(--space-3);
+  border: 1px solid var(--seal-line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  box-shadow: var(--shadow-md);
+  color: var(--seal-deep);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transform: translateX(-50%);
+  animation: pop-in var(--duration-fast) var(--ease-spring) both;
+}
+
+.seltrans-trigger:hover {
+  background: var(--seal-wash);
+}
+
+.seltrans-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: hsl(24 14% 12% / 0.32);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  animation: fade-in var(--duration-fast) var(--ease-out) both;
+}
+
+.seltrans-panel {
+  display: grid;
+  gap: var(--space-3);
+  width: min(34rem, 100%);
+  max-height: 70dvh;
+  overflow-y: auto;
+  padding: var(--space-5);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  animation: pop-in var(--duration-base) var(--ease-spring) both;
+}
+
+.seltrans-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.seltrans-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+}
+
+.seltrans-state--error {
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid var(--seal-line);
+  border-radius: var(--radius-md);
+  background: var(--seal-wash);
+  color: var(--seal-deep);
+}
+
+.seltrans-state--error p {
+  margin: 0;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.seltrans-origin {
+  padding: var(--space-3) var(--space-4);
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--paper-deep);
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  margin: 0;
+}
+
+.seltrans-result {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-md);
+  line-height: 1.85;
+}
+
+.seltrans-panel__foot {
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .reader__meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

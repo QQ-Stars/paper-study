@@ -1,3 +1,4 @@
+import { Badge, Button, Checkbox } from '@cloudflare/kumo';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   useEffect,
@@ -54,6 +55,22 @@ function progressLine(event: unknown): string | null {
   return Reflect.get(event, 'type') === 'progress' && typeof line === 'string'
     ? line
     : null;
+}
+
+function jobStatusBadgeVariant(status: string): 'warning' | 'primary' | 'success' | 'error' | 'outline' {
+  switch (status) {
+    case 'pending':
+    case 'running':
+      return 'warning';
+    case 'review':
+      return 'primary';
+    case 'done':
+      return 'success';
+    case 'failed':
+      return 'error';
+    default:
+      return 'outline';
+  }
 }
 
 export function JobDetail({ jobId }: JobDetailProps) {
@@ -219,9 +236,9 @@ export function JobDetail({ jobId }: JobDetailProps) {
       <section className="job-detail" aria-label={`任务 ${jobId} 详情`}>
         <p role="alert">{errorMessage(detailQuery.error ?? '任务不存在')}</p>
         <div className="job-detail__actions">
-          <button type="button" onClick={() => void detailQuery.refetch()}>
+          <Button type="button" variant="outline" onClick={() => void detailQuery.refetch()}>
             重试读取任务
-          </button>
+          </Button>
         </div>
       </section>
     );
@@ -241,7 +258,7 @@ export function JobDetail({ jobId }: JobDetailProps) {
           <h2>{detail.job.query || `任务 ${jobId}`}</h2>
           <p>{detail.job.sources.join(' · ') || '未记录来源'}</p>
         </div>
-        <span className={`job-status job-status--${detail.job.status}`}>{detail.job.status}</span>
+        <Badge className={`job-status job-status--${detail.job.status}`} variant={jobStatusBadgeVariant(detail.job.status)}>{detail.job.status}</Badge>
       </header>
 
       <dl className="job-detail__metrics">
@@ -252,13 +269,14 @@ export function JobDetail({ jobId }: JobDetailProps) {
       </dl>
 
       <div className="job-detail__actions">
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => setCandidatePanel({ jobId, open: !showCandidates })}
         >
           {showCandidates ? '收起候选详情' : '展开候选详情'}
-        </button>
-        <button type="button" onClick={deleteJob}>删除任务</button>
+        </Button>
+        <Button type="button" variant="ghost" onClick={() => void deleteJob()}>删除任务</Button>
       </div>
 
       {showCandidates ? (
@@ -268,50 +286,46 @@ export function JobDetail({ jobId }: JobDetailProps) {
           ) : (
             <>
               <div className="job-candidates__toolbar">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={eligibleCount > 0 && selectedKeys.length === eligibleCount}
-                    onChange={(event) => setSelection({
-                      jobId,
-                      keys: event.currentTarget.checked ? eligibleKeys : [],
-                    })}
-                  />
-                  选择全部待确认候选
-                </label>
+                <Checkbox
+                  label="选择全部待确认候选"
+                  checked={eligibleCount > 0 && selectedKeys.length === eligibleCount}
+                  disabled={eligibleCount === 0}
+                  onCheckedChange={(checked) => setSelection({
+                    jobId,
+                    keys: checked ? eligibleKeys : [],
+                  })}
+                />
                 <span>{selectedKeys.length} / {eligibleCount}</span>
               </div>
               <ul>
                 {candidateEntries.map(({ candidate, key }) => (
                   <li key={key}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        aria-label={`选择 ${candidate.title}`}
-                        checked={!candidate.inLibrary && selectedKeys.includes(key)}
-                        disabled={candidate.inLibrary || confirming}
-                        onChange={(event) => setSelection({
-                          jobId,
-                          keys: event.currentTarget.checked
-                            ? [...new Set([...selectedKeys, key])]
-                            : selectedKeys.filter((item) => item !== key),
-                        })}
-                      />
-                      <span>
-                        <strong>{candidate.title}</strong>
-                        <small>{[candidate.venue, candidate.year, candidate.ccf ? `CCF ${candidate.ccf}` : null]
-                          .filter(Boolean).join(' · ')}</small>
-                      </span>
-                      {candidate.inLibrary ? <b>已在库</b> : null}
-                    </label>
+                    <Checkbox
+                      className="job-candidate__toggle"
+                      aria-label={`选择 ${candidate.title}`}
+                      checked={!candidate.inLibrary && selectedKeys.includes(key)}
+                      disabled={candidate.inLibrary || confirming}
+                      onCheckedChange={(checked) => setSelection({
+                        jobId,
+                        keys: checked
+                          ? [...new Set([...selectedKeys, key])]
+                          : selectedKeys.filter((item) => item !== key),
+                      })}
+                    />
+                    <span className="job-candidate__body">
+                      <strong>{candidate.title}</strong>
+                      <small>{[candidate.venue, candidate.year, candidate.ccf ? `CCF ${candidate.ccf}` : null]
+                        .filter(Boolean).join(' · ')}</small>
+                    </span>
+                    {candidate.inLibrary ? <b>已在库</b> : null}
                   </li>
                 ))}
               </ul>
               <div className="job-candidates__actions">
-                <button type="button" onClick={confirmSelected} disabled={confirming || selectedKeys.length === 0}>
+                <Button type="button" variant="primary" onClick={() => void confirmSelected()} disabled={confirming || selectedKeys.length === 0}>
                   确认选中候选
-                </button>
-                {confirming ? <button type="button" onClick={stopConfirm}>停止接收</button> : null}
+                </Button>
+                {confirming ? <Button type="button" variant="outline" onClick={stopConfirm}>停止接收</Button> : null}
               </div>
             </>
           )}

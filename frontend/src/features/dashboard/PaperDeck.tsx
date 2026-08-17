@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
 
+import { Badge, Button, Empty } from '@cloudflare/kumo';
+
 import { useDeckFlip } from '../../lib/motion/useDeckFlip';
 import type { DeckIdentity, DeckState } from './deckReducer';
 
@@ -24,6 +26,12 @@ function optionLabel(paper: PaperDeckItem): string {
   return [paper.title, paper.titleZh, paper.venue, paper.year, paper.status]
     .filter((value): value is string => Boolean(value))
     .join('，');
+}
+
+function paperStatusBadgeVariant(status: string): 'success' | 'primary' | 'outline' {
+  if (status === '已理解') return 'success';
+  if (status === '学习中') return 'primary';
+  return 'outline';
 }
 
 function positionText(state: DeckState): string {
@@ -121,8 +129,10 @@ export function PaperDeck({
 
       {state.total === 0 ? (
         <div className="paper-deck__empty" role="status">
-          <strong>当前没有论文</strong>
-          <span>导入论文或调整筛选后，真实结果会出现在这里。</span>
+          <Empty
+            title="当前没有论文"
+            description="导入论文或调整筛选后，真实结果会出现在这里。"
+          />
         </div>
       ) : (
         <div
@@ -178,7 +188,12 @@ export function PaperDeck({
                   {[paper.venue, paper.year, paper.type].filter(Boolean).join(' · ')}
                 </span>
                 {paper.status ? (
-                  <span className="paper-deck__card-status">{paper.status}</span>
+                  <Badge
+                    className="paper-deck__card-status"
+                    variant={paperStatusBadgeVariant(paper.status)}
+                  >
+                    {paper.status}
+                  </Badge>
                 ) : null}
               </div>
             );
@@ -187,16 +202,18 @@ export function PaperDeck({
       )}
 
       <footer className="paper-deck__actions">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           aria-label="上一篇论文"
           disabled={!state.canPrevious}
           onClick={() => moveSelection(-1, false)}
         >
           ←
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="primary"
           className="paper-deck__open"
           disabled={selectedPaper == null}
           onClick={() => {
@@ -204,15 +221,16 @@ export function PaperDeck({
           }}
         >
           打开阅读
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
           aria-label="下一篇论文"
           disabled={!state.canNext}
           onClick={() => moveSelection(1, false)}
         >
           →
-        </button>
+        </Button>
       </footer>
     </section>
   );

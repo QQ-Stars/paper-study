@@ -1,4 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- React Router lazy modules export route metadata with their component. */
+import { Button, Input, Select, Surface } from '@cloudflare/kumo';
 import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -83,7 +84,7 @@ function ChartPanel({
   });
 
   return (
-    <section className="insight-panel" aria-labelledby={headingId}>
+    <Surface as="section" className="insight-panel" aria-labelledby={headingId}>
       <header>
         <p>{eyebrow}</p>
         <h3 id={headingId}>{title}</h3>
@@ -101,7 +102,7 @@ function ChartPanel({
           没有足够的真实数据生成此图表。
         </div>
       )}
-    </section>
+    </Surface>
   );
 }
 
@@ -298,18 +299,19 @@ export function Component() {
       <div className="insights-route__state" role="alert">
         <strong>无法加载研究洞察</strong>
         <span>{errorMessage(papersQuery.error ?? graphQuery.error)}</span>
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => void Promise.all([papersQuery.refetch(), graphQuery.refetch()])}
         >
           重试
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
-    <section className="insights-route" aria-label="研究洞察">
+    <Surface as="section" className="insights-route" aria-label="研究洞察">
       <header className="insights-route__intro">
         <div>
           <p>EVIDENCE MAP</p>
@@ -324,49 +326,49 @@ export function Component() {
       </header>
 
       <div className="insights-route__commands">
-        <button type="button" disabled={commandPending} onClick={() => void buildGraph()}>
+        <Button type="button" variant="outline" disabled={commandPending} onClick={() => void buildGraph()}>
           {commandPending && session.command === 'citation-build' ? '正在构建引用图…' : '重建引用图'}
-        </button>
-        <button type="button" disabled={commandPending} onClick={() => void normalizeVenues()}>
+        </Button>
+        <Button type="button" variant="outline" disabled={commandPending} onClick={() => void normalizeVenues()}>
           {commandPending && session.command === 'normalize-venues' ? '正在规范场所…' : '规范发表场所'}
-        </button>
-        <label className="insights-route__recommendation-seed">
-          <span>推荐种子论文</span>
-          <select
-            value={recommendationPaperId}
-            disabled={commandPending || papers.length === 0}
-            onChange={(event) => setSelectedRecommendationId(event.currentTarget.value)}
-          >
-            {papers.map((paper) => <option key={paper.id} value={paper.id}>{paper.title}</option>)}
-          </select>
-        </label>
-        <button
+        </Button>
+        <Select
+          label="推荐种子论文"
+          className="insights-route__recommendation-seed"
+          value={recommendationPaperId}
+          disabled={commandPending || papers.length === 0}
+          onValueChange={(value) => setSelectedRecommendationId(value ?? '')}
+        >
+          {papers.map((paper) => <Select.Option key={paper.id} value={paper.id}>{paper.title}</Select.Option>)}
+        </Select>
+        <Button
           type="button"
+          variant="outline"
           disabled={commandPending || !recommendationPaperId}
           onClick={() => void recommend()}
         >
           {commandPending && session.command === 'recommend' ? '正在推荐…' : '推荐相似论文'}
-        </button>
-        <button type="button" disabled={commandPending} onClick={() => void embed()}>
+        </Button>
+        <Button type="button" variant="outline" disabled={commandPending} onClick={() => void embed()}>
           {commandPending && session.command === 'embed' ? '正在更新向量…' : '更新缺失向量'}
-        </button>
-        <label className="insights-route__semantic-query">
-          <span>语义查询</span>
-          <input
-            type="search"
-            value={semanticQuery}
-            disabled={commandPending}
-            onChange={(event) => setSemanticQuery(event.currentTarget.value)}
-          />
-        </label>
-        <button
+        </Button>
+        <Input
+          label="语义查询"
+          type="search"
+          className="insights-route__semantic-query w-full"
+          value={semanticQuery}
+          disabled={commandPending}
+          onChange={(event) => setSemanticQuery((event.target as HTMLInputElement).value)}
+        />
+        <Button
           type="button"
+          variant="outline"
           disabled={commandPending || !semanticQuery.trim()}
           onClick={() => void semanticSearch()}
         >
           {commandPending && session.command === 'semantic-search' ? '正在语义搜索…' : '语义搜索'}
-        </button>
-        {commandPending ? <button type="button" onClick={stopCommand}>停止接收</button> : null}
+        </Button>
+        {commandPending ? <Button type="button" variant="ghost" onClick={stopCommand}>停止接收</Button> : null}
       </div>
 
       {session.phase === 'failure' && session.error ? (
@@ -420,9 +422,9 @@ export function Component() {
             <ol>
               {semanticMatches.map(({ paper, score }) => (
                 <li key={paper.id}>
-                  <button type="button" onClick={() => openPaper(paper.id)}>
+                  <Button type="button" variant="ghost" onClick={() => openPaper(paper.id)}>
                     <strong>{paper.title}</strong>
-                  </button>
+                  </Button>
                   <span>语义得分 {score.toFixed(3)}</span>
                 </li>
               ))}
@@ -443,7 +445,7 @@ export function Component() {
           ) : null}
         </div>
       </div>
-    </section>
+    </Surface>
   );
 }
 

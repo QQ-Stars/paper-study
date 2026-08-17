@@ -42,21 +42,43 @@ def _explain_core(con, r: dict, deep: bool) -> str:
 
     fulltext = None
     if deep:
-        pdf = _find_pdf(r)
-        if pdf:
+        # OCR 模式：优先用已落库的 OCR Markdown，避免重复调用 OCR（贵且慢）
+        if config.PDF_TEXT_PROVIDER == "ocr":
             try:
-                pages = extract.page_count(pdf)
+                cached_md = db.get_ocr_markdown(con, r["id"])
             except Exception:
-                pages = "?"
-            _p(f"STAGE::pdf::读取 PDF 全文（共 {pages} 页）…")
-            try:
-                fulltext = extract.full_text(pdf, r.get("abstract"), config.EXPLAIN_MAX_CHARS)
-                fulltext, cut = extract.strip_references(fulltext)
-                _p(f"PDFOK::已读取全文 {len(fulltext)} 字" + ("（已跳过参考文献）" if cut else ""))
-            except Exception as e:
-                _p(f"PDFERR::{e}（改用摘要生成）")
-        else:
-            _p("PDFMISS::未找到本地PDF，改用摘要 / TLDR 生成")
+                cached_md = None
+            if cached_md and cached_md.strip():
+                _p(f"PDFOK::使用已保存的 OCR Markdown（{len(cached_md)} 字）")
+                fulltext = cached_md[:config.EXPLAIN_MAX_CHARS]
+        if fulltext is None:
+            pdf = _find_pdf(r)
+            if pdf:
+                try:
+                    pages = extract.page_count(pdf)
+                except Exception:
+                    pages = "?"
+                _p(f"STAGE::pdf::读取 PDF 全文（共 {pages} 页）…")
+                # OCR 模式无缓存：先触发 OCR（成功后自动落库），失败回退本地解析
+                if config.PDF_TEXT_PROVIDER == "ocr":
+                    try:
+                        ocr_text = extract._ocr_full_text(str(pdf), paper_id=r["id"])
+                        if len(ocr_text.strip()) >= 200:
+                            fulltext = ocr_text[:config.EXPLAIN_MAX_CHARS]
+                            _p(f"PDFOK::OCR 转换完成并已落库（{len(fulltext)} 字）")
+                    except Exception as e:
+                        _p(f"OCRERR::{e}（回退本地解析）")
+                if fulltext is None:
+                    try:
+                        fulltext = extract.full_text(pdf, r.get("abstract"), config.EXPLAIN_MAX_CHARS)
+                        _p(f"PDFOK::已读取全文 {len(fulltext)} 字")
+                    except Exception as e:
+                        _p(f"PDFERR::{e}（改用摘要生成）")
+                if fulltext:
+                    fulltext, cut = extract.strip_references(fulltext)
+                    _p("PDFOK::已跳过参考文献" if cut else "PDFOK::全文就绪")
+            else:
+                _p("PDFMISS::未找到本地PDF，改用摘要 / TLDR 生成")
 
     _p("STAGE::generate::调用大模型撰写讲解…")
     md = llm.generate_explainer(r, fulltext)

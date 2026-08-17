@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import ntpath
+
+from sqlalchemy import text as sa_text
 from typing import Any
 
 import anyio
@@ -80,6 +82,121 @@ def create_legacy_router() -> APIRouter:
         except Exception as error:
             return _safe_json_error(error)
         return _json_response(result)
+
+    @router.post("/api/ocr-md")
+    async def ocr_md(request: Request) -> Response:
+        """PDF → Markdown（OCR）：调用 agent ocr-md（方案 A 官方提示词）。
+        进度 OCRPG::i/n → NDJSON progress 事件，Markdown → 终态事件 markdown 字段。"""
+        body = await _body(request)
+        paper_id = _safe_base(body.get("id"))
+        if not paper_id:
+            return _json_response({"ok": False, "error": "缺少 id"}, 400)
+        try:
+            row = await _services(request).library_queries.get_paper(paper_id)
+        except Exception:
+            row = None
+        stored = row.get("pdf_path") if isinstance(row, dict) else None
+        try:
+            file = _pdf_files(request).resolve_for_id(paper_id, stored_path=stored)
+        except Exception as error:
+            return _safe_json_error(error)
+        if file is None:
+            return _json_response(
+                {"ok": False, "error": "无本地 PDF，请先下载 PDF 入库后再执行 OCR"}, 409
+            )
+        return ndjson_response(
+            _agent_events(
+                request,
+                "ocr-md",
+                ["--id", paper_id],
+                terminal_fields={"markdown": ""},
+                stdout_text_field="markdown",
+            )
+        )
+
+    @router.get("/api/ocr-md")
+    async def get_ocr_md(request: Request) -> Response:
+        """读已保存的 PDF→Markdown(OCR) 结果；无记录返回空文本（与 /api/explainer 一致）。"""
+        paper_id = _safe_base(request.query_params.get("id"))
+        if not paper_id:
+            return _json_response({"ok": False, "error": "缺少 id"}, 400)
+        try:
+            async with request.app.state.session_factory() as session:
+                result = await session.execute(
+                    sa_text("SELECT content FROM ocr_markdown WHERE paper_id = :pid"),
+                    {"pid": paper_id},
+                )
+                row = result.first()
+        except Exception:
+            # 表不存在（从未执行过 OCR）→ 视同无记录
+            return _markdown_response(None)
+        return _markdown_response(row[0] if row else None)
+
+    @router.get("/api/ocr-md-batch")
+    async def ocr_batch_status(request: Request) -> Response:
+        """批量 OCR 统计：总数 / 已有 OCR / 有 PDF 待转换 / 缺 PDF。"""
+        try:
+            async with request.app.state.session_factory() as session:
+                rows = (
+                    await session.execute(sa_text("SELECT id, pdf_path FROM papers"))
+                ).all()
+                try:
+                    have_rows = (
+                        await session.execute(
+                            sa_text(
+                                "SELECT paper_id FROM ocr_markdown "
+                                "WHERE TRIM(content) != ''"
+                            )
+                        )
+                    ).all()
+                except Exception:
+                    have_rows = []  # 表不存在（从未执行过 OCR）
+            have = {str(row[0]) for row in have_rows}
+            resolver = _pdf_files(request)
+            total = len(rows)
+            has_ocr = len(have)
+            with_pdf = 0
+            pending = 0
+            no_pdf = 0
+            for row in rows:
+                paper_id = str(row[0])
+                stored = row[1] if isinstance(row[1], str) and row[1].strip() else None
+                resolved = resolver.resolve_for_id(paper_id, stored_path=stored)
+                if resolved is not None:
+                    with_pdf += 1
+                    if paper_id not in have:
+                        pending += 1
+                else:
+                    no_pdf += 1
+        except Exception as error:
+            return _safe_json_error(error)
+        return _json_response(
+            {
+                "ok": True,
+                "total": total,
+                "hasOcr": has_ocr,
+                "withPdf": with_pdf,
+                "pending": pending,
+                "noPdf": no_pdf,
+            }
+        )
+
+    @router.post("/api/ocr-md-batch")
+    async def ocr_batch(request: Request) -> Response:
+        """批量 PDF→Markdown(OCR)：只补「有 PDF 且无 OCR 落库」的论文；NDJSON 流式进度，
+        汇总 JSON 包在终态事件 summary 字段（与 /api/explain-batch 同契约）。"""
+        body = await _body(request)
+        return ndjson_response(
+            _agent_events(
+                request,
+                "ocr-md-batch",
+                _optional_args(body, "limit"),
+                terminal_fields={
+                    "summary": {"total": 0, "done": 0, "failed": [], "skipped_no_pdf": []}
+                },
+                stdout_object_field="summary",
+            )
+        )
 
     @router.get("/api/reviews")
     async def list_reviews(request: Request) -> Response:

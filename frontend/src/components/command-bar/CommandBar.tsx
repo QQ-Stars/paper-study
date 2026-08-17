@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Button } from '@cloudflare/kumo/components/button';
+import { ListChecks, BookOpen } from '@phosphor-icons/react';
 
 import { useWorkspaceStore } from '../../lib/workspace';
 
@@ -71,24 +73,28 @@ export function CommandBar({
       </button>
 
       <div className="workspace-command-bar__panels">
-        <button
+        <Button
           id={triggerIds.queue}
-          type="button"
+          variant="ghost"
+          size="sm"
+          icon={<ListChecks size={16} />}
           aria-expanded={activePanel === 'queue'}
           aria-controls="workspace-responsive-panel"
           onClick={() => openPanel('queue', triggerIds.queue)}
         >
           研究队列
-        </button>
-        <button
+        </Button>
+        <Button
           id={triggerIds.inspector}
-          type="button"
+          variant="ghost"
+          size="sm"
+          icon={<BookOpen size={16} />}
           aria-expanded={activePanel === 'inspector'}
           aria-controls="workspace-responsive-panel"
           onClick={() => openPanel('inspector', triggerIds.inspector)}
         >
           论文上下文
-        </button>
+        </Button>
       </div>
     </div>
   );

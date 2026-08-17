@@ -5,11 +5,11 @@
 }
 
 .settings-section header > p {
-  color: var(--color-accent-hover);
+  color: var(--color-text-weak);
   font-family: var(--font-mono);
   font-size: var(--font-size-1);
-  font-weight: 650;
-  letter-spacing: 0.11em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
 }
 
 .settings-section header span {
@@ -21,9 +21,6 @@
   display: grid;
   gap: var(--space-4);
   padding: var(--space-5);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-stage);
-  background: var(--color-surface);
 }
 
 .settings-section header {
@@ -43,30 +40,6 @@
   gap: var(--space-4);
 }
 
-.settings-field,
-.settings-field label {
-  display: grid;
-  align-content: start;
-  gap: var(--space-2);
-}
-
-.settings-field {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-2);
-}
-
-.settings-field input {
-  width: 100%;
-  min-height: 2.75rem;
-  padding-inline: var(--space-3);
-}
-
-.settings-field small {
-  overflow-wrap: anywhere;
-  color: var(--color-text-weak);
-  font-size: var(--font-size-1);
-}
-
 .settings-actions,
 .settings-density {
   display: flex;
@@ -75,25 +48,13 @@
   gap: var(--space-2);
 }
 
-.settings-actions button,
-.settings-density button {
-  min-height: 2.75rem;
-  padding-inline: var(--space-3);
-}
-
-.settings-density button[aria-pressed="true"] {
-  border-color: var(--color-accent);
-  background: var(--color-accent-muted);
-  color: var(--color-text);
-}
-
 .settings-status {
   color: var(--color-text-muted);
   font-size: var(--font-size-2);
 }
 
 .settings-status--ok {
-  color: var(--color-accent-hover);
+  color: var(--color-success);
 }
 
 .settings-status--error {
@@ -110,15 +71,6 @@
   justify-content: space-between;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
-}
-
-.settings-savebar__primary {
-  min-width: 8rem;
-  min-height: 2.75rem;
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-bg);
-  font-weight: 650;
 }
 
 .settings-route__state {
@@ -142,9 +94,5 @@
 
   .settings-savebar {
     bottom: calc(var(--mobile-nav-height) + var(--space-2));
-  }
-
-  .settings-savebar__primary {
-    min-width: 7rem;
   }
 }

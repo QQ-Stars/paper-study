@@ -28,11 +28,11 @@
 }
 
 .artifact-panel__header p {
-  color: var(--color-accent-hover);
+  color: var(--color-text-weak);
   font-family: var(--font-mono);
   font-size: var(--font-size-1);
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
 }
 
 .artifact-panel__header h2 {
@@ -99,22 +99,6 @@
   gap: var(--space-2);
 }
 
-.artifact-panel__actions button {
-  min-height: 2.25rem;
-  padding-inline: var(--space-3);
-  border-color: var(--color-accent);
-  background: var(--color-accent-muted);
-  color: var(--color-text);
-  font-size: var(--font-size-2);
-  font-weight: 620;
-}
-
-.artifact-panel__actions .artifact-panel__stop {
-  border-color: var(--color-line-strong);
-  background: transparent;
-  color: var(--color-text-muted);
-}
-
 .artifact-panel__editor {
   display: grid;
   gap: var(--space-2);
@@ -125,9 +109,6 @@
 .artifact-panel__editor textarea {
   min-height: 9rem;
   resize: vertical;
-  padding: var(--space-3);
-  font-family: var(--font-sans);
-  line-height: 1.55;
 }
 
 .artifact-panel__status,

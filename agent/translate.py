@@ -122,7 +122,10 @@ def _chunk(text: str, size: int = 3800):
     return chunks
 
 
-def translate_paper(pid: str, workers: int = 4) -> str:
+def translate_paper(pid: str, workers: int = 0) -> str:
+    """workers<=0 时用设置页配置的翻译并发数（translateWorkers）。"""
+    if workers <= 0:
+        workers = config.TRANSLATE_WORKERS
     con = db.connect()
     row = con.execute("SELECT * FROM papers WHERE id=?", (pid,)).fetchone()
     if not row:
@@ -131,17 +134,41 @@ def translate_paper(pid: str, workers: int = 4) -> str:
     _p(f"STAGE::load::{(r.get('title') or '')[:48]}")
 
     pdf = _find_pdf(r)
-    if pdf:
-        _p(f"STAGE::pdf::读取 PDF 全文（共 {extract.page_count(pdf)} 页）…")
-        body = extract.full_text(pdf, None, config.EXPLAIN_MAX_CHARS)
-    else:
-        con.close()
-        _p("PDFMISS::未找到本地PDF，无法进行全文翻译")
-        raise SystemExit(5)
+    body = None
+    # OCR 模式：优先用已落库的 OCR Markdown，避免重复调用 OCR（贵且慢）
+    if config.PDF_TEXT_PROVIDER == "ocr":
+        try:
+            cached_md = db.get_ocr_markdown(con, r["id"])
+        except Exception:
+            cached_md = None
+        if cached_md and cached_md.strip():
+            _p(f"PDFOK::使用已保存的 OCR Markdown（{len(cached_md)} 字）")
+            body = cached_md[:config.TRANSLATE_MAX_CHARS]
+    if body is None:
+        if pdf:
+            # OCR 模式无缓存：先触发 OCR（成功后自动落库），失败回退本地解析
+            if config.PDF_TEXT_PROVIDER == "ocr":
+                try:
+                    _p("STAGE::pdf::OCR 转换中（结果将落库供下次复用）…")
+                    ocr_text = extract._ocr_full_text(str(pdf), paper_id=r["id"])
+                    if len(ocr_text.strip()) >= 200:
+                        body = ocr_text[:config.TRANSLATE_MAX_CHARS]
+                except Exception as e:
+                    _p(f"OCRERR::{e}（回退本地解析）")
+            if body is None:
+                _p(f"STAGE::pdf::读取 PDF 全文（共 {extract.page_count(pdf)} 页）…")
+                body = extract.full_text(pdf, None, config.TRANSLATE_MAX_CHARS)
+        else:
+            con.close()
+            _p("PDFMISS::未找到本地PDF，无法进行全文翻译")
+            raise SystemExit(5)
 
-    body, stripped = extract.strip_references(body)
-    if stripped:
-        _p("STRIP::已跳过参考文献/致谢部分")
+    if config.TRANSLATE_SKIP_REFERENCES:
+        body, stripped = extract.strip_references(body)
+        if stripped:
+            _p("STRIP::已跳过参考文献/致谢部分")
+    else:
+        _p("STRIP::按设置保留参考文献/致谢部分")
     body, caps, n_noise = _clean_body(body)
     if n_noise:
         _p(f"STRIP::已移除 {n_noise} 行页眉页脚/页码/arXiv 等噪声")
@@ -153,11 +180,28 @@ def translate_paper(pid: str, workers: int = 4) -> str:
         _p(f"STRIP::已把 {len(caps)} 处图表标题移到文末附录")
         body = body.rstrip() + "\n\n## 图表标题（原文图表说明）\n\n" + "\n".join(f"- {c}" for c in caps)
 
-    chunks = _chunk(body)
+    chunks = _chunk(body, config.TRANSLATE_CHUNK_SIZE)
     if not chunks:
         con.close(); _p("ERR::无可翻译内容"); raise SystemExit(3)
+
+    if config.TRANSLATE_MODE == "full":
+        # 整篇一次送入（适用于大上下文模型）：不切块，单次调用；失败时自动回退分块。
+        _p(f"STAGE::translate::整篇一次翻译（{len(body)} 字，模式=full）…")
+        try:
+            md = llm.translate_md(body)
+        except Exception as e:
+            _p(f"FULLERR::{e}（回退分块翻译）")
+            md = ""
+        if md and md.strip():
+            db.set_translation(con, pid, md)
+            con.close()
+            _p(f"DONE::{len(md)}")
+            sys.stdout.write(md)
+            sys.stdout.flush()
+            return md
+
     _p(f"TOTAL::{len(chunks)}")
-    _p("STAGE::translate::翻译中…")
+    _p(f"STAGE::translate::分块翻译中（每块 ≤{config.TRANSLATE_CHUNK_SIZE} 字，并发 {workers}）…")
 
     results = [None] * len(chunks)
     done = 0

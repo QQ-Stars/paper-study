@@ -1,3 +1,5 @@
+import { Table } from '@cloudflare/kumo';
+
 import type { Candidate, Verification } from '../../lib/api/types';
 import { candidateKey } from './acquireReducer';
 
@@ -48,57 +50,68 @@ export function CandidateList({
   return (
     <section className="candidate-list" aria-label="检索候选">
       <div className="candidate-list__toolbar">
-        <label>
-          <input
-            type="checkbox"
-            checked={allSelected}
-            disabled={disabled || selectable.length === 0}
-            onChange={(event) => onToggleAll(event.currentTarget.checked)}
-          />
-          选择全部可入库候选
-        </label>
         <span>{selectedKeys.length} / {selectable.length} 已选择</span>
       </div>
-      <ol className="candidate-list__items">
-        {candidates.map((candidate, index) => {
-          const key = candidateKey(candidate);
-          const verification = verifications[index];
-          const verified = verificationText(verification);
-          const title = candidate.title || candidate.sourceId;
-          return (
-            <li key={key} className={candidate.inLibrary ? 'candidate candidate--in-library' : 'candidate'}>
-              <label className="candidate__select">
-                <input
-                  type="checkbox"
-                  aria-label={`选择 ${title}`}
+      <Table className="candidate-list__items">
+        <Table.Header>
+          <Table.Row>
+            <Table.CheckHead
+              label="选择全部可入库候选"
+              checked={allSelected}
+              disabled={disabled || selectable.length === 0}
+              onValueChange={(nextSelected) => onToggleAll(nextSelected)}
+            />
+            <Table.Head className="candidate-list__index-head">#</Table.Head>
+            <Table.Head>候选</Table.Head>
+            <Table.Head className="candidate-list__score-head">REL</Table.Head>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {candidates.map((candidate, index) => {
+            const key = candidateKey(candidate);
+            const verification = verifications[index];
+            const verified = verificationText(verification);
+            const title = candidate.title || candidate.sourceId;
+            return (
+              <Table.Row
+                key={key}
+                className={candidate.inLibrary ? 'candidate candidate--in-library' : 'candidate'}
+              >
+                <Table.CheckCell
+                  label={`选择 ${title}`}
                   checked={!candidate.inLibrary && selected.has(key)}
                   disabled={disabled || candidate.inLibrary}
-                  onChange={(event) => onToggle(key, event.currentTarget.checked)}
+                  onValueChange={(nextSelected) => onToggle(key, nextSelected)}
                 />
-                <span className="candidate__index">{String(index + 1).padStart(2, '0')}</span>
-              </label>
-              <div className="candidate__body">
-                <strong>{title}</strong>
-                <p>
-                  {[candidate.venue || '未标注来源', candidate.year, candidate.type, candidate.topic]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </p>
-                <div className="candidate__badges">
-                  <span>{candidate.source}</span>
-                  {candidate.ccf ? <span>CCF {candidate.ccf}</span> : null}
-                  {verified ? <span title={verification?.note}>{verified}</span> : null}
-                  {candidate.inLibrary ? <span className="candidate__existing">已在库</span> : null}
-                </div>
-              </div>
-              <div className="candidate__score" aria-label={`相关度 ${relevancePercent(candidate.relevance)}%`}>
-                <strong>{relevancePercent(candidate.relevance)}</strong>
-                <span>REL</span>
-              </div>
-            </li>
-          );
-        })}
-      </ol>
+                <Table.Cell className="candidate__index">
+                  {String(index + 1).padStart(2, '0')}
+                </Table.Cell>
+                <Table.Cell className="candidate__body">
+                  <strong>{title}</strong>
+                  <p>
+                    {[candidate.venue || '未标注来源', candidate.year, candidate.type, candidate.topic]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                  <div className="candidate__badges">
+                    <span>{candidate.source}</span>
+                    {candidate.ccf ? <span>CCF {candidate.ccf}</span> : null}
+                    {verified ? <span title={verification?.note}>{verified}</span> : null}
+                    {candidate.inLibrary ? <span className="candidate__existing">已在库</span> : null}
+                  </div>
+                </Table.Cell>
+                <Table.Cell
+                  className="candidate__score"
+                  aria-label={`相关度 ${relevancePercent(candidate.relevance)}%`}
+                >
+                  <strong>{relevancePercent(candidate.relevance)}</strong>
+                  <span>REL</span>
+                </Table.Cell>
+              </Table.Row>
+            );
+          })}
+        </Table.Body>
+      </Table>
     </section>
   );
 }

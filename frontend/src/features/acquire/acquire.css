@@ -38,11 +38,11 @@
 }
 
 .section-kicker {
-  color: var(--color-accent-hover);
+  color: var(--color-text-weak);
   font-family: var(--font-mono);
   font-size: var(--font-size-1);
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
 }
 
 .acquire-command h2,
@@ -91,27 +91,6 @@
   grid-column: 1 / -1;
 }
 
-.acquire-form label,
-.acquire-queries,
-.local-pdf__controls label {
-  display: grid;
-  gap: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-2);
-}
-
-.acquire-form input,
-.acquire-queries textarea,
-.local-pdf__controls input {
-  width: 100%;
-  min-height: 2.5rem;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-control);
-  background: var(--color-bg-subtle);
-  color: var(--color-text);
-}
-
 .acquire-queries textarea {
   min-height: 4.5rem;
   resize: vertical;
@@ -134,17 +113,6 @@
   font-size: var(--font-size-2);
 }
 
-.source-picker label,
-.acquire-options label,
-.candidate-list__toolbar label,
-.local-pdf label {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-3);
-}
-
 .acquire-options,
 .acquire-actions,
 .acquire-history,
@@ -154,22 +122,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-}
-
-.acquire-options button,
-.acquire-actions button,
-.acquire-history button,
-.local-pdf button {
-  padding-inline: var(--space-3);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-3);
-}
-
-.acquire-actions .acquire-primary {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-bg);
-  font-weight: 680;
 }
 
 .acquire-history {
@@ -183,10 +135,9 @@
   font-size: var(--font-size-1);
 }
 
-.acquire-history button {
-  min-height: 1.8rem;
-  overflow: hidden;
+.acquire-history__item {
   max-width: 12rem;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -249,7 +200,7 @@
 .candidate-list__toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-line);
@@ -262,34 +213,11 @@
 }
 
 .candidate-list__items {
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.candidate {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) 3.5rem;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 5.25rem;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--color-line);
-}
-
-.candidate:last-child {
-  border-bottom: 0;
+  width: 100%;
 }
 
 .candidate--in-library {
-  background: rgb(255 255 255 / 0.018);
   opacity: 0.66;
-}
-
-.candidate__select {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
 }
 
 .candidate__index {
@@ -320,6 +248,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 
 .candidate__badges {
   display: flex;
@@ -377,7 +306,11 @@
   padding: var(--space-4) var(--space-5);
 }
 
-.local-pdf__controls label {
+.local-pdf__controls {
+  align-items: flex-end;
+}
+
+.local-pdf__directory {
   min-width: min(26rem, 100%);
   flex: 1;
 }
@@ -400,13 +333,20 @@
 }
 
 .local-pdf__files li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
   background: var(--color-bg-subtle);
 }
 
-.local-pdf__files label span {
+.local-pdf__file-toggle {
+  flex-shrink: 0;
+}
+
+.local-pdf__files li span {
   overflow: hidden;
   min-width: 0;
   flex: 1;
@@ -581,26 +521,7 @@
     grid-template-columns: 1fr;
   }
 
-  .acquire-actions button,
-  .acquire-history button,
-  .acquire-options button,
-  .local-pdf button {
-    min-height: 2.75rem;
-  }
-
-  .source-picker label,
-  .acquire-options label,
-  .candidate-list__toolbar label,
-  .local-pdf label {
-    min-height: 2.75rem;
-  }
-
-  .candidate {
-    grid-template-columns: auto minmax(0, 1fr);
-    min-height: 6rem;
-    padding-inline: var(--space-3);
-  }
-
+  .candidate-list__score-head,
   .candidate__score {
     display: none;
   }

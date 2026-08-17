@@ -1,14 +1,30 @@
 import { NavLink } from 'react-router-dom';
+import {
+  HouseSimple,
+  Books,
+  GraduationCap,
+  MagnifyingGlass,
+  ListChecks,
+  TrendUp,
+  GearSix,
+} from '@phosphor-icons/react';
+import type { ComponentType } from 'react';
 
-const destinations = [
-  { to: '/dashboard', label: '今日', glyph: '今' },
-  { to: '/library', label: '文献库', glyph: '库' },
-  { to: '/reviews', label: '复习', glyph: '习' },
-  { to: '/acquire', label: '采集', glyph: '采' },
-  { to: '/jobs', label: '任务', glyph: '任' },
-  { to: '/insights', label: '洞察', glyph: '析' },
-  { to: '/settings', label: '设置', glyph: '设' },
-] as const;
+interface Destination {
+  readonly to: string;
+  readonly label: string;
+  readonly Icon: ComponentType<{ size?: number | string; weight?: 'thin' | 'light' | 'regular' | 'bold' | 'fill' | 'duotone' }>;
+}
+
+const destinations: Destination[] = [
+  { to: '/dashboard', label: '今日', Icon: HouseSimple },
+  { to: '/library', label: '文献库', Icon: Books },
+  { to: '/reviews', label: '复习', Icon: GraduationCap },
+  { to: '/acquire', label: '采集', Icon: MagnifyingGlass },
+  { to: '/jobs', label: '任务', Icon: ListChecks },
+  { to: '/insights', label: '洞察', Icon: TrendUp },
+  { to: '/settings', label: '设置', Icon: GearSix },
+];
 
 export function GlobalNavigation() {
   return (
@@ -35,7 +51,7 @@ export function GlobalNavigation() {
             }
           >
             <span className="global-nav__glyph" aria-hidden="true">
-              {destination.glyph}
+              <destination.Icon size={18} weight="regular" />
             </span>
             <span className="global-nav__label">{destination.label}</span>
           </NavLink>

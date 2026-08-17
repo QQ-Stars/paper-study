@@ -1,28 +1,51 @@
 :root {
   color-scheme: dark;
 
-  --color-bg: #050706;
-  --color-bg-subtle: #090d0b;
-  --color-surface: rgb(14 18 16 / 0.82);
-  --color-surface-raised: rgb(20 25 22 / 0.88);
-  --color-surface-strong: #101411;
-  --color-accent: #2fe586;
-  --color-accent-hover: #59eda0;
-  --color-accent-pressed: #0aaa60;
-  --color-accent-muted: rgb(47 229 134 / 0.14);
-  --color-accent-line: rgb(47 229 134 / 0.32);
-  --color-accent-line-strong: rgb(47 229 134 / 0.45);
+  /* ── Project color tokens (refined dark + red) ── */
+  --color-bg: #0a0a0c;
+  --color-bg-subtle: #101013;
+  --color-surface: rgb(22 22 26 / 0.72);
+  --color-surface-raised: rgb(28 28 32 / 0.8);
+  --color-surface-strong: #1a1a1e;
+  --color-accent: #ff4d4d;
+  --color-accent-hover: #ff6b6b;
+  --color-accent-pressed: #e63e3e;
+  --color-accent-muted: rgb(255 77 77 / 0.1);
+  --color-accent-line: rgb(255 77 77 / 0.3);
+  --color-accent-line-strong: rgb(255 77 77 / 0.46);
   --color-error: #ff665c;
   --color-warning: #e6a84a;
-  --color-text: #f2f6f3;
-  --color-text-muted: #9ca8a1;
-  --color-text-weak: #77827a;
-  --color-line: rgb(255 255 255 / 0.09);
-  --color-line-strong: rgb(255 255 255 / 0.16);
-  --color-shadow: rgb(0 8 4 / 0.62);
+  --color-text: #f4f4f6;
+  --color-text-muted: #9a9aa3;
+  --color-text-weak: #63636e;
+  --color-line: rgb(255 255 255 / 0.1);
+  --color-line-strong: rgb(255 255 255 / 0.15);
+  --color-shadow: rgb(0 0 0 / 0.55);
 
-  --font-sans: "Segoe UI Variable", "SF Pro Text", "Segoe UI", system-ui,
-    sans-serif;
+  /* ── Interactive surface states ── */
+  --color-surface-hover: rgb(255 255 255 / 0.06);
+  --color-surface-active: rgb(255 255 255 / 0.09);
+
+  /* ── Focus ring ── */
+  --color-focus-ring: var(--color-accent);
+
+  /* ── Semantic success ── */
+  --color-success: #22c55e;
+
+  /* ── Shadow system (layered, soft) ── */
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 6px rgb(0 0 0 / 0.3);
+  --shadow-md:
+    0 2px 4px rgb(0 0 0 / 0.4), 0 8px 16px -4px rgb(0 0 0 / 0.45);
+  --shadow-lg:
+    0 4px 8px rgb(0 0 0 / 0.4), 0 16px 32px -8px rgb(0 0 0 / 0.5);
+  --shadow-overlay:
+    0 8px 16px rgb(0 0 0 / 0.4), 0 24px 64px -16px rgb(0 0 0 / 0.6);
+
+  /* ── Typography ── */
+  --font-sans:
+    Inter, "Segoe UI Variable", "SF Pro Text", "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 
   --font-size-1: 0.6875rem;
@@ -30,8 +53,9 @@
   --font-size-3: 0.8125rem;
   --font-size-4: 0.875rem;
   --font-size-5: 1rem;
-  --font-size-title: clamp(1.5rem, 2vw, 1.75rem);
+  --font-size-title: clamp(1.375rem, 1.8vw, 1.625rem);
 
+  /* ── Spacing ── */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -40,25 +64,108 @@
   --space-6: 1.5rem;
   --space-8: 2rem;
 
-  --radius-control: 0.5rem;
-  --radius-panel: 0.8125rem;
-  --radius-stage: 1.125rem;
-  --radius-overlay: 1.375rem;
+  /* ── Radius (crisper, minimal) ── */
+  --radius-control: 0.4375rem;
+  --radius-panel: 0.75rem;
+  --radius-stage: 1rem;
+  --radius-overlay: 1.125rem;
+  --radius-pill: 999px;
 
+  /* ── Motion ── */
   --duration-feedback: 140ms;
   --duration-panel: 220ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
-  --nav-width: 13rem;
+  /* ── Layout ── */
+  --nav-width: 13.5rem;
   --context-width: 20rem;
   --mobile-nav-height: 4.5rem;
 
+  /* ── Z-index ── */
   --z-base: 0;
   --z-navigation: 20;
   --z-overlay: 40;
   --z-skip-link: 60;
 }
 
+/* ── Kumo dark-mode theme overrides ── */
+/*
+ * Kumo uses @layer base for :root and :root[data-mode="dark"] selectors.
+ * Since un-layered CSS wins over layered CSS, these overrides take effect
+ * when data-mode="dark" is set on <html>.
+ */
+:root[data-mode="dark"] {
+  /* Text colors */
+  --text-color-kumo-default: #f4f4f6;
+  --text-color-kumo-inverse: #18181b;
+  --text-color-kumo-strong: #fafafa;
+  --text-color-kumo-subtle: #9a9aa3;
+  --text-color-kumo-inactive: #4b4b54;
+  --text-color-kumo-placeholder: #63636e;
+  --text-color-kumo-brand: #ff4d4d;
+  --text-color-kumo-link: #ff6b6b;
+  --text-color-kumo-info: #60a5fa;
+  --text-color-kumo-success: #4ade80;
+  --text-color-kumo-danger: #f87171;
+  --text-color-kumo-warning: #fb923c;
+  --text-color-kumo-badge-inverted: #000;
+
+  /* Background / surface colors */
+  --color-kumo-canvas: #0a0a0c;
+  --color-kumo-elevated: #101013;
+  --color-kumo-recessed: #08080a;
+  --color-kumo-base: #18181c;
+  --color-kumo-tint: #1e1e23;
+  --color-kumo-contrast: #fafafa;
+  --color-kumo-overlay: #26262b;
+  --color-kumo-control: #18181c;
+  --color-kumo-interact: #3d3d45;
+  --color-kumo-fill: #26262b;
+  --color-kumo-fill-hover: #3d3d45;
+
+  /* Brand → red */
+  --color-kumo-brand: #ff4d4d;
+  --color-kumo-brand-hover: #ff6b6b;
+
+  /* Lines & borders */
+  --color-kumo-line: rgb(255 255 255 / 0.1);
+  --color-kumo-hairline: rgb(255 255 255 / 0.06);
+
+  /* Focus → red */
+  --color-kumo-focus: #ff4d4d;
+
+  /* Shadows */
+  --color-kumo-shadow-edge: rgb(0 0 0 / 0.2);
+  --color-kumo-shadow-drop: rgb(0 0 0 / 0.4);
+  --color-kumo-tip-shadow: transparent;
+  --color-kumo-tip-stroke: rgb(255 255 255 / 0.06);
+
+  /* Semantic tints */
+  --color-kumo-info-tint: rgb(96 165 250 / 0.14);
+  --color-kumo-info: #60a5fa;
+  --color-kumo-warning-tint: rgb(251 146 60 / 0.14);
+  --color-kumo-warning: #fb923c;
+  --color-kumo-danger-tint: rgb(255 77 77 / 0.14);
+  --color-kumo-danger: #ff4d4d;
+  --color-kumo-success-tint: rgb(74 222 128 / 0.12);
+  --color-kumo-success: #4ade80;
+
+  /* Banners */
+  --color-kumo-banner-info: rgb(96 165 250 / 0.18);
+  --color-kumo-banner-warning: rgb(251 146 60 / 0.18);
+
+  /* Badges */
+  --color-kumo-badge-red: #e63e3e;
+  --color-kumo-badge-green: #16a34a;
+  --color-kumo-badge-orange: #ea580c;
+  --color-kumo-badge-purple: #9333ea;
+  --color-kumo-badge-teal: #0d9488;
+  --color-kumo-badge-blue: #2563eb;
+  --color-kumo-badge-neutral: #63636e;
+  --color-kumo-badge-inverted: #fafafa;
+}
+
+/* ── Comfortable density overrides ── */
 :root[data-density="comfortable"] {
   --space-3: 0.875rem;
   --space-4: 1.125rem;

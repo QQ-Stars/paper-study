@@ -3,6 +3,8 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
+import { Button } from '@cloudflare/kumo/components/button';
+import { X } from '@phosphor-icons/react';
 
 import {
   type WorkspacePanel,
@@ -187,13 +189,14 @@ export function ResponsivePanelHost({
               <h2 id="workspace-panel-title">{copy.title}</h2>
               <p id="workspace-panel-description">{copy.description}</p>
             </div>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              shape="square"
+              size="sm"
+              icon={<X size={18} />}
               onClick={closePanel}
               aria-label={`关闭${copy.title}`}
-            >
-              关闭
-            </button>
+            />
           </header>
           <div className="workspace-overlay__content">
             <ResponsivePanelPlacementContext.Provider value={presentation}>

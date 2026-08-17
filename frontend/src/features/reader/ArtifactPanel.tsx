@@ -5,6 +5,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Button, InputArea } from '@cloudflare/kumo';
 
 import { artifactKeys } from '../../lib/api/keys';
 import { paperApi } from '../../lib/api/paperApi';
@@ -141,13 +142,19 @@ function GeneratedArtifact({
   return (
     <div className="artifact-panel__pane">
       <div className="artifact-panel__actions">
-        <button type="button" disabled={running} onClick={onGenerate}>
+        <Button type="button" disabled={running} onClick={onGenerate} size="sm" variant="primary">
           生成{label}
-        </button>
+        </Button>
         {running ? (
-          <button type="button" className="artifact-panel__stop" onClick={onStop}>
+          <Button
+            type="button"
+            className="artifact-panel__stop"
+            onClick={onStop}
+            size="sm"
+            variant="outline"
+          >
             停止接收{label}
-          </button>
+          </Button>
         ) : null}
       </div>
       <CommandStatus kind={kind} command={command} />
@@ -218,23 +225,31 @@ function NoteArtifact({
     <div className="artifact-panel__pane">
       <label className="artifact-panel__editor">
         <span>笔记内容</span>
-        <textarea
+        <InputArea
           value={currentValue}
           onChange={(event) => setDraft({
             paperId,
             generation,
             serverValue: initialContent,
-            value: event.currentTarget.value,
+            value: (event.target as HTMLTextAreaElement).value,
             dirty: true,
           })}
         />
       </label>
       <div className="artifact-panel__actions">
-        <button type="button" disabled={running} onClick={save}>保存笔记</button>
+        <Button type="button" disabled={running} onClick={save} size="sm" variant="primary">
+          保存笔记
+        </Button>
         {running ? (
-          <button type="button" className="artifact-panel__stop" onClick={onStop}>
+          <Button
+            type="button"
+            className="artifact-panel__stop"
+            onClick={onStop}
+            size="sm"
+            variant="outline"
+          >
             停止等待保存
-          </button>
+          </Button>
         ) : null}
       </div>
       <CommandStatus kind="note" command={command} />

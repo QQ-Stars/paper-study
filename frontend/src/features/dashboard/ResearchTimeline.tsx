@@ -1,3 +1,5 @@
+import { Badge, Empty, Surface } from '@cloudflare/kumo';
+
 import type {
   ResearchTimelineEvidence,
   TimelineSource,
@@ -32,7 +34,7 @@ export function ResearchTimeline(props: ResearchTimelineEvidence) {
   const events = deriveTimelineEvents(props);
 
   return (
-    <section className="research-timeline" aria-labelledby="research-timeline-heading">
+    <Surface as="section" className="research-timeline" aria-labelledby="research-timeline-heading">
       <header className="research-timeline__header">
         <p>VERIFIED ACTIVITY</p>
         <h2 id="research-timeline-heading">研究时间线</h2>
@@ -40,14 +42,18 @@ export function ResearchTimeline(props: ResearchTimelineEvidence) {
 
       {events.length === 0 ? (
         <div className="research-timeline__empty" role="status">
-          <strong>没有可核验的时间线事件</strong>
-          <span>仅显示论文、复习和任务返回的真实时间字段，不生成示例活动。</span>
+          <Empty
+            title="没有可核验的时间线事件"
+            description="仅显示论文、复习和任务返回的真实时间字段，不生成示例活动。"
+          />
         </div>
       ) : (
         <ol className="research-timeline__list" aria-label="真实研究时间线">
           {events.map((event) => (
             <li key={event.id} className="research-timeline__event">
-              <div className="research-timeline__source">{sourceLabel(event.source)}</div>
+              <Badge className="research-timeline__source" variant="outline">
+                {sourceLabel(event.source)}
+              </Badge>
               <div>
                 <strong>{event.title}</strong>
                 <p>{event.detail}</p>
@@ -57,6 +63,6 @@ export function ResearchTimeline(props: ResearchTimelineEvidence) {
           ))}
         </ol>
       )}
-    </section>
+    </Surface>
   );
 }

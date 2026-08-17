@@ -146,3 +146,35 @@ def set_translation(con, pid: str, md: str):
         config.artifact_path("translation", pid).write_text(md or "", encoding="utf-8")
     except Exception:
         pass
+
+
+def _ensure_ocr_markdown_table(con):
+    # 独立表（不动 papers 表结构，避免触发后端 alembic schema revision 门禁）；
+    # 自带建表，与 translations 同模式。
+    con.execute("""CREATE TABLE IF NOT EXISTS ocr_markdown (
+        paper_id   TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+        content    TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')))""")
+
+
+def set_ocr_markdown(con, pid: str, md: str):
+    """保存 PDF→Markdown(OCR) 结果；重复转换覆盖并刷新 updated_at。"""
+    _ensure_ocr_markdown_table(con)
+    con.execute("""INSERT INTO ocr_markdown(paper_id, content, created_at, updated_at)
+                   VALUES(?,?,datetime('now'),datetime('now'))
+                   ON CONFLICT(paper_id) DO UPDATE SET content=excluded.content, updated_at=datetime('now')""",
+                (pid, md))
+    con.commit()
+    # 与讲解/翻译一致：同步落 .md 文件（目录由设置页 ocrMarkdownDir 配置，留空回退 data/ocr_markdown）
+    try:
+        config.artifact_path("ocr_markdown", pid).write_text(md or "", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def get_ocr_markdown(con, pid: str):
+    """读已保存的 OCR Markdown；无记录返回 None。"""
+    _ensure_ocr_markdown_table(con)
+    row = con.execute("SELECT content FROM ocr_markdown WHERE paper_id=?", (pid,)).fetchone()
+    return row[0] if row and row[0] else None

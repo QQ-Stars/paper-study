@@ -1,4 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- React Router lazy modules export route metadata with their component. */
+import { Button } from '@cloudflare/kumo';
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
@@ -167,9 +168,9 @@ export function Component() {
       <ReaderRouteState title="论文读取失败" alert>
         <code className="reader-route-state__identity">{fixedPaperId}</code>
         <p>{errorMessage(paperQuery.error)}</p>
-        <button type="button" onClick={() => { void paperQuery.refetch(); }}>
+        <Button type="button" onClick={() => { void paperQuery.refetch(); }}>
           重新读取
-        </button>
+        </Button>
       </ReaderRouteState>
     );
   }
@@ -213,9 +214,13 @@ export function Component() {
             <div className="reader-stage-state reader-stage-state--error" role="alert">
               <strong>PDF 状态读取失败</strong>
               <span>{errorMessage(pdfStatusQuery.error)}</span>
-              <button type="button" onClick={() => { void pdfStatusQuery.refetch(); }}>
+              <Button
+                size="sm"
+                type="button"
+                onClick={() => { void pdfStatusQuery.refetch(); }}
+              >
                 重新读取 PDF 状态
-              </button>
+              </Button>
             </div>
           ) : null}
           {pdfStatusQuery.data?.hasPdf ? (

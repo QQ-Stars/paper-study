@@ -1,4 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- React Router lazy modules export route metadata with their component. */
+import { Button, Checkbox, Input, InputArea } from '@cloudflare/kumo';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -341,84 +342,76 @@ export function Component() {
         </header>
 
         <div className="acquire-form">
-          <label className="acquire-form__query">
-            <span>研究方向</span>
-            <input
-              value={query}
-              onChange={(event) => replaceQuery(event.currentTarget.value)}
-              placeholder="例如：lifecycle-safe document readers"
-            />
-          </label>
-          <label>
-            <span>年份</span>
-            <input value={years} onChange={(event) => setYears(event.currentTarget.value)} />
-          </label>
-          <label>
-            <span>最多候选</span>
-            <input
-              type="number"
-              min="1"
-              max="60"
-              value={maxCandidates}
-              onChange={(event) => setMaxCandidates(Number(event.currentTarget.value))}
-            />
-          </label>
-          <label>
-            <span>最低相关度</span>
-            <input
-              type="number"
-              min="0"
-              max="1"
-              step="0.05"
-              value={minRelevance}
-              onChange={(event) => setMinRelevance(Number(event.currentTarget.value))}
-            />
-          </label>
+          <Input
+            label="研究方向"
+            className="w-full acquire-form__query"
+            value={query}
+            onChange={(event) => replaceQuery((event.target as HTMLInputElement).value)}
+            placeholder="例如：lifecycle-safe document readers"
+          />
+          <Input
+            label="年份"
+            className="w-full"
+            value={years}
+            onChange={(event) => setYears((event.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="最多候选"
+            type="number"
+            min={1}
+            max={60}
+            className="w-full"
+            value={maxCandidates}
+            onChange={(event) => setMaxCandidates(Number((event.target as HTMLInputElement).value))}
+          />
+          <Input
+            label="最低相关度"
+            type="number"
+            min={0}
+            max={1}
+            step={0.05}
+            className="w-full"
+            value={minRelevance}
+            onChange={(event) => setMinRelevance(Number((event.target as HTMLInputElement).value))}
+          />
         </div>
 
         <fieldset className="source-picker">
           <legend>学术来源</legend>
           {ACADEMIC_SOURCES.map((source) => (
-            <label key={source}>
-              <input
-                type="checkbox"
-                checked={sources.includes(source)}
-                onChange={(event) => {
-                  // 先在 handler 内捕获 checked：函数式 updater 可能在渲染阶段
-                  // 才执行，届时 event.currentTarget 已被 React 置空，
-                  // 读它会抛 TypeError 触发路由 ErrorBoundary（整页跳重试页）。
-                  const checked = event.currentTarget.checked;
-                  setSources((current) => checked
-                    ? [...current, source]
-                    : current.filter((item) => item !== source));
-                }}
-              />
-              {SOURCE_LABELS[source]}
-            </label>
+            <Checkbox
+              key={source}
+              label={SOURCE_LABELS[source]}
+              checked={sources.includes(source)}
+              onCheckedChange={(checked) => setSources((current) => checked
+                ? [...current, source]
+                : current.filter((item) => item !== source))}
+            />
           ))}
         </fieldset>
 
         <div className="acquire-options">
-          <label>
-            <input type="checkbox" checked={expand} onChange={(event) => setExpand(event.currentTarget.checked)} />
-            扩展检索词
-          </label>
-          <label>
-            <input type="checkbox" checked={onlyA} onChange={(event) => setOnlyA(event.currentTarget.checked)} />
-            仅 CCF-A
-          </label>
-          <button type="button" onClick={expandQueries} disabled={busy}>生成检索词</button>
+          <Checkbox
+            label="扩展检索词"
+            checked={expand}
+            onCheckedChange={(checked) => setExpand(checked)}
+          />
+          <Checkbox
+            label="仅 CCF-A"
+            checked={onlyA}
+            onCheckedChange={(checked) => setOnlyA(checked)}
+          />
+          <Button type="button" variant="outline" size="sm" onClick={() => void expandQueries()} disabled={busy}>生成检索词</Button>
         </div>
 
         {queries.length > 0 ? (
-          <label className="acquire-queries">
-            <span>检索词（每行一条）</span>
-            <textarea
-              value={queries.join('\n')}
-              onChange={(event) => setQueries(event.currentTarget.value.split(/\r?\n/))}
-              rows={Math.min(6, Math.max(2, queries.length))}
-            />
-          </label>
+          <InputArea
+            label="检索词（每行一条）"
+            className="w-full acquire-queries"
+            value={queries.join('\n')}
+            onChange={(event) => setQueries((event.target as HTMLTextAreaElement).value.split(/\r?\n/))}
+            rows={Math.min(6, Math.max(2, queries.length))}
+          />
         ) : null}
         {expandStatus ? <p className="acquire-inline-status" aria-live="polite">{expandStatus}</p> : null}
 
@@ -426,33 +419,34 @@ export function Component() {
           <div className="acquire-history" aria-label="最近检索">
             <span>最近</span>
             {history.map((item) => (
-              <button key={item} type="button" onClick={() => selectHistory(item)}>{item}</button>
+              <Button key={item} type="button" variant="ghost" size="sm" className="acquire-history__item" onClick={() => selectHistory(item)}>{item}</Button>
             ))}
           </div>
         ) : null}
 
         <div className="acquire-actions">
-          <button
+          <Button
             type="button"
+            variant="primary"
             className="acquire-primary"
             onClick={() => void submitBackgroundSearch()}
             disabled={busy || submittingJob}
           >
             {submittingJob ? '提交中…' : '后台检索'}
-          </button>
-          <button type="button" onClick={submitSearch} disabled={busy}>
+          </Button>
+          <Button type="button" variant="outline" onClick={submitSearch} disabled={busy}>
             开始检索
-          </button>
-          {busy ? <button type="button" onClick={stopCurrentRun}>停止接收</button> : null}
+          </Button>
+          {busy ? <Button type="button" variant="ghost" onClick={stopCurrentRun}>停止接收</Button> : null}
           {(state.status === 'stopped' || state.status === 'failure') && lastRequest ? (
-            <button type="button" onClick={() => void executeSearch(lastRequest)}>重试检索</button>
+            <Button type="button" variant="outline" onClick={() => void executeSearch(lastRequest)}>重试检索</Button>
           ) : null}
           {state.candidates.length > 0 ? (
             <>
-              <button type="button" onClick={verifyCandidates} disabled={busy}>核验会议信息</button>
-              <button type="button" onClick={ingestSelected} disabled={busy || state.selectedKeys.length === 0}>
+              <Button type="button" variant="outline" onClick={() => void verifyCandidates()} disabled={busy}>核验会议信息</Button>
+              <Button type="button" variant="outline" onClick={() => void ingestSelected()} disabled={busy || state.selectedKeys.length === 0}>
                 入库选中项
-              </button>
+              </Button>
             </>
           ) : null}
         </div>

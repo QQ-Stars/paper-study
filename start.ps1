@@ -2,10 +2,16 @@
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1 [-SkipBrowser]
 # 或双击 start.cmd。
 #
+# 架构：
+#   后端 = FastAPI（native_runtime 四角色，端口 5173）；旧 Node server.js 已退役。
+#   前端 = ui-redesign（纸墨风 React+Vite）构建产物由后端 /workspace/ 路由托管；
+#          构建产物缺失时自动执行 ui-redesign npm run build。
+#
 # 逻辑：
 #   1. owner marker 不是 python_active -> 报错退出（需先完成一次性 P6 接管）
-#   2. 5173 已在监听且 /health/live 200 -> 视为已运行，直接打开浏览器
-#   3. 否则用 owner marker 中记录的精确 frozen identity 路径执行 native_runtime start
+#   2. ui-redesign/dist 缺失 -> 尝试 npm run build（失败仅警告，后端会回退旧前端产物）
+#   3. 5173 已在监听且 /health/live 200 -> 视为已运行，直接打开浏览器
+#   4. 否则用 owner marker 中记录的精确 frozen identity 路径执行 native_runtime start
 
 param([switch]$SkipBrowser)
 
@@ -45,6 +51,19 @@ if ($owner.ownerState -ne 'python_active') {
 $biPath = [string]$owner.buildIdentityManifestPath
 if (-not (Test-Path $biPath)) { Write-Host ('ERROR: owner marker 引用的 BuildIdentity 不存在: ' + $biPath); exit 1 }
 
+# 新前端构建产物检查：ui-redesign/dist 缺失时自动构建（后端 /workspace/ 托管它）
+$uiDist = Join-Path $repo 'ui-redesign\dist\index.html'
+if (-not (Test-Path $uiDist)) {
+    Write-Host 'ui-redesign 构建产物缺失，尝试 npm run build …'
+    Push-Location (Join-Path $repo 'ui-redesign')
+    try {
+        npm run build
+        if ($LASTEXITCODE -ne 0) { Write-Host 'WARN: ui-redesign 构建失败，后端将回退旧前端产物（如有）。' }
+    } catch {
+        Write-Host 'WARN: npm 不可用或构建异常，后端将回退旧前端产物（如有）。'
+    } finally { Pop-Location }
+}
+
 if (Test-Alive) {
     $listener = @(Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue)
     Write-Host ('Paper-Study 已在运行（python_active, listener pid=' + $listener[0].OwningProcess + '）。')
@@ -70,5 +89,5 @@ if (Test-Alive) {
     Write-Host '启动成功：/health/live -> 200'
 }
 
-Write-Host '打开 http://localhost:5173 （/workspace/ = React 工作区，/legacy/ = 旧版入口）'
-if (-not $SkipBrowser) { Start-Process 'http://localhost:5173' }
+Write-Host '打开 http://localhost:5173/workspace/ （ui-redesign 新前端；/legacy/ = 旧版入口）'
+if (-not $SkipBrowser) { Start-Process 'http://localhost:5173/workspace/' }

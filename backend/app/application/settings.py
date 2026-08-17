@@ -50,13 +50,15 @@ _STRING_FIELDS = frozenset(
         "pdfDir",
         "explainerDir",
         "translationDir",
+        "ocrMarkdownDir",
         "researchTheme",
+        "translateMode",
     }
 )
 _INTEGER_FIELDS = frozenset(
-    {"timeout", "llmTimeout", "ocrTimeout", "ocrPageBatchSize", "ocrMaxConcurrency"}
+    {"timeout", "llmTimeout", "ocrTimeout", "ocrPageBatchSize", "ocrMaxConcurrency", "explainMaxChars", "translateChunkSize", "translateMaxChars", "translateWorkers"}
 )
-_BOOLEAN_FIELDS = frozenset({"ocrEnabled"})
+_BOOLEAN_FIELDS = frozenset({"ocrEnabled", "translateSkipReferences"})
 _OBSIDIAN_STRING_FIELDS = frozenset(
     {"obsidianVaultPath", "obsidianRootFolder", "obsidianPdfMode"}
 )
@@ -164,6 +166,11 @@ class SettingsService:
             "translationDir": Path(
                 (default_dirs or {}).get(
                     "translationDir", self.root / "data" / "translations"
+                )
+            ).expanduser(),
+            "ocrMarkdownDir": Path(
+                (default_dirs or {}).get(
+                    "ocrMarkdownDir", self.root / "data" / "ocr_markdown"
                 )
             ).expanduser(),
         }
@@ -306,6 +313,25 @@ class SettingsService:
             "embedApiBase": _value(document, "embedApiBase", env, "EMBED_API_BASE", ""),
             "embedApiModel": _value(document, "embedApiModel", env, "EMBED_API_MODEL", ""),
             "s2Provider": _value(document, "s2Provider", env, "S2_PROVIDER", "semantic-scholar"),
+            "explainMaxChars": _integer_value(
+                document, "explainMaxChars", env, "EXPLAIN_MAX_CHARS", 120000
+            ),
+            "llmTimeout": _integer_value(
+                document, "llmTimeout", env, "LLM_TIMEOUT", 0
+            ),
+            "translateMode": _value(document, "translateMode", env, "TRANSLATE_MODE", "chunked"),
+            "translateChunkSize": _integer_value(
+                document, "translateChunkSize", env, "TRANSLATE_CHUNK_SIZE", 3800
+            ),
+            "translateMaxChars": _integer_value(
+                document, "translateMaxChars", env, "TRANSLATE_MAX_CHARS", 120000
+            ),
+            "translateWorkers": _integer_value(
+                document, "translateWorkers", env, "TRANSLATE_WORKERS", 4
+            ),
+            "translateSkipReferences": _boolean_value(
+                document, "translateSkipReferences", env, "TRANSLATE_SKIP_REFERENCES", True
+            ),
             "s2Endpoint": _value(
                 document,
                 "s2Endpoint",
@@ -317,7 +343,7 @@ class SettingsService:
 
     def _directory_view(self, document: Mapping[str, object]) -> dict[str, object]:
         result: dict[str, object] = {}
-        for field in ("pdfDir", "explainerDir", "translationDir"):
+        for field in ("pdfDir", "explainerDir", "translationDir", "ocrMarkdownDir"):
             configured = document.get(field)
             rendered = configured if isinstance(configured, str) else ""
             default = self.default_dirs[field]

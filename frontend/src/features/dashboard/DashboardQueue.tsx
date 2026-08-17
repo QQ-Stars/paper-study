@@ -1,3 +1,5 @@
+import { Button, Input } from '@cloudflare/kumo';
+
 import type { PaperListItem } from '../../lib/api/types';
 import type {
   DashboardSort,
@@ -29,17 +31,18 @@ export function DashboardQueue({
   return (
     <section className="dashboard-queue" aria-label="研究队列控制">
       <div className="dashboard-queue__controls">
-        <label>
-          <span>搜索论文</span>
-          <input
-            type="search"
-            aria-label="筛选研究队列"
-            data-panel-autofocus="true"
-            value={filters.query}
-            placeholder="题名、来源、类型或主题"
-            onChange={(event) => onFiltersChange({ query: event.currentTarget.value })}
-          />
-        </label>
+        <Input
+          label="搜索论文"
+          type="search"
+          className="w-full"
+          aria-label="筛选研究队列"
+          data-panel-autofocus="true"
+          value={filters.query}
+          placeholder="题名、来源、类型或主题"
+          onChange={(event) => onFiltersChange({
+            query: (event.target as HTMLInputElement).value,
+          })}
+        />
         <label>
           <span>论文状态</span>
           <select
@@ -87,8 +90,9 @@ export function DashboardQueue({
             <ol className="dashboard-queue__list" aria-label="筛选后的真实论文">
               {filteredPapers.map((paper) => (
                 <li key={paper.id}>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     aria-current={paper.id === selectedPaperId ? 'true' : undefined}
                     onClick={() => onSelect(paper.id)}
                   >
@@ -99,7 +103,7 @@ export function DashboardQueue({
                         .filter(Boolean)
                         .join(' · ')}
                     </small>
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ol>

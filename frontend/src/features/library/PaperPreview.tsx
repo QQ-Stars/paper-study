@@ -1,3 +1,5 @@
+import { Badge, Button } from '@cloudflare/kumo';
+
 import type { PaperListItem, PaperRecord } from '../../lib/api/types';
 
 export interface PaperPreviewProps {
@@ -12,6 +14,12 @@ export interface PaperPreviewProps {
 
 function fact(value: string | number | null | undefined): string {
   return value == null || value === '' ? '-' : String(value);
+}
+
+function previewStatusBadgeVariant(status: string): 'success' | 'primary' | 'outline' {
+  if (status === '已理解') return 'success';
+  if (status === '学习中') return 'primary';
+  return 'outline';
 }
 
 export function PaperPreview({
@@ -37,7 +45,9 @@ export function PaperPreview({
     <aside className="paper-preview" aria-label="论文预览">
       <header>
         <p className="paper-preview__eyebrow">PAPER CONTEXT</p>
-        <span className="paper-preview__status">{paper.status}</span>
+        <Badge className="paper-preview__status" variant={previewStatusBadgeVariant(paper.status)}>
+          {paper.status}
+        </Badge>
       </header>
 
       <div className="paper-preview__identity">
@@ -62,27 +72,29 @@ export function PaperPreview({
       </section>
 
       <div className="paper-preview__actions">
-        <button
+        <Button
           type="button"
+          variant="primary"
           className="paper-preview__open"
           onClick={() => onOpen(paper.id)}
         >
           打开阅读
-        </button>
+        </Button>
         {onEdit ? (
-          <button type="button" disabled={mutationPending} onClick={() => onEdit(paper)}>
+          <Button type="button" variant="outline" disabled={mutationPending} onClick={() => onEdit(paper)}>
             编辑论文
-          </button>
+          </Button>
         ) : null}
         {onDelete ? (
-          <button
+          <Button
             type="button"
+            variant="secondary-destructive"
             className="paper-preview__delete"
             disabled={mutationPending}
             onClick={() => onDelete(paper.id)}
           >
             删除论文
-          </button>
+          </Button>
         ) : null}
       </div>
     </aside>

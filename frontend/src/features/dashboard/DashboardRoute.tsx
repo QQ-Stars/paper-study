@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { Button } from '@cloudflare/kumo';
 
 import {
   type WorkspaceRouteHandle,
@@ -216,7 +217,7 @@ export function DashboardView({
           <strong>无法载入研究概览</strong>
           <span>{errorMessage}</span>
           {onRetry ? (
-            <button type="button" onClick={onRetry}>重试载入概览</button>
+            <Button type="button" onClick={onRetry}>重试载入概览</Button>
           ) : null}
         </div>
       </section>
@@ -252,15 +253,16 @@ export function DashboardView({
           研究概览
         </h1>
         {inspectorMode !== 'rail' ? (
-          <button
+          <Button
             id="dashboard-inspector-trigger"
             type="button"
+            variant="outline"
             className="dashboard-route__context-trigger"
             aria-expanded={inspectorOpen}
             onClick={() => setInspectorOpen(true)}
           >
             显示论文上下文
-          </button>
+          </Button>
         ) : null}
       </header>
 

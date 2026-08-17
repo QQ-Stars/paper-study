@@ -86,6 +86,7 @@ export function WorkspaceShell() {
       aria-label="Paper Study 研究工作区"
       data-layout={handle.layout}
       data-panel={activePanel ?? 'closed'}
+      data-mode="dark"
     >
       <a
         className="skip-link"

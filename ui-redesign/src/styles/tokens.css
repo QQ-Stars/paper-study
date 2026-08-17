@@ -1,0 +1,99 @@
+/* ============================================================
+   Paper Study · 设计令牌
+   概念「书斋」：宣纸底色 + 墨色文字 + 朱砂点缀。
+   所有组件样式只允许引用这里的令牌，禁止硬编码颜色。
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* ── 色板：纸 ── */
+  --paper: hsl(40 30% 97%);
+  --paper-deep: hsl(36 22% 93%);
+  --paper-sunken: hsl(36 18% 90%);
+  --card: hsl(0 0% 100%);
+
+  /* ── 色板：墨 ── */
+  --ink: hsl(24 14% 12%);
+  --ink-soft: hsl(24 7% 34%);
+  --ink-faint: hsl(28 6% 55%);
+  --ink-ghost: hsl(30 6% 72%);
+
+  /* ── 线 ── */
+  --line: hsl(34 16% 88%);
+  --line-strong: hsl(33 12% 78%);
+
+  /* ── 朱砂（品牌强调） ── */
+  --seal: hsl(9 68% 47%);
+  --seal-deep: hsl(9 72% 40%);
+  --seal-wash: hsl(9 68% 47% / 0.07);
+  --seal-line: hsl(9 68% 47% / 0.22);
+
+  /* ── 语义色 ── */
+  --jade: hsl(158 38% 34%);
+  --jade-wash: hsl(158 38% 34% / 0.08);
+  --amber: hsl(32 82% 42%);
+  --amber-wash: hsl(32 82% 42% / 0.1);
+  --info: hsl(217 52% 48%);
+  --info-wash: hsl(217 52% 48% / 0.08);
+
+  /* ── 阴影（暖调、轻柔） ── */
+  --shadow-sm: 0 1px 2px hsl(30 15% 20% / 0.05);
+  --shadow-md:
+    0 1px 2px hsl(30 15% 20% / 0.04), 0 10px 28px -14px hsl(30 15% 20% / 0.18);
+  --shadow-lg:
+    0 2px 6px hsl(30 15% 20% / 0.05), 0 28px 56px -18px hsl(30 15% 20% / 0.24);
+  --shadow-focus: 0 0 0 3px var(--seal-line);
+
+  /* ── 字体 ── */
+  --font-display: "Source Serif 4", "Noto Serif SC", Georgia,
+    "Times New Roman", "SimSun", serif;
+  --font-sans: Inter, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", ui-monospace, "SF Mono", Consolas, monospace;
+
+  /* ── 字号阶梯 ── */
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-display: clamp(1.75rem, 2.4vw, 2.125rem);
+
+  /* ── 间距阶梯（4px 基线） ── */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* ── 圆角 ── */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.125rem;
+  --radius-pill: 999px;
+
+  /* ── 动效 ── */
+  --duration-fast: 140ms;
+  --duration-base: 220ms;
+  --duration-slow: 360ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  /* ── 布局 ── */
+  --sidebar-width: 14.5rem;
+  --topbar-height: 3.75rem;
+  --content-max: 76rem;
+
+  /* ── 层级 ── */
+  --z-sticky: 20;
+  --z-overlay: 40;
+  --z-toast: 60;
+}

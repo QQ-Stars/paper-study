@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 
+import { Badge, Button } from '@cloudflare/kumo';
+
 import { useResponsivePanelPlacement } from '../../components/overlays/panelPlacement';
 import type { DashboardReviewEvidence } from './evidence';
 import type { PaperDeckItem } from './PaperDeck';
@@ -66,6 +68,12 @@ function availabilityLabel(value: ArtifactAvailability): string {
   }
 }
 
+function inspectorStatusBadgeVariant(status: string): 'success' | 'primary' | 'outline' {
+  if (status === '已理解') return 'success';
+  if (status === '学习中') return 'primary';
+  return 'outline';
+}
+
 export function PaperInspector({
   paper,
   review,
@@ -125,7 +133,12 @@ export function PaperInspector({
       ) : null}
 
       <div className="paper-inspector__identity">
-        <span className="paper-inspector__status">{paper.status || '状态未提供'}</span>
+        <Badge
+          className="paper-inspector__status"
+          variant={paper.status ? inspectorStatusBadgeVariant(paper.status) : 'outline'}
+        >
+          {paper.status || '状态未提供'}
+        </Badge>
         <h3>{paper.title}</h3>
         {paper.titleZh ? <p lang="zh-CN">{paper.titleZh}</p> : null}
         <p>
@@ -183,8 +196,9 @@ export function PaperInspector({
 
       {onExportObsidian ? (
         <>
-          <button
+          <Button
             type="button"
+            variant="outline"
             className="paper-inspector__open"
             aria-label={obsidianExportPending
               ? '正在导出到 Obsidian…'
@@ -193,13 +207,14 @@ export function PaperInspector({
             onClick={() => onExportObsidian(paper.id)}
           >
             {obsidianExportPending ? '正在导出…' : '导出到 Obsidian'}
-          </button>
+          </Button>
           {obsidianExportError ? <output role="alert">{obsidianExportError}</output> : null}
         </>
       ) : null}
 
-      <button
+      <Button
         type="button"
+        variant="primary"
         className="paper-inspector__open"
         aria-label={`打开 ${paper.title}`}
         onClick={() => {
@@ -208,7 +223,7 @@ export function PaperInspector({
         }}
       >
         打开阅读
-      </button>
+      </Button>
     </div>
   );
 
@@ -237,13 +252,14 @@ export function PaperInspector({
           <h2>论文上下文</h2>
         </div>
         {modal ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
             aria-label="关闭论文上下文"
             onClick={() => onClose('button')}
           >
             ×
-          </button>
+          </Button>
         ) : null}
       </header>
 
