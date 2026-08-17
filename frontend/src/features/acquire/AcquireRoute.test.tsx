@@ -293,6 +293,30 @@ describe('Acquire route', () => {
     expect(within(panel).getByRole('link', { name: '任务页' })).toHaveAttribute('href', '/jobs');
   });
 
+  it('toggles academic sources without crashing and searches with the remaining sources', async () => {
+    const user = userEvent.setup();
+    renderAcquire();
+
+    await user.type(screen.getByRole('textbox', { name: '研究方向' }), 'source toggle');
+    // 取消勾选 arXiv：历史上这里会因 updater 延迟执行时读空
+    // event.currentTarget 抛 TypeError，把整页打进 ErrorBoundary 重试页。
+    await user.click(screen.getByRole('checkbox', { name: 'arXiv' }));
+
+    expect(screen.getByRole('checkbox', { name: 'arXiv' })).not.toBeChecked();
+    // 表单状态保持、页面未落入错误边界。
+    expect(screen.getByRole('textbox', { name: '研究方向' })).toHaveValue('source toggle');
+    expect(screen.queryByText(/页面崩溃|发生了错误/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '开始检索' }));
+    await waitFor(() => expect(apiMocks.search).toHaveBeenCalledOnce());
+    expect(apiMocks.search.mock.calls[0][0].sources).toEqual(['semanticscholar']);
+
+    // 再勾回 arXiv，确认勾选方向同样稳定。
+    await user.click(screen.getByRole('checkbox', { name: 'arXiv' }));
+    expect(screen.getByRole('checkbox', { name: 'arXiv' })).toBeChecked();
+    expect(screen.getByRole('textbox', { name: '研究方向' })).toHaveValue('source toggle');
+  });
+
   it('validates query/source, clamps max, streams progress, and disables existing papers', async () => {
     const user = userEvent.setup();
     renderAcquire();

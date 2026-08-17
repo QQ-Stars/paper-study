@@ -381,7 +381,11 @@ export function Component() {
                 type="checkbox"
                 checked={sources.includes(source)}
                 onChange={(event) => {
-                  setSources((current) => event.currentTarget.checked
+                  // 先在 handler 内捕获 checked：函数式 updater 可能在渲染阶段
+                  // 才执行，届时 event.currentTarget 已被 React 置空，
+                  // 读它会抛 TypeError 触发路由 ErrorBoundary（整页跳重试页）。
+                  const checked = event.currentTarget.checked;
+                  setSources((current) => checked
                     ? [...current, source]
                     : current.filter((item) => item !== source));
                 }}

@@ -221,7 +221,9 @@ export function LocalPdfPanel() {
                     aria-label={`选择 ${file.name}`}
                     checked={selected.has(file.path)}
                     onChange={(event) => {
-                      setSelectedPaths((current) => event.currentTarget.checked
+                      // 先在 handler 内捕获 checked，避免 updater 延迟执行时读空 currentTarget。
+                      const checked = event.currentTarget.checked;
+                      setSelectedPaths((current) => checked
                         ? [...new Set([...current, file.path])]
                         : current.filter((path) => path !== file.path));
                     }}

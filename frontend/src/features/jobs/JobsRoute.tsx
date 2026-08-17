@@ -162,9 +162,13 @@ export function Component() {
               <input
                 type="checkbox"
                 checked={sources.includes(source)}
-                onChange={(event) => setSources((current) => event.currentTarget.checked
-                  ? [...current, source]
-                  : current.filter((item) => item !== source))}
+                onChange={(event) => {
+                  // 先在 handler 内捕获 checked，避免 updater 延迟执行时读空 currentTarget。
+                  const checked = event.currentTarget.checked;
+                  setSources((current) => checked
+                    ? [...current, source]
+                    : current.filter((item) => item !== source));
+                }}
               />
               {SOURCE_LABELS[source]}
             </label>
