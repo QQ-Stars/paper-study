@@ -9,6 +9,7 @@ from pathlib import Path
 from pathlib import PurePosixPath
 import re
 from typing import Any, Callable
+import urllib.request
 from uuid import uuid4
 
 from backend.app.application.credentials import CredentialService
@@ -215,22 +216,32 @@ class SettingsService:
             return await self._view_unlocked()
 
     async def test_llm(self) -> dict[str, object]:
-        probe = None
-        if self._llm_transport is not None:
-            probe = SafeCredentialProbe(llm_transport=self._llm_transport)
         result = await self.credential_service.test_connection(
             CredentialKind.LLM,
-            probe=probe,
+            probe=self._llm_probe(),
         )
         return _probe_payload(result)
 
     async def test_connection(self, kind: CredentialKind | str) -> dict[str, object]:
         normalized = CredentialKind(kind)
-        probe = None
-        if normalized is CredentialKind.LLM and self._llm_transport is not None:
-            probe = SafeCredentialProbe(llm_transport=self._llm_transport)
+        probe = self._llm_probe() if normalized is CredentialKind.LLM else None
         return _probe_payload(
             await self.credential_service.test_connection(normalized, probe=probe)
+        )
+
+    def _llm_probe(self) -> SafeCredentialProbe | None:
+        if self._llm_transport is not None:
+            return SafeCredentialProbe(llm_transport=self._llm_transport)
+        # Native runtime does not inject a transport; derive one from the current
+        # LLM profile so "测试模型连接" works the same as the legacy Node flow.
+        document = self._read_document()
+        profile = self._profile_from_document(CredentialKind.LLM, document)
+        base_url = str(profile.base_url or "").strip()
+        model = str(profile.model or "").strip()
+        if not base_url or not model:
+            return None
+        return SafeCredentialProbe(
+            llm_transport=_openai_compat_probe_transport(base_url, model)
         )
 
     async def profile(self, kind: CredentialKind | str) -> ProviderProfile:
@@ -664,6 +675,40 @@ def _relative_to_root(root: Path, value: Path) -> str:
         return str(value.resolve().relative_to(root.resolve()))
     except ValueError:
         return str(value.resolve())
+
+
+def _openai_compat_probe_transport(
+    base_url: str, model: str
+) -> Callable[[Any, str], Any]:
+    """Probe transport: send the fixture prompt to an OpenAI-compatible
+    /chat/completions endpoint using the stored credential.  Truthy return
+    means the connection works; any exception is mapped to probe failure."""
+    endpoint = base_url.rstrip("/") + "/chat/completions"
+
+    async def transport(credential: Any, prompt: str) -> bool:
+        def call() -> bool:
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+                "max_tokens": 64,
+            }
+            request = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {credential.value}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=60) as response:
+                document = json.loads(response.read().decode("utf-8"))
+            return bool(document.get("choices"))
+
+        return await asyncio.to_thread(call)
+
+    return transport
 
 
 def _probe_payload(result: Any) -> dict[str, object]:
