@@ -27,6 +27,8 @@ export interface CreateJobInput {
   max?: number;
   minRelevance?: number;
   onlyA?: boolean;
+  /** 用户在采集页生成/编辑的检索词；后端以 JSON 字符串存入 ingest_jobs.queries。 */
+  queries?: string[];
 }
 
 export function createJobsGateway(client: ApiClient = api) {
@@ -42,8 +44,13 @@ export function createJobsGateway(client: ApiClient = api) {
     },
 
     async createJob(input: CreateJobInput, signal?: AbortSignal): Promise<number> {
+      const { queries, ...rest } = input;
+      const cleanedQueries = queries?.map((item) => item.trim()).filter(Boolean);
+      const body = cleanedQueries && cleanedQueries.length > 0
+        ? { ...rest, queries: JSON.stringify(cleanedQueries) }
+        : rest;
       const value = await client.json('/api/jobs', decodeCommandId, jsonRequest(
-        input, { method: 'POST', ...signalOptions(signal) },
+        body, { method: 'POST', ...signalOptions(signal) },
       ));
       if (typeof value !== 'number') throw new DecodeError('$.id', 'job id number', value);
       return value;

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { paperKeys } from '../../lib/api/keys';
@@ -16,6 +16,8 @@ const apiMocks = vi.hoisted(() => ({
   scanPdfs: vi.fn(),
   importPdfs: vi.fn(),
   downloadPdfs: vi.fn(),
+  listJobs: vi.fn(),
+  createJob: vi.fn(),
 }));
 
 vi.mock('../../lib/api/acquisitionGateway', () => ({
@@ -24,6 +26,12 @@ vi.mock('../../lib/api/acquisitionGateway', () => ({
     search: apiMocks.search,
     verifyVenue: apiMocks.verifyVenue,
     ingestSelected: apiMocks.ingestSelected,
+  },
+}));
+vi.mock('../../lib/api/jobsGateway', () => ({
+  jobsGateway: {
+    listJobs: apiMocks.listJobs,
+    createJob: apiMocks.createJob,
   },
 }));
 vi.mock('../../lib/api/pdfGateway', () => ({
@@ -80,6 +88,11 @@ function deferred<T>() {
   return { promise, reject, resolve };
 }
 
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location-probe">{location.pathname}</output>;
+}
+
 function renderAcquire() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -92,6 +105,7 @@ function renderAcquire() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/acquire']}>
         <Component />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -102,6 +116,8 @@ beforeEach(() => {
   localStorage.clear();
   for (const mock of Object.values(apiMocks)) mock.mockReset();
   apiMocks.expand.mockResolvedValue({ queries: ['expanded query'] });
+  apiMocks.listJobs.mockResolvedValue([]);
+  apiMocks.createJob.mockResolvedValue(7);
   apiMocks.search.mockImplementation(async (_request, options) => {
     options.onEvent?.({ type: 'progress', line: 'STAGE::search' });
     return {
@@ -220,6 +236,61 @@ describe('Acquire route', () => {
       await lateExpansion.promise;
     });
     expect(screen.queryByDisplayValue('late stale query')).not.toBeInTheDocument();
+  });
+
+  it('submits a background job with edited queries and navigates to the job detail', async () => {
+    const user = userEvent.setup();
+    renderAcquire();
+
+    await user.click(screen.getByRole('button', { name: '后台检索' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('请输入研究方向');
+
+    await user.type(screen.getByRole('textbox', { name: '研究方向' }), 'background direction');
+    await user.click(screen.getByRole('button', { name: '生成检索词' }));
+    expect(await screen.findByDisplayValue('expanded query')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '后台检索' }));
+
+    await waitFor(() => expect(apiMocks.createJob).toHaveBeenCalledOnce());
+    expect(apiMocks.createJob.mock.calls[0][0]).toMatchObject({
+      query: 'background direction',
+      sources: ['semanticscholar', 'arxiv'],
+      queries: ['expanded query'],
+    });
+    // 流式检索未被触发：后台任务由服务端独立执行。
+    expect(apiMocks.search).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByTestId('location-probe')).toHaveTextContent('/jobs/7');
+    });
+  });
+
+  it('lists server-side background jobs so a returning visitor can resume monitoring', async () => {
+    apiMocks.listJobs.mockResolvedValue([
+      {
+        id: 3,
+        query: 'running direction',
+        sources: ['arxiv'],
+        yearFrom: 2024,
+        yearTo: 2026,
+        maxPapers: 10,
+        minRelevance: 0,
+        onlyA: false,
+        scheduleId: null,
+        status: 'running',
+        found: 4,
+        added: 0,
+        skipped: 0,
+        pending: 0,
+        createdAt: null,
+        finishedAt: null,
+      },
+    ]);
+    renderAcquire();
+
+    const panel = screen.getByRole('region', { name: '后台任务' });
+    expect(await within(panel).findByText('running direction')).toBeInTheDocument();
+    expect(within(panel).getByText('running')).toBeInTheDocument();
+    expect(within(panel).getByRole('link', { name: '任务页' })).toHaveAttribute('href', '/jobs');
   });
 
   it('validates query/source, clamps max, streams progress, and disables existing papers', async () => {

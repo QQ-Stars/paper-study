@@ -1,12 +1,14 @@
 /* eslint-disable react-refresh/only-export-components -- React Router lazy modules export route metadata with their component. */
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useReducer, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { RouteErrorBoundary } from '../../components/feedback/RouteErrorBoundary';
 import { isAbortError } from '../../lib/api/errors';
-import { paperKeys } from '../../lib/api/keys';
+import { jobKeys, paperKeys } from '../../lib/api/keys';
 import type { SearchRequest } from '../../lib/api/types';
 import { acquisitionGateway } from '../../lib/api/acquisitionGateway';
+import { jobsGateway } from '../../lib/api/jobsGateway';
 import { createSafeStorage, createSearchHistory } from '../../lib/storage/safeStorage';
 import type { WorkspaceRouteHandle } from '../../lib/workspace';
 import {
@@ -46,6 +48,7 @@ function progressLine(event: unknown): string | null {
 
 export function Component() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [state, dispatch] = useReducer(acquireReducer, undefined, createAcquireState);
   const [query, setQuery] = useState('');
   const [sources, setSources] = useState<string[]>(['semanticscholar', 'arxiv']);
@@ -61,14 +64,30 @@ export function Component() {
   const [history, setHistory] = useState(() => historyStore.list());
   const ownerRef = useRef<RunOwner | null>(null);
   const expandOwnerRef = useRef<AbortController | null>(null);
+  const jobOwnerRef = useRef<AbortController | null>(null);
   const runSequence = useRef(0);
   const [lastRequest, setLastRequest] = useState<SearchRequest | null>(null);
+  const [submittingJob, setSubmittingJob] = useState(false);
+
+  // 后台任务列表随页面挂载轮询：用户离开再返回采集页时，可直接看到
+  // 服务端任务的最新状态（pending/running 时 2.5s 轮询，否则停止）。
+  const backgroundJobsQuery = useQuery({
+    queryKey: jobKeys.list(),
+    queryFn: ({ signal }) => jobsGateway.listJobs(signal),
+    refetchInterval: (query) => (
+      query.state.data?.some((job) => job.status === 'pending' || job.status === 'running')
+        ? 2500
+        : false
+    ),
+  });
 
   useEffect(() => () => {
     ownerRef.current?.controller.abort();
     ownerRef.current = null;
     expandOwnerRef.current?.abort();
     expandOwnerRef.current = null;
+    jobOwnerRef.current?.abort();
+    jobOwnerRef.current = null;
   }, []);
 
   const beginRun = (operation: AcquireOperation): RunOwner => {
@@ -139,6 +158,55 @@ export function Component() {
       return;
     }
     void executeSearch(normalized.request);
+  };
+
+  // 后台检索：提交为服务端任务（POST /api/jobs）后立即跳转任务详情。
+  // 任务由后端 asyncio 后台任务驱动 agent 子进程执行，与前端连接无关：
+  // 离开页面/关闭标签页不会中断，随时可从任务页或本页「后台任务」面板恢复查看。
+  const submitBackgroundSearch = async () => {
+    const normalized = normalizeSearchDraft({
+      query,
+      sources,
+      years,
+      max: maxCandidates,
+      minRelevance,
+      expand,
+      onlyA,
+      queries,
+    });
+    if (!normalized.ok) {
+      setValidationErrors(normalized.errors);
+      return;
+    }
+    setValidationErrors([]);
+    setHistory(historyStore.add(normalized.request.query));
+    setLastRequest(normalized.request);
+    jobOwnerRef.current?.abort();
+    const controller = new AbortController();
+    jobOwnerRef.current = controller;
+    setSubmittingJob(true);
+    try {
+      const id = await jobsGateway.createJob({
+        query: normalized.request.query,
+        sources: normalized.request.sources,
+        years: normalized.request.years,
+        max: normalized.request.max,
+        minRelevance: normalized.request.minRelevance,
+        onlyA: normalized.request.onlyA,
+        queries,
+      }, controller.signal);
+      if (jobOwnerRef.current !== controller) return;
+      await queryClient.invalidateQueries({ queryKey: jobKeys.list() });
+      navigate(`/jobs/${id}`);
+    } catch (error) {
+      if (jobOwnerRef.current !== controller || isAbortError(error)) return;
+      setValidationErrors(['后台检索提交失败：' + errorMessage(error)]);
+    } finally {
+      if (jobOwnerRef.current === controller) {
+        jobOwnerRef.current = null;
+        setSubmittingJob(false);
+      }
+    }
   };
 
   const stopCurrentRun = () => {
@@ -357,7 +425,15 @@ export function Component() {
         ) : null}
 
         <div className="acquire-actions">
-          <button type="button" className="acquire-primary" onClick={submitSearch} disabled={busy}>
+          <button
+            type="button"
+            className="acquire-primary"
+            onClick={() => void submitBackgroundSearch()}
+            disabled={busy || submittingJob}
+          >
+            {submittingJob ? '提交中…' : '后台检索'}
+          </button>
+          <button type="button" onClick={submitSearch} disabled={busy}>
             开始检索
           </button>
           {busy ? <button type="button" onClick={stopCurrentRun}>停止接收</button> : null}
@@ -377,6 +453,10 @@ export function Component() {
         {validationErrors.length > 0 ? (
           <div className="acquire-alert" role="alert">{validationErrors.join('；')}</div>
         ) : null}
+        <p className="acquire-hint">
+          后台检索由服务端持续执行，离开页面不会中断，可随时回来查看进度；
+          「开始检索」为流式模式，需停留在本页直到完成。
+        </p>
         {statusMessage ? (
           <div className={state.status === 'failure' ? 'acquire-alert' : 'acquire-result'} role={state.status === 'failure' ? 'alert' : 'status'}>
             {statusMessage}
@@ -404,6 +484,38 @@ export function Component() {
           <pre className="acquire-log" aria-label="采集进度" aria-live="polite">
             {state.progress.join('\n')}
           </pre>
+        ) : null}
+      </section>
+
+      <section className="acquire-jobs" aria-label="后台任务">
+        <header>
+          <div>
+            <span className="section-kicker">SERVER JOBS</span>
+            <h2>后台任务</h2>
+          </div>
+          <Link to="/jobs">任务页</Link>
+        </header>
+        {backgroundJobsQuery.isPending ? <p className="acquire-jobs__loading">读取任务…</p> : null}
+        {backgroundJobsQuery.isError ? (
+          <p className="acquire-alert" role="alert">{errorMessage(backgroundJobsQuery.error)}</p>
+        ) : null}
+        {backgroundJobsQuery.data && backgroundJobsQuery.data.length > 0 ? (
+          <ol className="acquire-jobs__list">
+            {backgroundJobsQuery.data.slice(0, 8).map((job) => (
+              <li key={job.id}>
+                <Link to={`/jobs/${job.id}`}>
+                  <span className="acquire-jobs__id">#{job.id}</span>
+                  <strong>{job.query || `任务 ${job.id}`}</strong>
+                  <span className={`acquire-jobs__status acquire-jobs__status--${job.status}`}>
+                    {job.status}
+                  </span>
+                  <span className="acquire-jobs__counts">{job.added} / {job.found}</span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        ) : backgroundJobsQuery.data ? (
+          <p className="acquire-jobs__empty">暂无后台任务。发起「后台检索」后可随时回这里查看状态。</p>
         ) : null}
       </section>
 

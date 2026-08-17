@@ -30,9 +30,24 @@ def run_job(job_id: int):
     min_rel = row["min_relevance"] if row["min_relevance"] is not None else 0.5
     only_a = bool(row["only_a"])
 
+    # 用户在采集页生成/编辑过的检索词会随任务落库（queries 字段，JSON 数组）。
+    # 有有效自定义检索词时直接使用，不再让 LLM 二次扩展；否则维持自动扩展。
+    custom_queries = None
+    try:
+        parsed = json.loads(row["queries"]) if row["queries"] else None
+    except (TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, list):
+        cleaned = [str(q).strip() for q in parsed if str(q or "").strip()]
+        if cleaned and cleaned != [direction]:
+            custom_queries = cleaned
+    if custom_queries:
+        _p("QUERIES::" + json.dumps(custom_queries, ensure_ascii=False))
+
     try:
         cands = pipeline.search(direction, sources, years, limit, min_rel,
-                                expand=True, expand_n=12, only_a=only_a)
+                                expand=not custom_queries, expand_n=12,
+                                queries=custom_queries, only_a=only_a)
     except Exception as e:
         _p(f"JOBERR::{e}")
         con.execute("UPDATE ingest_jobs SET status='failed', finished_at=datetime('now') WHERE id=?", (job_id,))

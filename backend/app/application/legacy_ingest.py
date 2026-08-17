@@ -444,16 +444,46 @@ class LegacyIngestService:
         task.add_done_callback(self._background.discard)
 
     async def _run_background(self, identifier: int, runner: Any) -> None:
+        result: Any = None
         try:
             result = runner(identifier)
             if asyncio.iscoroutine(result):
-                await result
+                result = await result
         except asyncio.CancelledError:
             raise
         except Exception:
             # The provider owns detailed failure persistence.  A route response
             # must never expose child-process or credential text.
             return
+        # 对齐旧 Node runJobBackground：子进程的 stderr 进度写回
+        # ingest_jobs.log，用户回到任务页时能看到服务端真实进度；
+        # 子进程异常退出而 agent 未及写状态时，兼容置 failed。
+        stderr_text = str(getattr(result, "stderr", "") or "")
+        returncode = getattr(result, "returncode", None)
+        if stderr_text.strip() or (returncode is not None and int(returncode) != 0):
+            await self._persist_background_result(identifier, stderr_text, returncode)
+
+    async def _persist_background_result(
+        self, identifier: int, stderr_text: str, returncode: object
+    ) -> None:
+        async with self._session_factory() as session:
+            if stderr_text.strip():
+                chunk = stderr_text if stderr_text.endswith("\n") else stderr_text + "\n"
+                await session.execute(
+                    text(
+                        "UPDATE ingest_jobs SET log=coalesce(log,'')||:chunk WHERE id=:id"
+                    ),
+                    {"id": identifier, "chunk": chunk},
+                )
+            if returncode is not None and int(returncode) != 0:
+                await session.execute(
+                    text(
+                        "UPDATE ingest_jobs SET status='failed', finished_at=:finished "
+                        "WHERE id=:id AND status IN ('pending','running')"
+                    ),
+                    {"id": identifier, "finished": _timestamp(self._clock())},
+                )
+            await session.commit()
 
 
 def _validate_search_payload(payload: Mapping[str, object]) -> tuple[str, tuple[str, ...]]:

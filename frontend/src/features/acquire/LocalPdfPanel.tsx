@@ -180,6 +180,7 @@ export function LocalPdfPanel() {
           补齐馆藏 PDF
         </button>
       </header>
+      <p className="local-pdf__hint">导入 / 补齐为流式任务，请停留在本页直到完成。</p>
 
       <div className="local-pdf__controls">
         <label>
