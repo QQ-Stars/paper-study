@@ -49,6 +49,11 @@ if (Test-Alive) {
     $listener = @(Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue)
     Write-Host ('Paper-Study 已在运行（python_active, listener pid=' + $listener[0].OwningProcess + '）。')
 } else {
+    # After a reboot/crash the durable state file can outlive the processes;
+    # clear it (only when every recorded role pid is dead) so start can proceed.
+    # 该辅助脚本随本地 operator 目录分发，其他克隆可能没有，缺失时跳过。
+    $staleCleaner = Join-Path $PSScriptRoot 'data\compatibility\p6-operator-scripts\clean-stale-state.ps1'
+    if (Test-Path -LiteralPath $staleCleaner) { & $staleCleaner }
     Write-Host 'Paper-Study 未运行，使用 frozen identity 启动四角色（api/worker/scheduler/mcp）...'
     & $py -B -m backend.app.cli.native_runtime start `
         --native-runtime-spec $nativeSpec `
