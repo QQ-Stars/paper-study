@@ -286,11 +286,22 @@ def bootstrap(
         pdf_files=pdf_files,
     )
     review_scheduler = ReviewScheduler(unit_of_work_factory)
+
+    async def _paper_has_pdf(paper_id: str) -> bool:
+        # 必须回查 DB 的 pdf_path（旧标题命名文件）再解析，否则仅按 <id>.pdf
+        # 命名查找会把大量存量论文误判为“缺少 PDF”（与 pdfbytes 修复同源）。
+        try:
+            row = await library_queries.get_paper(paper_id)
+        except Exception:
+            row = None
+        stored = row.get("pdf_path") if isinstance(row, dict) else None
+        return pdf_files.resolve_for_id(paper_id, stored_path=stored) is not None
+
     artifact_store = ArtifactStore(
         unit_of_work_factory,
         read_mode=rollout.artifact_read_mode,
         legacy_markdown_root=repository_root / "paper",
-        has_pdf=lambda paper_id: pdf_files.resolve_for_id(paper_id) is not None,
+        has_pdf=_paper_has_pdf,
     )
     search_coordinator = SearchCoordinator(legacy_agent, unit_of_work_factory)
     legacy_services = LegacyApplicationServices(

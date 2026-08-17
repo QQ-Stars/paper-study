@@ -101,6 +101,8 @@ class LegacyAgentProvider:
         terminal_fields: Mapping[str, object] | None = None,
         stdin: str | bytes | None = None,
         stdout_array_field: str | None = None,
+        stdout_text_field: str | None = None,
+        stdout_object_field: str | None = None,
     ):
         if command in self._STRUCTURED_STDOUT_COMMANDS:
             async for event in self._stream_stdout_json_events(
@@ -170,13 +172,25 @@ class LegacyAgentProvider:
             stdout_text = stdout.decode("utf-8", errors="replace")
             decoded = json.loads(stdout_text) if stdout_text.strip() else {}
             if isinstance(decoded, dict):
-                payload.update(decoded)
+                if stdout_object_field is not None:
+                    # 整个 stdout JSON 对象包进指定终态字段（如 explain-batch
+                    # 的 summary，对齐旧 Node 行为）。
+                    payload[stdout_object_field] = decoded
+                else:
+                    payload.update(decoded)
             elif isinstance(decoded, list) and stdout_array_field is not None:
                 # Some agent commands (e.g. `search`) emit a bare JSON array;
                 # wrap it into the expected terminal field for the frontend.
                 payload[stdout_array_field] = decoded
+            elif stdout_text_field is not None and stdout_text.strip():
+                # 非 JSON stdout：整段文本包进指定字段（如 explain/translate
+                # 的 markdown，对齐旧 Node 行为）。
+                payload[stdout_text_field] = stdout_text
         except (TypeError, ValueError):
-            pass
+            # stdout 不是 JSON（如 explain/translate 直接输出 markdown）：
+            # 整段包进指定终态字段，对齐旧 Node 行为。
+            if stdout_text_field is not None and stdout_text.strip():
+                payload[stdout_text_field] = stdout_text
         for key, value in dict(terminal_fields or {}).items():
             payload.setdefault(key, value)
         payload.setdefault("ok", returncode == 0)

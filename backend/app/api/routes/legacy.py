@@ -404,12 +404,17 @@ def create_legacy_router() -> APIRouter:
         identifier = _safe_base(body.get("id"))
         if not identifier:
             return _json_response({"ok": False, "error": "缺少 id"}, 400)
+        args = ["--id", identifier]
+        if body.get("deep"):
+            args.append("--deep")
         return ndjson_response(
             _durable_artifact_events(
                 request,
                 identifier,
                 "explainer",
                 profile="deep" if body.get("deep") else "standard",
+                agent_command="explain",
+                agent_args=args,
             )
         )
 
@@ -424,6 +429,7 @@ def create_legacy_router() -> APIRouter:
                 terminal_fields={
                     "summary": {"total": 0, "done": 0, "failed": [], "skipped_no_pdf": []}
                 },
+                stdout_object_field="summary",
             )
         )
 
@@ -439,6 +445,8 @@ def create_legacy_router() -> APIRouter:
                 identifier,
                 "translation",
                 profile="standard",
+                agent_command="translate",
+                agent_args=["--id", identifier],
             )
         )
 
@@ -834,27 +842,64 @@ async def _durable_artifact_events(
     kind: str,
     *,
     profile: str,
+    agent_command: str | None = None,
+    agent_args: list[str] | tuple[str, ...] = (),
 ):
+    # 优先走 durable processing 管道；存量 legacy 论文没有 ready source
+    # document（SOURCE_IDENTITY_MISSING）时，回退到旧 Node 同款行为：
+    # spawn agent 子进程（explain/translate），stdout 纯文本包进 markdown 字段。
     service = _processing_streams(request)
     stream = getattr(service, "artifact_events", None)
-    if not callable(stream):
+    durable_error: str | None = None
+    durable_terminal: dict[str, object] | None = None
+    if callable(stream):
+        try:
+            async for event in stream(paper_id, kind, profile=profile):
+                # 流内部会把异常转成失败终态事件：成功直接透传返回；
+                # 失败（如 SOURCE_IDENTITY_MISSING）则不转发，转走 agent 回退。
+                if isinstance(event, dict) and event.get("type") == "result":
+                    durable_terminal = event
+                    if event.get("ok"):
+                        yield event
+                        return
+                    continue
+                yield event
+        except Exception as error:
+            durable_terminal = {"ok": False, "error": _safe_error(error)}
+        if durable_terminal is not None:
+            durable_error = str(durable_terminal.get("error") or "") or "processing failed"
+    else:
+        durable_error = "processing service unavailable"
+    if agent_command is None:
         yield {
             "type": "result",
             "ok": False,
             "markdown": "",
-            "error": "processing service unavailable",
+            "error": durable_error,
         }
         return
-    try:
-        async for event in stream(paper_id, kind, profile=profile):
-            yield event
-    except Exception as error:
-        yield {
-            "type": "result",
-            "ok": False,
-            "markdown": "",
-            "error": _safe_error(error),
-        }
+    async for event in _agent_events(
+        request,
+        agent_command,
+        list(agent_args),
+        terminal_fields={"markdown": ""},
+        stdout_text_field="markdown",
+    ):
+        # agent 通道完全不可用时，返回 durable 管道的原始失败原因。
+        if (
+            isinstance(event, dict)
+            and event.get("type") == "result"
+            and not event.get("ok")
+            and event.get("error") == "provider unavailable"
+        ):
+            yield {
+                "type": "result",
+                "ok": False,
+                "markdown": "",
+                "error": durable_error or "legacy agent failed",
+            }
+            return
+        yield event
 
 
 async def _durable_embedding_events(request: Request, scope: str):
@@ -913,6 +958,8 @@ async def _agent_events(
     terminal_fields: dict[str, object] | None = None,
     stdin: str | bytes | None = None,
     stdout_array_field: str | None = None,
+    stdout_text_field: str | None = None,
+    stdout_object_field: str | None = None,
 ):
     provider = _legacy_agent(request)
     fields = dict(terminal_fields or {})
@@ -924,6 +971,10 @@ async def _agent_events(
         extra: dict[str, object] = {}
         if stdout_array_field is not None:
             extra["stdout_array_field"] = stdout_array_field
+        if stdout_text_field is not None:
+            extra["stdout_text_field"] = stdout_text_field
+        if stdout_object_field is not None:
+            extra["stdout_object_field"] = stdout_object_field
         try:
             result = stream(
                 command,
@@ -960,11 +1011,17 @@ async def _agent_events(
         try:
             parsed = json.loads(raw_stdout) if raw_stdout.strip() else {}
             if isinstance(parsed, dict):
-                decoded.update(parsed)
+                if stdout_object_field is not None:
+                    decoded[stdout_object_field] = parsed
+                else:
+                    decoded.update(parsed)
             elif isinstance(parsed, list) and stdout_array_field is not None:
                 decoded[stdout_array_field] = parsed
+            elif stdout_text_field is not None and raw_stdout.strip():
+                decoded[stdout_text_field] = raw_stdout
         except (TypeError, ValueError):
-            pass
+            if stdout_text_field is not None and raw_stdout.strip():
+                decoded[stdout_text_field] = raw_stdout
         for key, value in fields.items():
             decoded.setdefault(key, value)
         decoded.setdefault("ok", int(getattr(result, "returncode", 1)) == 0)
