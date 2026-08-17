@@ -77,8 +77,12 @@ function SettingsForm({ settings }: { readonly settings: SettingsView }) {
     mutationFn: (scope: 'all' | 'missing') => insightsGateway.embed(scope),
   });
   // 中文题名批量生成（对齐旧版 titleZhBatchBtn）。
+  // 完成后刷新待生成计数，避免「待生成 N 篇」停留在旧缓存。
   const translateTitles = useMutation({
     mutationFn: () => artifactGateway.translateTitles(0),
+    onSuccess: () => queryClient.invalidateQueries({
+      queryKey: ['title-translations', 'status'],
+    }),
   });
   const titleStatus = useQuery({
     queryKey: ['title-translations', 'status'],
@@ -237,14 +241,25 @@ function SettingsForm({ settings }: { readonly settings: SettingsView }) {
           {titleStatus.data && titleStatus.data.pending > 0 ? (
             <small className="settings-status">待生成 {titleStatus.data.pending} 篇</small>
           ) : null}
-          {translateTitles.isSuccess ? (
-            <output className="settings-status settings-status--ok">
-              已生成 {translateTitles.data.summary.done} / {translateTitles.data.summary.total}
-              {translateTitles.data.summary.failed.length > 0
-                ? `，失败 ${translateTitles.data.summary.failed.length} 篇`
-                : ''}。
-            </output>
-          ) : null}
+          {translateTitles.isSuccess ? (() => {
+            const summary = translateTitles.data.summary;
+            const failedTitles = summary.failed
+              .map((failure) => failure.title || failure.id)
+              .join('、');
+            const tone = summary.failed.length === 0
+              ? 'settings-status--ok'
+              : summary.done > 0
+                ? 'settings-status--ok'
+                : 'settings-status--error';
+            return (
+              <output className={`settings-status ${tone}`}>
+                已生成 {summary.done} / {summary.total}
+                {summary.failed.length > 0
+                  ? `，失败 ${summary.failed.length} 篇（${failedTitles}）——题名若为纯专有名词/缩写则无中文可译`
+                  : ''}。
+              </output>
+            );
+          })() : null}
           {translateTitles.isError ? (
             <output className="settings-status settings-status--error">{message(translateTitles.error)}</output>
           ) : null}

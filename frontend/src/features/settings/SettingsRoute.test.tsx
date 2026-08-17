@@ -211,6 +211,27 @@ describe('Settings route', () => {
     expect(apiMocks.translateTitles).toHaveBeenCalledOnce();
   });
 
+  it('reports untranslatable titles honestly and refreshes the pending count', async () => {
+    const user = userEvent.setup();
+    apiMocks.translateTitles.mockResolvedValueOnce({
+      type: 'result', ok: true,
+      summary: {
+        total: 2, done: 0,
+        failed: [
+          { id: 'p1', title: 'OPERA', error: '大模型未返回有效中文题名' },
+          { id: 'p2', title: 'HalTrapper', error: '大模型未返回有效中文题名' },
+        ],
+        cancelled: false,
+      },
+    });
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: '生成中文题名' }));
+    expect(await screen.findByText(/失败 2 篇（OPERA、HalTrapper）/)).toBeInTheDocument();
+    // 完成后重新拉取待生成计数，不留在旧缓存。
+    await waitFor(() => expect(apiMocks.getTitleTranslationStatus).toHaveBeenCalledTimes(2));
+  });
+
   it('shows and saves all eight non-secret Obsidian settings', async () => {
     const user = userEvent.setup();
     renderSettings();
