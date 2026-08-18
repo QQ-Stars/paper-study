@@ -16,12 +16,6 @@
   <img src="https://img.shields.io/github/languages/code-size/QQ-Stars/paper-study" alt="code size">
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/github/last-commit/QQ-Stars/paper-study" alt="last commit">
-  <img src="https://img.shields.io/github/commit-activity/m/QQ-Stars/paper-study" alt="commit activity">
-  <img src="https://img.shields.io/github/issues/QQ-Stars/paper-study" alt="issues">
-  <img src="https://img.shields.io/github/stars/QQ-Stars/paper-study" alt="stars">
-</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="backend">
