@@ -400,23 +400,32 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
               onChange={(event) => setEditQuery(event.target.value)}
             />
           </label>
-          <ul className="manage__picks">
-            {editMatches.map((paper) => (
-              <li key={paper.id} className="manage__pick-row">
-                <button type="button" className={editTarget?.id === paper.id ? 'is-active' : ''} onClick={() => pickEditTarget(paper)}>
-                  {paper.title_zh || paper.title}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--danger-ghost btn--sm"
-                  aria-label={`删除 ${paper.title_zh || paper.title}`}
-                  onClick={() => setDeleteTargets([paper])}
-                >
-                  删除
-                </button>
-              </li>
-            ))}
-          </ul>
+          <p className="manage__picks-meta">
+            {editQuery.trim()
+              ? `命中 ${editMatches.length} 篇（最多显示 6 篇）· 点标题展开字段编辑`
+              : '显示最近 6 篇 · 点标题展开字段编辑，或输入关键词检索'}
+          </p>
+          {editMatches.length > 0 ? (
+            <ul className="manage__picks">
+              {editMatches.map((paper) => (
+                <li key={paper.id} className="manage__pick-row">
+                  <button type="button" className={editTarget?.id === paper.id ? 'is-active' : ''} onClick={() => pickEditTarget(paper)}>
+                    {paper.title_zh || paper.title}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--danger-ghost btn--sm"
+                    aria-label={`删除 ${paper.title_zh || paper.title}`}
+                    onClick={() => setDeleteTargets([paper])}
+                  >
+                    删除
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="manage__picks-empty">未找到匹配的论文，请调整检索词。</p>
+          )}
           {editTarget && (
             <div className="manage__form">
               {EDIT_LABELS.map((field) => (

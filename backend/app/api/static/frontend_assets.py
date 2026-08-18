@@ -14,7 +14,8 @@ from starlette.responses import FileResponse, RedirectResponse, Response
 
 
 _CSP = (
-    "default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; "
+    "default-src 'self'; script-src 'self' blob:; worker-src 'self' blob:; "
+    "connect-src 'self' blob:; "
     "style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; "
     "base-uri 'self'; frame-ancestors 'none'"
 )

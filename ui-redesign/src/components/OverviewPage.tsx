@@ -135,7 +135,7 @@ export function OverviewPage({
             <section className="card overview__continue" aria-labelledby="overview-continue-title">
               <img
                 className="overview__continue-art"
-                src="/images/study-banner.png"
+                src={`${import.meta.env.BASE_URL}images/study-banner.png`}
                 alt="书桌与文献的极简插画"
               />
               <div className="overview__continue-body">
