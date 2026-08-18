@@ -24,12 +24,6 @@
   <img src="https://img.shields.io/badge/platform-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey" alt="platform">
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/data-local--only-E5484D" alt="data">
-  <img src="https://img.shields.io/badge/GPU-not_required-success" alt="gpu">
-  <img src="https://img.shields.io/badge/deploy-native_%C2%B7_docker-blueviolet" alt="deploy">
-</p>
-
 ---
 
 ## 为什么需要它
