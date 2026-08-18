@@ -172,6 +172,8 @@ macOS / Linux 将 `npm.cmd` 换成 `npm`。旧 `frontend/` 应用的构建（`np
 
 Windows 用户直接**双击 `start.cmd`**（或在终端执行 `powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1`）：脚本会检查 owner marker 门禁 → 缺失前端产物时自动构建 → 拉起 FastAPI 四角色（api/worker/scheduler/mcp）→ 打开 <http://localhost:5173/workspace/>。加 `-SkipBrowser` 参数可跳过自动开浏览器。
 
+**一键关闭**：双击 `stop.cmd` —— 先优雅执行 `native_runtime stop`，未停干净时自动强制结束残留的后端进程，并同时关闭 ui-redesign 开发服务器（5180，若在运行）。
+
 ### 6) 手动启动原生 Windows production runtime（可选）
 
 P6 首次接管会生成 content-addressed BuildIdentity、native runtime spec、`python_active` owner marker 和 exact HandoffReceipt。日常启动必须使用该次接管返回的精确路径；不得用 `latest`、glob、目录扫描或重新计算 SHA 替代。Windows PowerShell：
