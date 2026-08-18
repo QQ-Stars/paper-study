@@ -47,7 +47,7 @@
 
 **适用于任意研究方向**：在 ⚙ 设置中填写研究主题，大模型采集时即按该主题对论文分类、评定相关度；更换主题即可用于其他领域。
 
-React 工作区与旧版回退入口均已合入 `main` 分支：`frontend/` 是独立的 React 19 应用（`/workspace/`），旧版 `public/` 前端仅作为可逆回退入口（`/legacy/`）保留，不会与 React 应用共同挂载或被 React 运行时加载。
+默认前端为 **`ui-redesign/`（纸墨风 React + Vite 工作台）**，构建产物由 FastAPI 在 `/workspace/` 托管；旧 `frontend/` React 应用与 `public/` 原生前端仅作为可逆回退入口保留（`/legacy/`），不再是默认落地页。
 
 ---
 
@@ -70,7 +70,8 @@ React 工作区与旧版回退入口均已合入 `main` 分支：`frontend/` 是
 ## 功能概览
 
 - 🔎 **自动采集**：输入研究方向（中/英皆可）→ 大模型扩展检索词 → 多源（arXiv / Semantic Scholar / OpenAlex / DBLP）检索去重 → 预览候选 → 勾选入库。
-- 📖 **沉浸精读**：从「今日 / 文献库 / 复习 / 洞察」打开论文，以 URL 固定论文身份；主舞台提供 PDF 懒加载、页码/缩放、多段选文与即时翻译，资料区提供笔记、讲解和全文翻译。
+- 📖 **沉浸精读**：独立阅读页提供 PDF 内嵌阅读（PDF.js 文本层，选中即划词翻译）、AI 讲解 / 全文翻译 / 研究笔记 / OCR 全文五个页签，公式由 KaTeX 渲染，讲解/翻译可一键重新生成。
+- 📄 **PDF → Markdown（OCR）**：用 OCR 视觉模型（如 DeepSeek-OCR）将 PDF 逐页转为结构化 Markdown，落库并可批量补齐；开启「OCR 提取」后讲解/翻译优先使用 OCR 全文。
 - 🧠 **大模型辅助**：一键生成**论文讲解**与**全文中文翻译**（读取 PDF 全文、跳过参考文献、公式由 KaTeX 渲染）。
 - 🔮 **语义检索**：按语义查找论文，**中文描述可直接匹配英文论文**；默认本地嵌入（无需 GPU），也可切换至更高精度的外部 API（如硅基流动 `BAAI/bge-m3`）。
 - 🗂️ **研究工作区**：「今日」论文甲板与真实时间线、「文献库」高密度筛选/排序/编辑、「任务」后台采集与定时计划协同工作。
@@ -123,7 +124,7 @@ cd paper-study
 
 ### 2) 安装网页端依赖
 
-根服务与 React 工作区使用彼此独立的 lockfile。Windows PowerShell 执行：
+根服务与旧 React 工作区使用彼此独立的 lockfile（新前端 ui-redesign 的依赖在步骤 4 随构建一并安装）。Windows PowerShell 执行：
 
 ```powershell
 npm.cmd ci
@@ -157,17 +158,21 @@ python3 -m venv .venv
 
 > 此步骤会联网下载若干 Python 包，可能耗时数分钟；**末尾若无 ERROR 即为成功**（warning 可忽略）。
 
-### 4) 构建 React
+### 4) 构建前端
 
-FastAPI 从 `frontend/dist/` 提供 React 资源，因此首次启动或修改 React 代码后先执行：
+FastAPI 默认从 `ui-redesign/dist/` 提供纸墨风新前端（构建产物已随仓库提交，通常无需手动构建；修改前端源码后重新构建）：
 
 ```powershell
-npm.cmd run frontend:build
+cd ui-redesign; npm.cmd ci; npm.cmd run build; cd ..
 ```
 
-macOS / Linux 将 `npm.cmd` 换成 `npm`。
+macOS / Linux 将 `npm.cmd` 换成 `npm`。旧 `frontend/` 应用的构建（`npm.cmd run frontend:build`）仅在需要回退入口时执行。
 
-### 5) 启动原生 Windows production runtime
+### 5) 一键启动（推荐）
+
+Windows 用户直接**双击 `start.cmd`**（或在终端执行 `powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1`）：脚本会检查 owner marker 门禁 → 缺失前端产物时自动构建 → 拉起 FastAPI 四角色（api/worker/scheduler/mcp）→ 打开 <http://localhost:5173/workspace/>。加 `-SkipBrowser` 参数可跳过自动开浏览器。
+
+### 6) 手动启动原生 Windows production runtime（可选）
 
 P6 首次接管会生成 content-addressed BuildIdentity、native runtime spec、`python_active` owner marker 和 exact HandoffReceipt。日常启动必须使用该次接管返回的精确路径；不得用 `latest`、glob、目录扫描或重新计算 SHA 替代。Windows PowerShell：
 
@@ -194,8 +199,8 @@ $ownerMarker = (Resolve-Path -LiteralPath 'data/compatibility/runtime/production
 | 地址 | 行为 |
 |---|---|
 | <http://localhost:5173/> | 默认重定向到 `/workspace/` |
-| <http://localhost:5173/workspace/> | 始终进入 React 工作区，并继续到研究概览 |
-| <http://localhost:5173/legacy/> | 始终进入旧版前端 |
+| <http://localhost:5173/workspace/> | **纸墨风新前端（ui-redesign）**：今日 / 文献库 / 管理 / 复习 / 采集 / 任务 / 洞察 / 设置 |
+| <http://localhost:5173/legacy/> | 旧版前端（回退入口） |
 
 `UI_ENTRY` 只控制根地址 `/`，不会禁用两个显式入口。production 值冻结在 native runtime spec 中；修改后必须产生新的 BuildIdentity 并重新执行受控接管，不能在日常启动时临时覆盖。旧版入口始终可通过 `/legacy/` 访问。
 
@@ -223,8 +228,10 @@ $ownerMarker = (Resolve-Path -LiteralPath 'data/compatibility/runtime/production
 | 功能 | 操作 |
 |---|---|
 | **采集论文** | 全局导航「采集」→ 输入研究方向 → 生成或编辑检索词 → 选择来源并检索 → 核验候选 → 勾选入库；每个流式阶段都显示进度、取消和失败状态 |
-| **阅读与讲解** | 在「今日」「文献库」「复习」或「洞察」打开论文 → Reader 主舞台查看 PDF → 资料区切换「笔记 / 讲解」，按需保存笔记或生成讲解 |
-| **全文与选文翻译** | Reader 资料区「翻译」→「生成翻译」；或在 PDF text layer 选择文字后打开「选文翻译」 |
+| **阅读与讲解** | 文献库详情「进入阅读页」→ 独立阅读页五页签：摘要与贡献 / AI 讲解 / 全文翻译 / OCR 全文 / 研究笔记；讲解与翻译支持一键重新生成 |
+| **PDF 阅读与划词翻译** | 阅读页「PDF 阅读」页签内嵌 PDF（翻页/缩放），选中正文即弹出划词翻译；工具栏「PDF 转 Markdown」可对该篇执行 OCR 转换 |
+| **OCR 全文提取** | 阅读页「OCR 全文」自动加载已落库结果；「管理」页「批量 PDF → Markdown」可为全库有 PDF 的论文批量补齐 |
+| **全文与选文翻译** | 阅读页「全文翻译」页签生成/重新生成；或在 PDF 中选中文字后划词翻译 |
 | **语义检索** | 「文献库」输入自然语言研究问题 →「语义检索」→ 按语义分排序；再次点击可返回普通筛选 |
 | **导入本地 PDF** | 「采集」→「本地 PDF」→ 填写文件夹并扫描 → 勾选 →「导入选中 PDF」；界面保留 TOTAL / PARSED / ADDED / DUP / SKIP 与失败明细 |
 | **复习论文** | 在「文献库」将论文状态设为「已理解」后进入计划；「复习」页按逾期、今日、后续、已完成查看服务端快照并完成当前轮次 |
@@ -232,7 +239,9 @@ $ownerMarker = (Resolve-Path -LiteralPath 'data/compatibility/runtime/production
 | **趋势与空白分析** | 「洞察」查看年度、主题、发表场所、高引用论文与引用网络；或配置 [MCP](#七mcp-服务可选) 由 Codex / Claude 协助分析 |
 | **收藏 / 进度 / 编辑** | 「文献库」可收藏、切换学习状态、组合筛选、添加/编辑/删除论文；Reader 资料区维护当前 URL 论文的笔记 |
 
-> 讲解、翻译、收藏等结果均**缓存至数据库**，再次打开同一篇时直接载入，无需重复生成。
+> 讲解、翻译、OCR Markdown、收藏等结果均**缓存至数据库**，再次打开同一篇时直接载入，无需重复生成。
+>
+> ⚙ 设置页「大模型与翻译管道」可配置：讲解/翻译全文字符上限、翻译模式（分块并发 / 整篇一次）、分块大小、并发数、是否跳过参考文献；「OCR 与提取」可配置 OCR 模型（Base URL / 模型 / Key）与启用开关。
 
 ---
 
@@ -360,14 +369,14 @@ DB_PATH = '<项目路径>\data\app.db'
 
 ## 九、开发者说明
 
-### React clean-room 边界与验证
+### 前端架构与开发模式
 
-- 当前交付分支是 `main`。`frontend/` 是独立的 React 19 + TypeScript + Vite 应用，构建基址固定为 `/workspace/`；`public/` 是旧版实现，只通过 `/legacy/`（或根入口回退）提供。
-- React 源码、样式和构建产物不导入旧版 `public/index.html`、`public/app.js`、`public/style.css` 或旧版 vendor 资源。两套界面只共享现有 Node/SQLite/Python API 与本地数据契约。
-- `UI_ENTRY=react|legacy` 仅决定 `/` 的启动时行为。显式 `/workspace/` 与 `/legacy/` 始终有效；production 值属于冻结 runtime identity。
-- 旧版前端不会随本次切换删除。只有在 React 工作区完成**两次正式发布**或累计**14 个有记录的活跃使用日**之后，才重新审查是否删除；达到门槛不代表自动删除，仍需一次新的兼容性、数据安全与回滚评审。
+- **默认前端**：`ui-redesign/`（纸墨风 React 18 + TypeScript + Vite），生产构建基址 `/workspace/`，产物 `ui-redesign/dist/` 随仓库提交，由 FastAPI 静态适配器托管（含 SPA fallback）。
+- **双端口开发模式**：日常使用只访问 5173；开发调试时另起 `cd ui-redesign; npm run dev`（端口 **5180**，HMR 热更新，API 经 Vite 代理转发至 5173），修改即时生效。
+- **回退入口**：旧 `frontend/`（React 19）与 `public/`（原生 JS）仅经 `/legacy/` 提供；`UI_ENTRY=react|legacy` 仅决定 `/` 的启动行为，显式入口始终有效。
+- **前端技术要点**：PDF.js v6 canvas + textLayer（划词翻译）、marked + KaTeX（支持 `$`、`$$`、`\(...\)`、`\[...\]` 四种公式定界符）、NDJSON 流式任务接口。
 
-从项目根目录执行完整开发门禁（Windows PowerShell）：
+从项目根目录执行旧前端的开发门禁（Windows PowerShell）：
 
 ```powershell
 npm.cmd test
@@ -402,16 +411,20 @@ paper-study/            # 克隆后的项目根目录
 │  ├─ pipeline.py       #   两阶段检索：search（出候选）/ ingest-selected（入库）
 │  ├─ sources/          #   数据源适配：arxiv / semanticscholar / openalex / dblp
 │  ├─ llm.py            #   分类 / 扩词 / 讲解 / 翻译 的大模型调用
-│  ├─ extract.py        #   PDF→Markdown（pymupdf4llm，保留版面、裁参考文献）
-│  ├─ explain.py        #   生成论文讲解
-│  ├─ translate.py      #   全文翻译（去参考文献/表格 → 分块 → 并发译 → 拼接）
+│  ├─ extract.py        #   PDF→Markdown（pymupdf4llm 本地解析 + OCR 模型 API 双通道）
+│  ├─ ocrmd.py          #   PDF→Markdown（OCR）单篇/批量，落库 ocr_markdown 表
+│  ├─ explain.py        #   生成论文讲解（OCR 模式优先用已落库 OCR Markdown）
+│  ├─ translate.py      #   全文翻译（分块并发/整篇模式可配，去参考文献可配）
 │  ├─ recommend.py      #   相似论文推荐（S2 Recommendations）
 │  ├─ embed.py          #   论文向量 + 语义检索（本地 model2vec 或外部嵌入 API，余弦排序）
 │  ├─ importer.py       #   本地 PDF 批量导入（扫描→抽取→分类→入库，原地引用）
 │  ├─ citegraph.py      #   引用关系图：抓 S2 参考文献 → 建库内互引边
 │  ├─ verify.py         #   会议核实（查权威库，非大模型臆测）
 │  └─ mcp_server.py     #   MCP 服务（将库以工具暴露给 Claude 等客户端）
-├─ frontend/            # React 19 clean-room 工作区（TypeScript/Vite/Vitest/Playwright）
+├─ ui-redesign/         # 纸墨风新前端（React + TS + Vite，默认入口 /workspace/）
+│  ├─ src/              #   页面组件、API 客户端、纸墨设计令牌（tokens.css）
+│  └─ dist/             #   生产构建产物（随仓库提交，缺失时 start.ps1 自动重建）
+├─ frontend/            # 旧 React 19 工作区（回退入口，TypeScript/Vite/Vitest/Playwright）
 │  ├─ src/              #   app、feature 与深模块实现
 │  └─ e2e/              #   确定性 mock API 的浏览器工作流与 clean-room 断言
 ├─ public/              # 旧版原生 JS/CSS/HTML，仅由 /legacy/ 回退入口提供
@@ -429,6 +442,8 @@ paper-study/            # 克隆后的项目根目录
 python -m agent search    --query "多模态大模型 幻觉检测" --sources arxiv,semanticscholar --expand   # 仅输出候选
 python -m agent explain   --id <论文id> [--deep]      # 生成讲解（--deep 读取 PDF 全文）
 python -m agent translate --id <论文id>               # 全文翻译
+python -m agent ocr-md    --id <论文id>               # PDF→Markdown（OCR，落库）
+python -m agent ocr-md-batch --limit 3                # 批量 OCR（只补有 PDF 且无落库记录的）
 python -m agent recommend --id <论文id> [--limit 14]   # 相似论文推荐
 python -m agent embed     --scope all|missing         # 建立/更新语义检索向量索引
 python -m agent semsearch --query "缓解物体幻觉的解码方法" --k 30   # 语义检索
@@ -440,6 +455,6 @@ python -m agent ping                                  # 测试大模型连通性
 
 ### 约定
 
-- **PDF、数据库、密钥不入 Git**（见 `.gitignore`）；更换设备后重新采集，或将文件放回 `data/pdfs/` 即可。
-- React 依赖由 Vite 构建进 `frontend/dist/`；旧版依赖继续本地化于 `public/vendor/`，两者不交叉加载。
+- **PDF、数据库、密钥不入 Git**（见 `.gitignore`；含 `data/ocr_markdown/` OCR 产物目录）；更换设备后重新采集，或将文件放回 `data/pdfs/` 即可。
+- 新前端依赖由 Vite 构建进 `ui-redesign/dist/`（随仓库提交）；旧版依赖继续本地化于 `public/vendor/`，两者不交叉加载。
 - 大模型配置优先级：`data/settings.json` > `.env`。**请妥善保管 API Key。**
