@@ -9,7 +9,6 @@
 <p align="center">一个 Python + React 的本地网页应用：多源自动检索论文 → AI 分类入库 → 一键生成中文讲解 / 翻译 → 语义检索辅助发现研究空白。<br/>论文、笔记、API 密钥<strong>仅保存在本地</strong>，不上传任何服务器。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-1497_passing-brightgreen" alt="tests">
   <img src="https://img.shields.io/github/license/QQ-Stars/paper-study" alt="license">
   <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" alt="python">
   <img src="https://img.shields.io/badge/node-20%2B-339933?logo=nodedotjs&logoColor=white" alt="node">
