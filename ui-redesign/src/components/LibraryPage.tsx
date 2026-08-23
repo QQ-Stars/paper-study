@@ -20,6 +20,7 @@ interface LibraryPageProps {
 
 type SearchMode = 'keyword' | 'semantic' | 'chunks';
 type SortKey = 'recent' | 'year' | 'citations' | 'relevance';
+type LibraryView = SortKey | 'favorites';
 
 const STATUS_FILTERS: Array<{ id: 'all' | StudyStatus; label: string }> = [
   { id: 'all', label: '全部' },
@@ -57,7 +58,7 @@ export function LibraryPage({
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'all' | StudyStatus>('all');
   const [topic, setTopic] = useState('all');
-  const [sort, setSort] = useState<SortKey>('recent');
+  const [libraryView, setLibraryView] = useState<LibraryView>('recent');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [semanticHits, setSemanticHits] = useState<SemanticHit[]>([]);
@@ -65,6 +66,8 @@ export function LibraryPage({
   const [chunkMode, setChunkMode] = useState<'lexical' | 'semantic' | 'hybrid'>('hybrid');
   const semStream = useStream();
   const chunkBusy = useState({ busy: false })[0];
+  const favoritesOnly = libraryView === 'favorites';
+  const effectiveSort: SortKey = favoritesOnly ? 'recent' : libraryView;
 
   const topics = useMemo(
     () => Array.from(new Set(papers.map((paper) => paper.topic).filter(Boolean))),
@@ -83,7 +86,8 @@ export function LibraryPage({
           (paper.topic ?? '').includes(query.trim()) ||
           (paper.id ?? '').toLowerCase().includes(q)) &&
         (status === 'all' || paper.status === status) &&
-        (topic === 'all' || paper.topic === topic),
+        (topic === 'all' || paper.topic === topic) &&
+        (!favoritesOnly || paper.favorite === 1),
     );
     const byKey = (key: SortKey) => (a: Paper, b: Paper) => {
       if (key === 'year') return Number(b.year || 0) - Number(a.year || 0);
@@ -91,20 +95,26 @@ export function LibraryPage({
       if (key === 'relevance') return (b.relevance ?? 0) - (a.relevance ?? 0);
       return b.created_at.localeCompare(a.created_at);
     };
-    return [...list].sort(byKey(sort));
-  }, [papers, query, status, topic, sort, mode]);
+    return [...list].sort(byKey(effectiveSort));
+  }, [papers, query, status, topic, favoritesOnly, effectiveSort, mode]);
 
   const selected = papers.find((paper) => paper.id === selectedId) ?? null;
 
   /* 分页：筛选/排序/搜索变化时回到第 1 页；页数变少时 clamp 兑底 */
   useEffect(() => {
     setPage(1);
-  }, [query, status, topic, sort, mode, pageSize, papers.length]);
+  }, [query, status, topic, libraryView, mode, pageSize, papers.length]);
+  useEffect(() => {
+    if (favoritesOnly && selectedId && !filtered.some((paper) => paper.id === selectedId)) {
+      onSelect(null);
+    }
+  }, [favoritesOnly, filtered, onSelect, selectedId]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pageCount);
   const paged = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const pageStart = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const pageEnd = Math.min(safePage * pageSize, filtered.length);
+  const countText = `${String(filtered.length).padStart(String(papers.length).length, '\u2007')} 篇`;
 
   const runSemantic = async () => {
     if (!query.trim()) return;
@@ -230,11 +240,12 @@ export function LibraryPage({
             </select>
             <select
               className="input library__topic"
-              aria-label="排序"
-              value={sort}
-              onChange={(event) => setSort(event.target.value as SortKey)}
+              aria-label="排序与收藏筛选"
+              value={libraryView}
+              onChange={(event) => setLibraryView(event.target.value as LibraryView)}
             >
               <option value="recent">最近入库</option>
+              <option value="favorites">已收藏</option>
               <option value="year">年份</option>
               <option value="citations">被引数</option>
               <option value="relevance">相关度</option>
@@ -253,7 +264,7 @@ export function LibraryPage({
             <option value="lexical">词法</option>
           </select>
         )}
-        <span className="library__count">{mode === 'keyword' ? `${filtered.length} 篇` : ''}</span>
+        <span className="library__count">{mode === 'keyword' ? countText : ''}</span>
       </div>
 
       {(mode === 'semantic' || mode === 'chunks') && (
@@ -352,7 +363,13 @@ export function LibraryPage({
                 </li>
               ))}
             {!loading && filtered.length === 0 && (
-              <li className="library__empty">没有符合筛选条件的文献，换个关键词试试。</li>
+              <li className="library__empty">
+                {favoritesOnly
+                  ? query.trim() || status !== 'all' || topic !== 'all'
+                    ? '没有符合当前条件的已收藏文献，调整关键词或筛选条件试试。'
+                    : '暂无已收藏的文献'
+                  : '没有符合筛选条件的文献，换个关键词试试。'}
+              </li>
             )}
           </ul>
 
