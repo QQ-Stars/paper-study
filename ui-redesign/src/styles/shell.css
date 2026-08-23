@@ -123,6 +123,7 @@
   min-width: 0;
   overflow: hidden;
   line-height: 1;
+  text-align: start;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
