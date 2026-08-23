@@ -5,6 +5,14 @@ import type { BatchRun, DuplicatePair, EnrichStatus, Paper, StudyStatus } from '
 import { DeleteConfirmDialog } from './DeleteConfirmDialog';
 import { PlusIcon, SearchIcon } from './Icons';
 import { StreamConsole, useStream } from './StreamConsole';
+import {
+  batchLimitInsertionText,
+  batchLimitLabel,
+  buildBatchLimitRequest,
+  buildDownloadBatchRequest,
+  isBatchLimitText,
+  parseBatchLimit,
+} from './batchLimits';
 
 interface ManagePageProps {
   papers: Paper[];
@@ -42,18 +50,84 @@ const EDIT_LABELS: Array<{ key: EditField; label: string; wide?: boolean }> = [
   { key: 'contribution', label: '核心贡献', wide: true },
 ];
 
-function normalizeBatchLimit(value: string): number {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+interface BatchLimitDraft {
+  value: string;
+  inputInvalid: boolean;
 }
 
-function batchLimitLabel(value: string): string {
-  const limit = normalizeBatchLimit(value);
-  return limit === 0 ? '全部' : `limit=${limit}`;
-}
+function BatchLimitControl({
+  id,
+  accessibleName,
+  draft,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  accessibleName: string;
+  draft: BatchLimitDraft;
+  disabled: boolean;
+  onChange: (next: BatchLimitDraft) => void;
+}) {
+  const result = parseBatchLimit(draft.value, draft.inputInvalid);
+  const descriptionId = `${id}-description`;
+  const rejectInvalidInsertion = (text: string) => {
+    if (isBatchLimitText(text)) return false;
+    onChange({ ...draft, inputInvalid: true });
+    return true;
+  };
 
-function updateBatchLimit(value: string, setter: (next: string) => void) {
-  if (value === '' || /^\d+$/.test(value)) setter(value);
+  return (
+    <label className="manage__limit-control">
+      <span>本次处理篇数</span>
+      <input
+        className="input"
+        id={id}
+        type="number"
+        min="0"
+        step="1"
+        inputMode="numeric"
+        aria-label={accessibleName}
+        aria-describedby={descriptionId}
+        aria-invalid={result.valid ? undefined : true}
+        value={draft.value}
+        disabled={disabled}
+        onKeyDown={(event) => {
+          if (
+            !event.ctrlKey &&
+            !event.metaKey &&
+            !event.altKey &&
+            event.key.length === 1 &&
+            rejectInvalidInsertion(event.key)
+          ) {
+            event.preventDefault();
+          }
+        }}
+        onBeforeInput={(event) => {
+          const syntheticData = (event as typeof event & { data?: unknown }).data;
+          const nativeData = 'data' in event.nativeEvent
+            ? (event.nativeEvent as InputEvent).data
+            : undefined;
+          const text = batchLimitInsertionText(syntheticData, nativeData);
+          if (text !== null && rejectInvalidInsertion(text)) event.preventDefault();
+        }}
+        onPaste={(event) => {
+          if (rejectInvalidInsertion(event.clipboardData.getData('text'))) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (rejectInvalidInsertion(event.dataTransfer.getData('text'))) event.preventDefault();
+        }}
+        onChange={(event) =>
+          onChange({
+            value: event.currentTarget.value,
+            inputInvalid: event.currentTarget.validity.badInput,
+          })
+        }
+      />
+      <small id={descriptionId} aria-live="polite">
+        {result.valid ? '留空或 0 = 全部' : result.error}
+      </small>
+    </label>
+  );
 }
 
 function formatLastRun(run: BatchRun | null | undefined): string {
@@ -177,7 +251,16 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [duplicateError, setDuplicateError] = useState('');
   const [enrichStatus, setEnrichStatus] = useState<EnrichStatus | null>(null);
-  const [enrichLimit, setEnrichLimit] = useState('10');
+  const [titleLimit, setTitleLimit] = useState<BatchLimitDraft>({ value: '10', inputInvalid: false });
+  const [downloadLimit, setDownloadLimit] = useState<BatchLimitDraft>({ value: '20', inputInvalid: false });
+  const [explainLimit, setExplainLimit] = useState<BatchLimitDraft>({ value: '3', inputInvalid: false });
+  const [ocrLimit, setOcrLimit] = useState<BatchLimitDraft>({ value: '3', inputInvalid: false });
+  const [enrichLimit, setEnrichLimit] = useState<BatchLimitDraft>({ value: '10', inputInvalid: false });
+
+  const downloadPendingIds = useMemo(
+    () => papers.filter((paper) => !paper.hasPdf && paper.pdf_url).map((paper) => paper.id),
+    [papers],
+  );
 
   const refreshTitleStatus = () => {
     artifactApi
@@ -212,10 +295,15 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
   }, []);
 
   const runTitleTranslations = async () => {
+    const request = buildBatchLimitRequest(titleLimit.value, titleLimit.inputInvalid);
+    if (!request.valid) {
+      notify(`标题翻译处理篇数：${request.error}`);
+      return;
+    }
     const anchor = titleStream.anchorRef.current + 1;
     titleStream.begin();
     try {
-      await artifactApi.runTitleTranslations({ limit: 10 }, (event) =>
+      await artifactApi.runTitleTranslations(request.request, (event) =>
         titleStream.accept(anchor, event),
       );
       await reloadPapers();
@@ -270,12 +358,20 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
   };
 
   const runDownload = async () => {
-    const missing = papers.filter((paper) => !paper.hasPdf && paper.pdf_url).map((paper) => paper.id);
+    const request = buildDownloadBatchRequest(
+      downloadLimit.value,
+      downloadPendingIds,
+      downloadLimit.inputInvalid,
+    );
+    if (!request.valid) {
+      notify(`PDF 补下载篇数：${request.error}`);
+      return;
+    }
     const anchor = downloadStream.anchorRef.current + 1;
     downloadStream.begin();
     try {
       await acquireApi.downloadPdfs(
-        { ids: missing.slice(0, 20), limit: 20 },
+        request.request,
         (event) => downloadStream.accept(anchor, event),
       );
       await reloadPapers();
@@ -286,11 +382,16 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
   };
 
   const runExplainBatch = async () => {
+    const request = buildBatchLimitRequest(explainLimit.value, explainLimit.inputInvalid);
+    if (!request.valid) {
+      notify(`批量讲解篇数：${request.error}`);
+      return;
+    }
     const anchor = batchStream.anchorRef.current + 1;
     batchStream.begin();
     try {
       await artifactApi.explainBatch(
-        { limit: 3 },
+        request.request,
         (event) => batchStream.accept(anchor, event),
       );
       refreshBatchStatus();
@@ -301,11 +402,16 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
   };
 
   const runOcrBatch = async () => {
+    const request = buildBatchLimitRequest(ocrLimit.value, ocrLimit.inputInvalid);
+    if (!request.valid) {
+      notify(`PDF 转 Markdown 篇数：${request.error}`);
+      return;
+    }
     const anchor = ocrBatchStream.anchorRef.current + 1;
     ocrBatchStream.begin();
     try {
       await artifactApi.ocrBatch(
-        { limit: 3 },
+        request.request,
         (event) => ocrBatchStream.accept(anchor, event),
       );
       refreshOcrBatchStatus();
@@ -334,13 +440,18 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
   };
 
   const runEnrich = async () => {
+    const request = buildBatchLimitRequest(enrichLimit.value, enrichLimit.inputInvalid);
+    if (!request.valid) {
+      notify(`元数据补全篇数：${request.error}`);
+      return;
+    }
     const anchor = enrichStream.anchorRef.current + 1;
     enrichStream.begin();
     try {
       let sawTerminal = false;
       let terminalError = '';
       await maintenanceApi.enrich(
-        { limit: normalizeBatchLimit(enrichLimit) },
+        request.request,
         (event) => {
           enrichStream.accept(anchor, event);
           if (event.type === 'done' || event.type === 'result') {
@@ -672,8 +783,26 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
               <p className="deep__fact">
                 待翻译 {titlePending ?? '—'} 篇 <code className="manage__endpoint">GET /api/title-translations</code>
               </p>
-              <button type="button" className="btn btn--primary btn--sm" onClick={() => void runTitleTranslations()} disabled={titleStream.state.running}>
-                补齐 10 篇
+              <BatchLimitControl
+                id="title-translation-limit"
+                accessibleName="本次处理篇数：标题翻译"
+                draft={titleLimit}
+                disabled={titleStream.state.running}
+                onChange={setTitleLimit}
+              />
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={() => void runTitleTranslations()}
+                disabled={
+                  titleStream.state.running ||
+                  titlePending === 0 ||
+                  !parseBatchLimit(titleLimit.value, titleLimit.inputInvalid).valid
+                }
+              >
+                {titlePending === 0
+                  ? '无需补齐'
+                  : `补齐（${batchLimitLabel(titleLimit.value, titleLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={titleStream.state} />
             </div>
@@ -743,8 +872,26 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
               <p className="deep__fact">
                 为有 PDF 链接但缺本地文件的论文补齐 <code className="manage__endpoint">POST /api/download-pdfs</code>
               </p>
-              <button type="button" className="btn btn--primary btn--sm" onClick={() => void runDownload()} disabled={downloadStream.state.running}>
-                补下载（最多 20 篇）
+              <BatchLimitControl
+                id="pdf-download-limit"
+                accessibleName="本次处理篇数：PDF 补下载"
+                draft={downloadLimit}
+                disabled={downloadStream.state.running}
+                onChange={setDownloadLimit}
+              />
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={() => void runDownload()}
+                disabled={
+                  downloadStream.state.running ||
+                  downloadPendingIds.length === 0 ||
+                  !parseBatchLimit(downloadLimit.value, downloadLimit.inputInvalid).valid
+                }
+              >
+                {downloadPendingIds.length === 0
+                  ? '无需补下载'
+                  : `补下载（${batchLimitLabel(downloadLimit.value, downloadLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={downloadStream.state} />
             </div>
@@ -756,13 +903,28 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
                 <code className="manage__endpoint">GET /api/explain-batch</code>
               </p>
               <p className="manage__last-run">{formatLastRun(batchStatus?.lastRun)}</p>
+              <BatchLimitControl
+                id="explain-batch-limit"
+                accessibleName="本次处理篇数：批量讲解"
+                draft={explainLimit}
+                disabled={batchStream.state.running}
+                onChange={setExplainLimit}
+              />
               <button
                 type="button"
                 className="btn btn--primary btn--sm"
                 onClick={() => void runExplainBatch()}
-                disabled={batchStream.state.running}
+                disabled={
+                  batchStream.state.running ||
+                  batchStatus?.pending === 0 ||
+                  !parseBatchLimit(explainLimit.value, explainLimit.inputInvalid).valid
+                }
               >
-                {batchStream.state.running ? '讲解进行中…' : '批量讲解（limit=3）'}
+                {batchStream.state.running
+                  ? '讲解进行中…'
+                  : batchStatus?.pending === 0
+                    ? '无需讲解'
+                    : `批量讲解（${batchLimitLabel(explainLimit.value, explainLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={batchStream.state} />
             </div>
@@ -774,17 +936,28 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
                 {ocrBatchStatus?.noPdf ?? '—'} 篇 <code className="manage__endpoint">GET /api/ocr-md-batch</code>
               </p>
               <p className="manage__last-run">{formatLastRun(ocrBatchStatus?.lastRun)}</p>
+              <BatchLimitControl
+                id="ocr-batch-limit"
+                accessibleName="本次处理篇数：PDF 转 Markdown"
+                draft={ocrLimit}
+                disabled={ocrBatchStream.state.running}
+                onChange={setOcrLimit}
+              />
               <button
                 type="button"
                 className="btn btn--primary btn--sm"
                 onClick={() => void runOcrBatch()}
-                disabled={ocrBatchStream.state.running || (ocrBatchStatus ? ocrBatchStatus.pending === 0 : false)}
+                disabled={
+                  ocrBatchStream.state.running ||
+                  (ocrBatchStatus ? ocrBatchStatus.pending === 0 : false) ||
+                  !parseBatchLimit(ocrLimit.value, ocrLimit.inputInvalid).valid
+                }
               >
                 {ocrBatchStream.state.running
                   ? '转换进行中…'
                   : ocrBatchStatus && ocrBatchStatus.pending === 0
                     ? '无需转换（已全部有 OCR 或无 PDF）'
-                    : '批量转换（limit=3）'}
+                    : `批量转换（${batchLimitLabel(ocrLimit.value, ocrLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={ocrBatchStream.state} />
             </div>
@@ -836,33 +1009,28 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
                 {enrichStatus?.withAuthors ?? '—'} 篇 · 待补作者 {enrichStatus?.missingAuthors ?? '—'} 篇{' '}
                 <code className="manage__endpoint">POST /api/enrich</code>
               </p>
-              <label className="manage__limit-control">
-                <span>本次处理篇数</span>
-                <input
-                  className="input"
-                  type="number"
-                  min="0"
-                  step="1"
-                  inputMode="numeric"
-                  aria-label="元数据补全篇数"
-                  value={enrichLimit}
-                  placeholder="10"
-                  disabled={enrichStream.state.running}
-                  onChange={(event) => updateBatchLimit(event.target.value, setEnrichLimit)}
-                />
-                <small>留空或 0 = 全部</small>
-              </label>
+              <BatchLimitControl
+                id="enrich-limit"
+                accessibleName="本次处理篇数：元数据补全"
+                draft={enrichLimit}
+                disabled={enrichStream.state.running}
+                onChange={setEnrichLimit}
+              />
               <button
                 type="button"
                 className="btn btn--primary btn--sm"
                 onClick={() => void runEnrich()}
-                disabled={enrichStream.state.running || (enrichStatus ? enrichStatus.pending === 0 : false)}
+                disabled={
+                  enrichStream.state.running ||
+                  (enrichStatus ? enrichStatus.pending === 0 : false) ||
+                  !parseBatchLimit(enrichLimit.value, enrichLimit.inputInvalid).valid
+                }
               >
                 {enrichStream.state.running
                   ? '补全进行中…'
                   : enrichStatus && enrichStatus.pending === 0
                     ? '无需补全'
-                    : `补全（${batchLimitLabel(enrichLimit)}）`}
+                    : `补全（${batchLimitLabel(enrichLimit.value, enrichLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={enrichStream.state} />
             </div>

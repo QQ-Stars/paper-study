@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:batch-limits": "node --experimental-strip-types --test test/batch-limits.test.mjs"
   },
   "dependencies": {
     "katex": "^0.16.47",
