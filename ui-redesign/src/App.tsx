@@ -10,6 +10,7 @@ import { InsightsPage } from './components/InsightsPage';
 import { JobsPage } from './components/JobsPage';
 import { LibraryPage } from './components/LibraryPage';
 import { ManagePage } from './components/ManagePage';
+import { McpPage } from './components/McpPage';
 import { OverviewPage } from './components/OverviewPage';
 import { ReaderPage } from './components/ReaderPage';
 import { ReviewsPage } from './components/ReviewsPage';
@@ -183,6 +184,7 @@ export default function App() {
           {page === 'acquire' && <AcquirePage papers={papersReady} {...shared} />}
           {page === 'jobs' && <JobsPage notify={notify} />}
           {page === 'insights' && <InsightsPage papers={papersReady} {...shared} />}
+          {page === 'mcp' && <McpPage />}
           {page === 'settings' && <SettingsPage notify={notify} />}
           {page === 'reader' && (
             <ReaderPage

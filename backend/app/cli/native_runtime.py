@@ -123,6 +123,8 @@ def run(
         native_runtime_spec=_path(options.native_runtime_spec),
         build_identity_manifest=_path(options.build_identity_manifest),
         state_directory=_path(options.state_directory),
+        require_frozen_node_executable=options.command
+        not in {"start", "status", "stop"},
     )
     if options.command == "export-rollback-map":
         rollback_map = operations.frozen_node_rollback_map_from_active_owner(

@@ -19,15 +19,14 @@ export function InsightsPage({ papers, notify, reloadPapers }: InsightsPageProps
   const recommendStream = useStream();
   const ingestStream = useStream();
 
-  const loadGraph = useCallback(() => {
-    acquireApi
-      .citeGraph()
-      .then(setGraph)
-      .catch(() => setGraph(null));
+  const loadGraph = useCallback(async () => {
+    const nextGraph = await acquireApi.citeGraph();
+    setGraph(nextGraph);
+    return nextGraph;
   }, []);
 
   useEffect(() => {
-    loadGraph();
+    void loadGraph().catch(() => setGraph(null));
   }, [loadGraph]);
 
   const topicBars = useMemo(() => {
@@ -62,12 +61,29 @@ export function InsightsPage({ papers, notify, reloadPapers }: InsightsPageProps
   const buildGraph = async () => {
     const anchor = buildStream.anchorRef.current + 1;
     buildStream.begin();
+    let terminal: StreamEvent | undefined;
     try {
-      await acquireApi.buildCiteGraph((event: StreamEvent) => buildStream.accept(anchor, event));
-      loadGraph();
-      notify('引用图谱已重建（GET /api/citegraph 已刷新）');
+      await acquireApi.buildCiteGraph((event: StreamEvent) => {
+        buildStream.accept(anchor, event);
+        if (event.type === 'done' || event.type === 'result') terminal = event;
+      });
+      if (!terminal) throw new Error('图谱重建未返回完成状态');
+      if (terminal.ok === false) {
+        throw new Error(String(terminal.error || '引用图谱重建失败'));
+      }
+      const nextGraph = await loadGraph();
+      const edgeCount = nextGraph.edgeCount ?? nextGraph.links.length;
+      const failed = typeof terminal.failed === 'number' ? terminal.failed : 0;
+      notify(
+        edgeCount === 0
+          ? `图谱已重建：${nextGraph.nodes.length} 个节点，未发现库内引用边。`
+          : `图谱已重建：${nextGraph.nodes.length} 个节点 / ${edgeCount} 条引用边${
+              failed > 0 ? `，${failed} 篇未匹配` : ''
+            }。`,
+      );
     } catch (error) {
       buildStream.fail(anchor, error);
+      notify(`图谱重建失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -107,6 +123,7 @@ export function InsightsPage({ papers, notify, reloadPapers }: InsightsPageProps
 
   const maxTopic = Math.max(1, ...topicBars.map(([, count]) => count));
   const maxYear = Math.max(1, ...yearBars.map(([, count]) => count));
+  const graphEdgeCount = graph ? (graph.edgeCount ?? graph.links.length) : 0;
 
   return (
     <div className="page page-enter insights">
@@ -182,29 +199,35 @@ export function InsightsPage({ papers, notify, reloadPapers }: InsightsPageProps
               引用图谱枢纽
             </h3>
             <button type="button" className="btn btn--sm" onClick={() => void buildGraph()} disabled={buildStream.state.running}>
-              重建图谱
+              {buildStream.state.running ? '重建中…' : '重建图谱'}
             </button>
           </header>
           <StreamConsole state={buildStream.state} />
           {graph ? (
             <>
               <p className="deep__fact">
-                图谱含 {graph.nodes?.length ?? 0} 个节点 / {graph.edges?.length ?? 0} 条引用边（GET /api/citegraph）。
+                图谱含 {graph.nodes.length} 个节点 / {graphEdgeCount} 条引用边（GET /api/citegraph）。
               </p>
-              <ol className="insights__cited">
-                {hubNodes.map((node) => (
-                  <li key={node.id}>
-                    <span className="insights__cited-rank">{node.indeg + node.outdeg}</span>
-                    <span className="insights__cited-copy">
-                      <strong>{node.title}</strong>
-                      <small>
-                        {node.venue} {node.year} · 入度 {node.indeg} / 出度 {node.outdeg}
-                      </small>
-                    </span>
-                    <span className="badge badge--venue">{node.type}</span>
-                  </li>
-                ))}
-              </ol>
+              {graphEdgeCount === 0 ? (
+                <p className="artifacts__empty">
+                  当前未发现馆藏论文之间的引用关系。可重建图谱重新检查元数据匹配，无引用边本身不是错误。
+                </p>
+              ) : (
+                <ol className="insights__cited">
+                  {hubNodes.map((node) => (
+                    <li key={node.id}>
+                      <span className="insights__cited-rank">{node.indeg + node.outdeg}</span>
+                      <span className="insights__cited-copy">
+                        <strong>{node.title}</strong>
+                        <small>
+                          {node.venue} {node.year} · 入度 {node.indeg} / 出度 {node.outdeg}
+                        </small>
+                      </span>
+                      <span className="badge badge--venue">{node.type}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </>
           ) : (
             <p className="artifacts__empty">图谱数据加载中或为空，可点击「重建图谱」。</p>

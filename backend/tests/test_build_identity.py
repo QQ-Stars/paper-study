@@ -27,6 +27,7 @@ class BuildIdentityTests(unittest.TestCase):
             BuildIdentityError,
             freeze_build_identity,
             verify_build_identity,
+            verify_native_runtime_spec,
         )
 
         with tempfile.TemporaryDirectory(prefix="study-app-p6-native-identity-") as raw:
@@ -192,6 +193,35 @@ class BuildIdentityTests(unittest.TestCase):
             )
             self.assertTrue(cli_result["ok"])
             self.assertEqual("native-windows", cli_result["deploymentKind"])
+
+            node_executable.unlink()
+            self.assertEqual(
+                frozen,
+                verify_native_runtime_spec(
+                    build_identity_manifest=frozen.manifest_path,
+                    native_runtime_spec=runtime_spec,
+                    require_frozen_node_executable=False,
+                ),
+            )
+            with self.assertRaises(BuildIdentityError) as unavailable_rollback:
+                verify_native_runtime_spec(
+                    build_identity_manifest=frozen.manifest_path,
+                    native_runtime_spec=runtime_spec,
+                )
+            self.assertEqual(
+                "BUILD_NATIVE_RUNTIME_INVALID",
+                unavailable_rollback.exception.code,
+            )
+            write_runtime_spec(api_port="18081")
+            with self.assertRaises(BuildIdentityError) as relaxed_drift:
+                verify_native_runtime_spec(
+                    build_identity_manifest=frozen.manifest_path,
+                    native_runtime_spec=runtime_spec,
+                    require_frozen_node_executable=False,
+                )
+            self.assertEqual("BUILD_IDENTITY_DRIFT", relaxed_drift.exception.code)
+            write_runtime_spec()
+            node_executable.write_bytes(b"node-runtime-v1")
 
             write_runtime_spec(api_port="18081")
             with self.assertRaises(BuildIdentityError) as environment_drift:

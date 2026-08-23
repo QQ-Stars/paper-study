@@ -74,6 +74,18 @@ class ProductionRollbackTests(unittest.TestCase):
             self.assertEqual("native-windows", validated["deploymentKind"])
             self.assertNotIn("imageDigest", validated)
 
+            node.unlink()
+            self.assertEqual(
+                validated,
+                validate_frozen_node_rollback_map(
+                    native,
+                    require_frozen_node_executable=False,
+                ),
+            )
+            with self.assertRaises(ProductionRollbackError) as unavailable:
+                validate_frozen_node_rollback_map(native)
+            self.assertEqual("ROLLBACK_MAP_INVALID", unavailable.exception.code)
+
             node.write_bytes(b"node-runtime-v2")
             with self.assertRaises(ProductionRollbackError) as drift:
                 validate_frozen_node_rollback_map(native)

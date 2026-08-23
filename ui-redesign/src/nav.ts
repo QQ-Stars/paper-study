@@ -6,6 +6,7 @@ import {
   CycleIcon,
   GearIcon,
   ListChecksIcon,
+  PlugIcon,
   SunriseIcon,
   TrendIcon,
   WrenchIcon,
@@ -19,6 +20,7 @@ export type PageId =
   | 'acquire'
   | 'jobs'
   | 'insights'
+  | 'mcp'
   | 'settings'
   | 'reader';
 
@@ -37,5 +39,6 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'acquire', label: '采集', hint: '多源检索与导入', Icon: CompassIcon },
   { id: 'jobs', label: '任务', hint: '后台任务与定时调度', Icon: ListChecksIcon },
   { id: 'insights', label: '洞察', hint: '引用图谱与推荐', Icon: TrendIcon },
+  { id: 'mcp', label: 'MCP 工具', hint: '论文库 MCP 服务与客户端接入', Icon: PlugIcon },
   { id: 'settings', label: '设置', hint: '模型凭据与目录', Icon: GearIcon },
 ];

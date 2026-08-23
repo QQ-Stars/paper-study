@@ -457,13 +457,20 @@ def validate_rollback_tail(
     return actual
 
 
-def validate_frozen_node_rollback_map(value: object) -> dict[str, object]:
+def validate_frozen_node_rollback_map(
+    value: object,
+    *,
+    require_frozen_node_executable: bool = True,
+) -> dict[str, object]:
     if not isinstance(value, dict):
         raise _invalid_map("The frozen Node rollback map fields are invalid.")
     if value.get("deploymentKind") == "native-windows":
         if set(value) != _NATIVE_MAP_FIELDS:
             raise _invalid_map("The native frozen Node rollback map fields are invalid.")
-        return _validate_native_rollback_map(value)
+        return _validate_native_rollback_map(
+            value,
+            require_executable=require_frozen_node_executable,
+        )
     if set(value) != _CONTAINER_MAP_FIELDS:
         raise _invalid_map("The frozen Node rollback map fields are invalid.")
     digest = value.get("imageDigest")
@@ -503,7 +510,11 @@ def validate_frozen_node_rollback_map(value: object) -> dict[str, object]:
     }
 
 
-def _validate_native_rollback_map(value: Mapping[str, object]) -> dict[str, object]:
+def _validate_native_rollback_map(
+    value: Mapping[str, object],
+    *,
+    require_executable: bool,
+) -> dict[str, object]:
     paths: dict[str, Path] = {}
     for field in ("executablePath", "entrypointPath", "cwd", "databasePath"):
         raw = value.get(field)
@@ -511,13 +522,18 @@ def _validate_native_rollback_map(value: Mapping[str, object]) -> dict[str, obje
             raise _invalid_map(f"The native rollback {field} must be an absolute path.")
         path = Path(raw)
         try:
-            resolved = path.resolve(strict=True)
+            resolved = path.resolve(
+                strict=require_executable or field != "executablePath"
+            )
         except OSError as error:
             raise _invalid_map(f"The native rollback {field} does not exist.") from error
         if resolved != path:
             raise _invalid_map(f"The native rollback {field} must be canonical.")
         paths[field] = resolved
-    if not paths["executablePath"].is_file() or not paths["entrypointPath"].is_file():
+    if (
+        (require_executable and not paths["executablePath"].is_file())
+        or not paths["entrypointPath"].is_file()
+    ):
         raise _invalid_map("The native rollback executables must be files.")
     if not paths["cwd"].is_dir() or not paths["databasePath"].is_file():
         raise _invalid_map("The native rollback cwd or database path is invalid.")
@@ -526,12 +542,14 @@ def _validate_native_rollback_map(value: Mapping[str, object]) -> dict[str, obje
         ("entrypointPath", "entrypointSha256"),
     ):
         expected = value.get(sha_field)
+        if not isinstance(expected, str) or re.fullmatch(
+            r"[0-9a-f]{64}", expected
+        ) is None:
+            raise _invalid_map(f"The native rollback {sha_field} is invalid or stale.")
+        if path_field == "executablePath" and not require_executable:
+            continue
         actual = hashlib.sha256(paths[path_field].read_bytes()).hexdigest()
-        if (
-            not isinstance(expected, str)
-            or re.fullmatch(r"[0-9a-f]{64}", expected) is None
-            or expected != actual
-        ):
+        if expected != actual:
             raise _invalid_map(f"The native rollback {sha_field} is invalid or stale.")
     if value.get("host") not in {"127.0.0.1", "::1"}:
         raise _invalid_map("The native frozen Node host must be loopback.")

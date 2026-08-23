@@ -8,6 +8,7 @@ export interface StreamState {
   running: boolean;
   lines: string[];
   summary: string;
+  progress: string;
 }
 
 export function useStream() {
@@ -15,17 +16,18 @@ export function useStream() {
     running: false,
     lines: [],
     summary: '',
+    progress: '',
   });
   const anchorRef = useRef(0);
 
   const reset = () => {
     anchorRef.current += 1;
-    setState({ running: false, lines: [], summary: '' });
+    setState({ running: false, lines: [], summary: '', progress: '' });
   };
 
   const begin = () => {
     anchorRef.current += 1;
-    setState({ running: true, lines: [], summary: '' });
+    setState({ running: true, lines: [], summary: '', progress: '' });
   };
 
   const accept = (anchor: number, event: StreamEvent) => {
@@ -36,7 +38,11 @@ export function useStream() {
         if (event.ok === false) return `失败：${String(event.error ?? '未知错误')}`;
         const added = typeof event.added === 'number' ? `新增 ${event.added} 篇` : '';
         const total = typeof event.total === 'number' ? `共 ${event.total} 项` : '';
-        return [added, total].filter(Boolean).join(' · ') || '完成';
+        const graph =
+          typeof event.edges === 'number' && typeof event.nodes === 'number'
+            ? `${event.edges} 条引用边 / ${event.nodes} 个节点`
+            : '';
+        return [added, total, graph].filter(Boolean).join(' · ') || '完成';
       }
       const message =
         (typeof event.message === 'string' && event.message) ||
@@ -50,13 +56,24 @@ export function useStream() {
           : '';
       return message ? `${event.type}: ${message}${count}` : JSON.stringify(event).slice(0, 200);
     };
-    /* 降噚：过滤 STAGE::/PROG::/TOTAL:: 类内部进度标记，只保留可读输出 */
+    /* 降噪：STAGE::/TOTAL:: 内部标记不入日志；PROG::i::n 聚合为头部实时进度（不刷屏） */
     const rawLine = typeof event.line === 'string' ? event.line : '';
-    const isNoise =
-      event.type === 'progress' && /^(STAGE|PROG|TOTAL)::/.test(rawLine) && !rawLine.startsWith('DONE::');
+    const progMatch = rawLine.match(/^PROG::(\d+)::(\d+)/);
+    if (event.type === 'progress' && progMatch) {
+      setState((prev) => ({ ...prev, progress: `${progMatch[1]} / ${progMatch[2]}` }));
+      return;
+    }
+    const isNoise = event.type === 'progress' && /^(STAGE|TOTAL|DONE)::/.test(rawLine);
+    /* REFERR::id::reason 人性化：裸标记转为可读的跳过提示 */
+    let line = describe();
+    if (event.type === 'progress' && rawLine.startsWith('REFERR::')) {
+      const parts = rawLine.split('::');
+      line = `跳过参考文献缺失：${String(parts[1] ?? '').slice(0, 32)}…（${parts[2] ?? 'not found'}）`;
+    }
     setState((prev) => ({
       running: !isTerminal,
-      lines: isNoise ? prev.lines : [...prev.lines.slice(-200), describe()],
+      progress: isTerminal ? '' : prev.progress,
+      lines: isNoise ? prev.lines : [...prev.lines.slice(-200), line],
       summary: isTerminal ? describe() : prev.summary,
     }));
   };
@@ -65,6 +82,7 @@ export function useStream() {
     if (anchor !== anchorRef.current) return;
     setState((prev) => ({
       running: false,
+      progress: '',
       lines: [...prev.lines, `错误：${error instanceof Error ? error.message : String(error)}`],
       summary: '',
     }));
@@ -85,7 +103,9 @@ export function StreamConsole({ state, placeholder }: { state: StreamState; plac
     <div className="stream-console" role="log" aria-live="polite">
       <div className="stream-console__head">
         <span className={`stream-console__dot${state.running ? ' stream-console__dot--live' : ''}`} />
-        {state.running ? '任务执行中…' : state.summary || '任务结束'}
+        {state.running
+          ? `任务执行中…${state.progress ? `（进度 ${state.progress}）` : ''}`
+          : state.summary || '任务结束'}
       </div>
       <ol className="stream-console__lines">
         {(state.lines.length > 0 ? state.lines : [placeholder ?? '等待输出…']).map((line, index) => (

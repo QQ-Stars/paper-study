@@ -94,6 +94,11 @@ def main():
 
     sub.add_parser("citegraph", help="构建库内引用关系边(抓 S2 参考文献)，写入 cite_edges")
 
+    sub.add_parser("dup-scan", help="只读扫描库内疑似重复论文，候选对 JSON→stdout")
+
+    enr = sub.add_parser("enrich", help="用 Semantic Scholar 补齐年份、会议与作者元数据")
+    enr.add_argument("--limit", type=int, default=0, help="本次最多补全多少篇，0=全部")
+
     sub.add_parser("norm-venues", help="用大模型把库内会议/期刊名规整成标准简称(落库)")
 
     sub.add_parser("ping", help="测试大模型连通性")
@@ -192,6 +197,13 @@ def main():
     elif args.cmd == "citegraph":
         from . import citegraph
         citegraph.build_edges()
+    elif args.cmd == "dup-scan":
+        from . import dedup
+        sys.stdout.write(json.dumps(dedup.scan_duplicates(), ensure_ascii=False))
+        sys.stdout.flush()
+    elif args.cmd == "enrich":
+        from . import enrich
+        enrich.run(limit=args.limit)
     elif args.cmd == "norm-venues":
         from . import venuefix
         venuefix.run()

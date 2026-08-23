@@ -144,9 +144,20 @@ def explain_batch(limit: int = 0, deep: bool = True) -> dict:
         except Exception as e:
             failed.append(r["id"])
             _p(f"ITEM::{i}::{total}::fail::{r['id']}::{str(e)[:120]}")
-    con.close()
     _p(f"BATCH::finish::done={done}::fail={len(failed)}::skip={len(skipped)}")
     out = {"ok": True, "total": total, "done": done, "failed": failed, "skipped_no_pdf": skipped}
+    try:
+        db.record_batch_run(
+            con,
+            "explain",
+            total=total,
+            done=done,
+            failed=len(failed),
+            skipped=len(skipped),
+            detail=out,
+        )
+    finally:
+        con.close()
     sys.stdout.write(json.dumps(out, ensure_ascii=False))
     sys.stdout.flush()
     return out

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 
 import { artifactApi } from '../api/client';
 import { CloseIcon, SparkIcon } from './Icons';
@@ -15,13 +22,22 @@ type TransPhase =
   | { kind: 'ok'; text: string; result: string }
   | { kind: 'error'; text: string; error: string };
 
+interface SelectionTranslateProps {
+  children: ReactNode;
+  onSuccess?: (source: string, translated: string) => void;
+}
+
 /* 划词翻译：监听容器内文本选择，浮层触发后端 POST /api/translate-text */
 
-export function SelectionTranslate({ children }: { children: ReactNode }) {
+export function SelectionTranslate({ children, onSuccess }: SelectionTranslateProps) {
   const [selection, setSelection] = useState<SelectionRect | null>(null);
   const [phase, setPhase] = useState<TransPhase>({ kind: 'idle' });
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  const handleMouseUp = useCallback(() => {
+  const captureSelection = useCallback(() => {
     const sel = window.getSelection();
     const text = (sel?.toString() ?? '').trim();
     if (!sel || sel.isCollapsed || !text || text.length < 2) {
@@ -29,6 +45,8 @@ export function SelectionTranslate({ children }: { children: ReactNode }) {
     }
     const range = sel.getRangeAt(0);
     const rect = range.getBoundingClientRect();
+    const active = document.activeElement;
+    previousFocusRef.current = active instanceof HTMLElement ? active : null;
     setSelection({
       text: text.slice(0, 6000),
       x: Math.min(rect.left + rect.width / 2, window.innerWidth - 220),
@@ -40,7 +58,22 @@ export function SelectionTranslate({ children }: { children: ReactNode }) {
     setSelection(null);
     setPhase({ kind: 'idle' });
     window.getSelection()?.removeAllRanges();
+    window.requestAnimationFrame(() => {
+      const previous = previousFocusRef.current;
+      if (previous?.isConnected && previous !== document.body) previous.focus();
+      else rootRef.current?.focus();
+    });
   }, []);
+
+  useEffect(() => {
+    if (selection) triggerRef.current?.focus();
+  }, [selection]);
+
+  const panelVisible = phase.kind !== 'idle';
+
+  useEffect(() => {
+    if (panelVisible) dialogRef.current?.focus();
+  }, [panelVisible]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -52,6 +85,7 @@ export function SelectionTranslate({ children }: { children: ReactNode }) {
 
   const translate = async (text: string) => {
     setSelection(null);
+    window.getSelection()?.removeAllRanges();
     setPhase({ kind: 'loading', text });
     try {
       const result = await artifactApi.translateText(text);
@@ -59,6 +93,11 @@ export function SelectionTranslate({ children }: { children: ReactNode }) {
       const translated = (result.text ?? result.translation ?? '').trim();
       if (result.ok && translated) {
         setPhase({ kind: 'ok', text, result: translated });
+        try {
+          onSuccess?.(text, translated);
+        } catch {
+          /* 历史持久化失败不应把已成功的翻译误报为失败。 */
+        }
       } else {
         setPhase({ kind: 'error', text, error: result.error || '后端未返回译文' });
       }
@@ -71,14 +110,36 @@ export function SelectionTranslate({ children }: { children: ReactNode }) {
     }
   };
 
-  const panelVisible = phase.kind !== 'idle';
+  const trapDialogFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    if (focusable.length === 0) {
+      event.preventDefault();
+      event.currentTarget.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
-    <div onMouseUp={handleMouseUp}>
+    <div ref={rootRef} tabIndex={-1} onMouseUp={captureSelection} onKeyUp={captureSelection}>
       {children}
 
       {selection && (
         <button
+          ref={triggerRef}
           type="button"
           className="seltrans-trigger"
           style={{ left: selection.x, top: selection.y }}
@@ -92,10 +153,13 @@ export function SelectionTranslate({ children }: { children: ReactNode }) {
       {panelVisible && (
         <div className="seltrans-overlay" role="presentation" onClick={close}>
           <div
+            ref={dialogRef}
             className="seltrans-panel"
             role="dialog"
-            aria-modal="false"
+            aria-modal="true"
             aria-label="划词翻译结果"
+            tabIndex={-1}
+            onKeyDown={trapDialogFocus}
             onClick={(event) => event.stopPropagation()}
           >
             <header className="seltrans-panel__head">

@@ -727,6 +727,68 @@ class RuntimeOwnershipTests(unittest.TestCase):
             finally:
                 first.release()
 
+    def test_expired_role_lease_distinguishes_live_owner_from_reused_pid(self) -> None:
+        from backend.app.providers.runtime_lease import RoleLeaseError, RoleScopedRuntimeLease
+
+        lease_started = datetime(2026, 8, 20, 0, 0, tzinfo=timezone.utc)
+        retry_at = datetime(2026, 8, 23, 0, 0, tzinfo=timezone.utc)
+        with p4_identity_fixture() as fixture:
+            identity_type, _owner_type, _process_type, _snapshot_type = _api()
+            identity_path = _candidate_identity(fixture, identity_type)
+            lease_root = fixture.root / "leases"
+            first = RoleScopedRuntimeLease(
+                lease_root,
+                clock=lambda: lease_started,
+                pid_probe=lambda _pid: True,
+                process_started_at_probe=lambda _pid: lease_started,
+            ).acquire(
+                identity_path,
+                environment="candidate",
+                runtime_namespace="p4-pid-reuse",
+                role="scheduler",
+                owner_id="scheduler-original",
+                pid=101,
+                lease_seconds=30,
+            )
+            try:
+                same_process = RoleScopedRuntimeLease(
+                    lease_root,
+                    clock=lambda: retry_at,
+                    pid_probe=lambda _pid: True,
+                    process_started_at_probe=lambda _pid: lease_started,
+                )
+                with self.assertRaisesRegex(RoleLeaseError, "SCHEDULER_ALREADY_OWNED"):
+                    same_process.acquire(
+                        identity_path,
+                        environment="candidate",
+                        runtime_namespace="p4-pid-reuse",
+                        role="scheduler",
+                        owner_id="scheduler-blocked",
+                        pid=102,
+                    )
+
+                reused_pid = RoleScopedRuntimeLease(
+                    lease_root,
+                    clock=lambda: retry_at,
+                    pid_probe=lambda _pid: True,
+                    process_started_at_probe=lambda _pid: retry_at,
+                )
+                replacement = reused_pid.acquire(
+                    identity_path,
+                    environment="candidate",
+                    runtime_namespace="p4-pid-reuse",
+                    role="scheduler",
+                    owner_id="scheduler-replacement",
+                    pid=103,
+                )
+                try:
+                    document = json.loads(replacement.canonical_bytes.decode("utf-8"))
+                    self.assertEqual("scheduler-replacement", document["ownerId"])
+                finally:
+                    replacement.release()
+            finally:
+                first.release()
+
     def test_candidate_role_lease_rejects_admission_while_drain_fence_exists(
         self,
     ) -> None:

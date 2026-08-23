@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import errno
 import hashlib
 import json
@@ -66,10 +66,14 @@ class RoleScopedRuntimeLease:
         *,
         clock: callable | None = None,
         pid_probe: callable | None = None,
+        process_started_at_probe: callable | None = None,
     ) -> None:
         self._root = Path(root).expanduser().resolve(strict=False)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._pid_probe = pid_probe or _pid_is_alive
+        self._process_started_at_probe = (
+            process_started_at_probe or _process_started_at
+        )
 
     def acquire(
         self,
@@ -186,6 +190,7 @@ class RoleScopedRuntimeLease:
                     lease_path,
                     now=now,
                     pid_probe=self._pid_probe,
+                    process_started_at_probe=self._process_started_at_probe,
                 ):
                     conflict = _role_conflict_code(role)
                     raise RoleLeaseError(conflict, "An active owner already holds the role lease.") from error
@@ -454,18 +459,39 @@ def _reclaim_stale_lease(
     *,
     now: str,
     pid_probe: callable,
+    process_started_at_probe: callable,
 ) -> bool:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, ValueError):
         return False
     try:
-        expires = datetime.fromisoformat(str(document["expiresAt"]).replace("Z", "+00:00"))
+        started = datetime.fromisoformat(
+            str(document["startedAt"]).replace("Z", "+00:00")
+        )
+        expires = datetime.fromisoformat(
+            str(document["expiresAt"]).replace("Z", "+00:00")
+        )
         pid = int(document["pid"])
         current = path.read_bytes()
     except (KeyError, TypeError, ValueError, OSError):
         return False
-    if expires > datetime.fromisoformat(now.replace("Z", "+00:00")) or pid_probe(pid):
+    pid_still_owns_lease = False
+    if pid_probe(pid):
+        try:
+            process_started_at = process_started_at_probe(pid)
+        except Exception:
+            process_started_at = None
+        pid_still_owns_lease = (
+            not isinstance(process_started_at, datetime)
+            or process_started_at.tzinfo is None
+            or process_started_at.astimezone(timezone.utc)
+            <= started.astimezone(timezone.utc) + timedelta(seconds=1)
+        )
+    if (
+        expires > datetime.fromisoformat(now.replace("Z", "+00:00"))
+        or pid_still_owns_lease
+    ):
         return False
     try:
         if path.read_bytes() != current:
@@ -479,7 +505,6 @@ def _reclaim_stale_lease(
 def _lease_time(value: datetime, *, seconds: int = 0) -> str:
     if value.tzinfo is None:
         raise RoleLeaseError("ROLE_LEASE_CLOCK_INVALID", "Lease clock must be timezone-aware.")
-    from datetime import timedelta
 
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace(
         "+00:00", "Z"
@@ -520,6 +545,54 @@ def _pid_is_alive(pid: int) -> bool:
         if not get_exit_code(process, ctypes.byref(exit_code)):
             return True
         return exit_code.value == 259
+    finally:
+        close_handle(process)
+
+
+def _process_started_at(pid: int) -> datetime | None:
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    get_process_times = kernel32.GetProcessTimes
+    get_process_times.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    )
+    get_process_times.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    process = open_process(0x1000, False, pid)
+    if not process:
+        return None
+    try:
+        created = wintypes.FILETIME()
+        exited = wintypes.FILETIME()
+        kernel = wintypes.FILETIME()
+        user = wintypes.FILETIME()
+        if not get_process_times(
+            process,
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
+            return None
+        ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime
+        if ticks <= 0:
+            return None
+        return datetime(1601, 1, 1, tzinfo=timezone.utc) + timedelta(
+            microseconds=ticks // 10
+        )
     finally:
         close_handle(process)
 

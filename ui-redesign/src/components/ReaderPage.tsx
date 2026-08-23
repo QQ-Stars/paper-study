@@ -29,6 +29,72 @@ const TABS: Array<{ id: ReaderTab; label: string }> = [
 
 const STATUS_CYCLE: StudyStatus[] = ['未开始', '学习中', '已理解'];
 
+type CiteBrief = {
+  id: string;
+  title: string;
+  titleZh: string;
+  year: string;
+  venue: string;
+  tldr: string;
+};
+
+type TranslateHistoryEntry = {
+  t: string;
+  src: string;
+  dst: string;
+};
+
+const TRANSLATE_HISTORY_PREFIX = 'paper-study:translate-history:';
+
+function readTranslateHistory(paperId: string): TranslateHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(TRANSLATE_HISTORY_PREFIX + paperId);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item): item is TranslateHistoryEntry =>
+          !!item &&
+          typeof item === 'object' &&
+          typeof (item as TranslateHistoryEntry).t === 'string' &&
+          typeof (item as TranslateHistoryEntry).src === 'string' &&
+          typeof (item as TranslateHistoryEntry).dst === 'string',
+      )
+      .slice(-50);
+  } catch {
+    return [];
+  }
+}
+
+function translateHistoryTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+/* 按标题行（# ～ ######）把 Markdown 切块，用于 OCR×翻译双语对照的尽力对齐 */
+function splitSections(md: string): Array<{ heading: string; body: string }> {
+  const sections: Array<{ heading: string; body: string }> = [];
+  let heading = '';
+  let buffer: string[] = [];
+  const flush = () => {
+    if (heading || buffer.some((line) => line.trim())) {
+      sections.push({ heading, body: buffer.join('\n') });
+    }
+    heading = '';
+    buffer = [];
+  };
+  for (const line of md.split(/\r?\n/)) {
+    if (/^#{1,6}\s/.test(line)) {
+      flush();
+      heading = line;
+    } else {
+      buffer.push(line);
+    }
+  }
+  flush();
+  return sections;
+}
+
 export function ReaderPage({
   papers,
   paperId,
@@ -58,6 +124,20 @@ export function ReaderPage({
     saved: boolean;
     savedChecked: boolean;
   }>({ phase: 'idle', progress: '', markdown: '', error: '', saved: false, savedChecked: false });
+  const [citeCtx, setCiteCtx] = useState<{ cites: CiteBrief[]; citedBy: CiteBrief[] }>({
+    cites: [],
+    citedBy: [],
+  });
+  /* 翻译 tab 的 OCR×中文双语对照：按需拉取已落库 OCR Markdown，按标题切块尽力配对 */
+  const [pair, setPair] = useState<{ on: boolean; loading: boolean; ocrText: string; checked: boolean }>({
+    on: false,
+    loading: false,
+    ocrText: '',
+    checked: false,
+  });
+  const [authors, setAuthors] = useState<string[]>([]);
+  const [translateHistory, setTranslateHistory] = useState<TranslateHistoryEntry[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const paper = papers.find((item) => item.id === paperId) ?? null;
 
@@ -108,11 +188,40 @@ export function ReaderPage({
     setPdfUrl('');
     setPdfInfo(null);
     setOcr({ phase: 'idle', progress: '', markdown: '', error: '', saved: false, savedChecked: false });
+    setCiteCtx({ cites: [], citedBy: [] });
+    setPair({ on: false, loading: false, ocrText: '', checked: false });
+    setAuthors([]);
+    setHistoryOpen(false);
     if (!paper) return;
+    let cancelled = false;
+    setTranslateHistory(readTranslateHistory(paper.id));
     libraryApi
       .pdfStatus(paper.id)
-      .then((status) => setPdfInfo({ hasPdf: status.hasPdf, canDownload: status.canDownload }))
-      .catch(() => setPdfInfo(null));
+      .then((status) => {
+        if (!cancelled) setPdfInfo({ hasPdf: status.hasPdf, canDownload: status.canDownload });
+      })
+      .catch(() => {
+        if (!cancelled) setPdfInfo(null);
+      });
+    libraryApi
+      .citeContext(paper.id)
+      .then((ctx) => {
+        if (!cancelled && ctx.ok) setCiteCtx({ cites: ctx.cites ?? [], citedBy: ctx.citedBy ?? [] });
+      })
+      .catch(() => {
+        if (!cancelled) setCiteCtx({ cites: [], citedBy: [] });
+      });
+    libraryApi
+      .paperAuthors(paper.id)
+      .then((result) => {
+        if (!cancelled) setAuthors(result.ok && Array.isArray(result.authors) ? result.authors : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAuthors([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [paper?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -246,27 +355,75 @@ export function ReaderPage({
           if (event.ok && md.trim()) {
             setOcr({ phase: 'done', progress: '', markdown: md, error: '', saved: true, savedChecked: true });
           } else {
+            const message = String(event.error ?? 'OCR 失败（请检查设置页 OCR 配置）');
             setOcr({
               phase: 'error',
               progress: '',
               markdown: '',
-              error: String(event.error ?? 'OCR 失败（请检查设置页 OCR 配置）'),
+              error: message,
               saved: false,
               savedChecked: true,
             });
+            notify(`OCR 失败：${message}`);
           }
         }
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       setOcr({
         phase: 'error',
         progress: '',
         markdown: '',
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
         saved: false,
         savedChecked: true,
       });
+      notify(`OCR 失败：${message}`);
     }
+  };
+
+  /* 双语对照开关：首次开启时拉取已落库 OCR Markdown；无则提示先去生成 */
+  const toggleBilingual = async () => {
+    if (pair.on) {
+      setPair((prev) => ({ ...prev, on: false }));
+      return;
+    }
+    if (!paper) return;
+    if (pair.checked && pair.ocrText) {
+      setPair((prev) => ({ ...prev, on: true }));
+      return;
+    }
+    setPair((prev) => ({ ...prev, on: true, loading: true }));
+    try {
+      const text = await artifactApi.getOcrMarkdown(paper.id);
+      if (text.trim()) {
+        setPair({ on: true, loading: false, ocrText: text, checked: true });
+      } else {
+        setPair({ on: false, loading: false, ocrText: '', checked: true });
+        notify('该论文尚无已落库的 OCR 全文，无法对照：请先在「OCR 全文」页签执行「PDF 转 Markdown」');
+      }
+    } catch (error) {
+      setPair({ on: false, loading: false, ocrText: '', checked: true });
+      notify(`OCR 全文读取失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const recordSelectionTranslation = (source: string, translated: string) => {
+    if (!paper) return;
+    const entry: TranslateHistoryEntry = {
+      t: new Date().toISOString(),
+      src: source,
+      dst: translated,
+    };
+    setTranslateHistory((current) => {
+      const next = [...current, entry].slice(-50);
+      try {
+        localStorage.setItem(TRANSLATE_HISTORY_PREFIX + paper.id, JSON.stringify(next));
+      } catch {
+        /* 本地存储不可用时仍保留当前会话历史。 */
+      }
+      return next;
+    });
   };
 
   if (!paper) {
@@ -404,9 +561,9 @@ export function ReaderPage({
         </header>
 
         <dl className="reader__meta">
-          <div>
+          <div className="reader__meta-authors">
             <dt>作者</dt>
-            <dd>后端未收录该字段</dd>
+            <dd>{authors.length > 0 ? authors.join('、') : '后端未收录该字段'}</dd>
           </div>
           <div>
             <dt>入库时间</dt>
@@ -453,7 +610,7 @@ export function ReaderPage({
           ))}
         </nav>
 
-        <SelectionTranslate>
+        <SelectionTranslate onSuccess={recordSelectionTranslation}>
           <div className="reader__content">
             {tab === 'overview' && (
               <>
@@ -472,6 +629,52 @@ export function ReaderPage({
                   </section>
                 ) : (
                   <p className="reader__empty">暂无核心贡献提炼。</p>
+                )}
+                {(citeCtx.cites.length > 0 || citeCtx.citedBy.length > 0) && (
+                  <section className="reader__block">
+                    <h2>库内引用上下文</h2>
+                    <p className="reader__tab-hint">
+                      来自库内引用图谱（cite_edges，「洞察」页可重建）；点击可直接跳转阅读。
+                    </p>
+                    {citeCtx.citedBy.length > 0 && (
+                      <div className="reader__citelist">
+                        <span className="eyebrow">被库内 {citeCtx.citedBy.length} 篇引用</span>
+                        {citeCtx.citedBy.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className="reader__cite"
+                            onClick={() => onSwitch(item.id)}
+                          >
+                            <strong>{item.titleZh || item.title}</strong>
+                            <span className="reader__cite-meta">
+                              {item.venue} {item.year}
+                            </span>
+                            {item.tldr && <span className="reader__cite-tldr">{item.tldr}…</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {citeCtx.cites.length > 0 && (
+                      <div className="reader__citelist">
+                        <span className="eyebrow">引用了库内 {citeCtx.cites.length} 篇</span>
+                        {citeCtx.cites.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className="reader__cite"
+                            onClick={() => onSwitch(item.id)}
+                          >
+                            <strong>{item.titleZh || item.title}</strong>
+                            <span className="reader__cite-meta">
+                              {item.venue} {item.year}
+                            </span>
+                            {item.tldr && <span className="reader__cite-tldr">{item.tldr}…</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
                 )}
                 <p className="reader__select-hint">提示：选中任意文字可触发「划词翻译」。</p>
               </>
@@ -518,15 +721,62 @@ export function ReaderPage({
                   <span className="reader__tab-hint">
                     启用「OCR 提取」后重新生成将优先使用 OCR Markdown 全文
                   </span>
-                  <button
-                    type="button"
-                    className="btn btn--sm"
-                    onClick={() => void regenerate('translation')}
-                    disabled={regen.kind !== null || content.loading}
-                  >
-                    {content.text ? '重新生成翻译' : '生成翻译'}
-                  </button>
+                  <div className="reader__tab-btns">
+                    <button
+                      type="button"
+                      className={`btn btn--sm${historyOpen ? ' btn--primary' : ''}`}
+                      aria-expanded={historyOpen}
+                      aria-controls="reader-translate-history"
+                      onClick={() => setHistoryOpen((open) => !open)}
+                    >
+                      划词历史（{translateHistory.length}）
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn--sm${pair.on ? ' btn--primary' : ''}`}
+                      onClick={() => void toggleBilingual()}
+                      disabled={pair.loading || content.loading || !content.text}
+                    >
+                      {pair.loading ? '加载 OCR 全文…' : pair.on ? '退出对照' : 'OCR 双语对照'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      onClick={() => void regenerate('translation')}
+                      disabled={regen.kind !== null || content.loading}
+                    >
+                      {content.text ? '重新生成翻译' : '生成翻译'}
+                    </button>
+                  </div>
                 </div>
+                {historyOpen && (
+                  <section
+                    className="reader__history"
+                    id="reader-translate-history"
+                    aria-label="划词翻译历史"
+                  >
+                    <header className="reader__history-head">
+                      <h3>划词翻译历史</h3>
+                      <span className="eyebrow">本机保存 · 最近 50 条</span>
+                    </header>
+                    {translateHistory.length > 0 ? (
+                      <ol className="reader__history-list">
+                        {[...translateHistory].reverse().map((item, index) => (
+                          <li key={`${item.t}-${index}`}>
+                            <time dateTime={item.t}>{translateHistoryTime(item.t)}</time>
+                            <blockquote>{item.src}</blockquote>
+                            <span className="reader__history-arrow" aria-hidden="true">
+                              →
+                            </span>
+                            <p>{item.dst}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="reader__empty">暂无记录。选中正文并完成一次「划词翻译」后会自动保存在本机。</p>
+                    )}
+                  </section>
+                )}
                 {regen.kind === 'translation' && (
                   <div className="ocr-panel ocr-panel--loading">
                     <span className="acquire__spinner" aria-hidden="true" />
@@ -537,6 +787,46 @@ export function ReaderPage({
                   <p className="reader__empty">正在加载翻译…</p>
                 ) : content.error ? (
                   <p className="reader__empty reader__empty--error">翻译加载失败：{content.error}</p>
+                ) : pair.on && pair.ocrText ? (
+                  (() => {
+                    const ocrSections = splitSections(pair.ocrText);
+                    const zhSections = splitSections(content.text);
+                    const rowCount = Math.max(ocrSections.length, zhSections.length);
+                    return (
+                      <div className="reader__bilingual">
+                        <header className="reader__bilingual-head">
+                          <span className="eyebrow">OCR 原文</span>
+                          <span className="eyebrow">中文翻译</span>
+                        </header>
+                        <p className="reader__tab-hint">
+                          按标题顺序尽力配对（{ocrSections.length} / {zhSections.length} 段）；
+                          两侧均可选中文字划词翻译。
+                        </p>
+                        {Array.from({ length: rowCount }, (_, idx) => (
+                          <div key={idx} className="reader__bilingual-row">
+                            <div className="doc-viewer">
+                              {ocrSections[idx] ? (
+                                <MarkdownView
+                                  source={`${ocrSections[idx].heading}\n${ocrSections[idx].body}`.trim()}
+                                />
+                              ) : (
+                                <p className="reader__empty">（原文无对应段落）</p>
+                              )}
+                            </div>
+                            <div className="doc-viewer">
+                              {zhSections[idx] ? (
+                                <MarkdownView
+                                  source={`${zhSections[idx].heading}\n${zhSections[idx].body}`.trim()}
+                                />
+                              ) : (
+                                <p className="reader__empty">（译文无对应段落）</p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()
                 ) : content.text ? (
                   <div className="doc-viewer reader__doc">
                     <MarkdownView source={content.text} />
@@ -608,85 +898,12 @@ export function ReaderPage({
             {tab === 'pdf' &&
               (pdfInfo?.hasPdf ? (
                 pdfUrl ? (
-                  <>
-                    {ocr.phase === 'loading' && (
-                      <div className="ocr-panel ocr-panel--loading">
-                        <span className="acquire__spinner" aria-hidden="true" />
-                        <span>
-                          {ocr.progress || 'OCR 进行中…'}（逐页调用 OCR 模型，可能需数分钟，可继续阅读 PDF）
-                        </span>
-                      </div>
-                    )}
-                    {ocr.phase === 'error' && (
-                      <div className="ocr-panel ocr-panel--error">
-                        <p>OCR 失败：{ocr.error}</p>
-                        <div className="deep__actions">
-                          <button type="button" className="btn btn--sm" onClick={() => void runOcr()}>
-                            重试
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--ghost btn--sm"
-                            onClick={() =>
-                              setOcr({
-                                phase: 'idle',
-                                progress: '',
-                                markdown: '',
-                                error: '',
-                                saved: false,
-                                savedChecked: true,
-                              })
-                            }
-                          >
-                            关闭
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {ocr.phase === 'done' && (
-                      <div className="ocr-panel">
-                        <header className="ocr-panel__head">
-                          <span className="eyebrow">
-                            PDF → Markdown（OCR{ocr.saved ? ' · 已落库，下次直接读取' : ''}） ·{' '}
-                            {ocr.markdown.length.toLocaleString()} 字符
-                          </span>
-                          <div className="deep__actions">
-                            <button
-                              type="button"
-                              className="btn btn--ghost btn--sm"
-                              onClick={() => void runOcr()}
-                            >
-                              重新生成
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn--ghost btn--sm"
-                              onClick={() =>
-                                setOcr({
-                                  phase: 'idle',
-                                  progress: '',
-                                  markdown: '',
-                                  error: '',
-                                  saved: false,
-                                  savedChecked: true,
-                                })
-                              }
-                            >
-                              收起结果
-                            </button>
-                          </div>
-                        </header>
-                        <div className="doc-viewer reader__doc">
-                          <MarkdownView source={ocr.markdown} />
-                        </div>
-                      </div>
-                    )}
-                    <PdfViewer
-                      url={pdfUrl}
-                      onConvert={() => void runOcr()}
-                      converting={ocr.phase === 'loading'}
-                    />
-                  </>
+                  <PdfViewer
+                    url={pdfUrl}
+                    storageKey={paper.id}
+                    onConvert={() => void runOcr()}
+                    converting={ocr.phase === 'loading'}
+                  />
                 ) : (
                   <p className="reader__empty">正在加载 PDF…</p>
                 )

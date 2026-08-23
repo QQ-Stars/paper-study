@@ -203,10 +203,7 @@ class ProductionRuntimeGuard:
             verify_database_evidence_identity_subject,
         )
         from backend.app.api.compat.evidence_capture import load_evidence_run_manifest
-        from backend.app.application.final_window import (
-            _load_lease,
-            load_production_startup_snapshot,
-        )
+        from backend.app.application.final_window import load_production_startup_snapshot
         from backend.app.application.runtime_handoff import (
             _load_runtime_owner,
             load_handoff_receipt,
@@ -237,6 +234,7 @@ class ProductionRuntimeGuard:
                 expected_file_sha256=str(
                     receipt_document["startupSnapshotFileSha256"]
                 ),
+                require_frozen_node_executable=False,
             )
             build = load_build_identity_manifest(snapshot.build_identity_manifest_path)
             identity = load_database_evidence_identity_manifest(
@@ -254,8 +252,18 @@ class ProductionRuntimeGuard:
                 database=database.database_path,
                 identity=identity,
             )
-            lease_path, lease_payload, lease = _load_lease(
-                str(receipt_document["cutoverLeasePath"])
+            lease_input = Path(str(receipt_document["cutoverLeasePath"])).expanduser()
+            if not lease_input.is_absolute():
+                raise ValueError("the completed cutover lease path is not absolute")
+            lease_path = lease_input.resolve(strict=False)
+            if lease_path != lease_input:
+                raise ValueError("the completed cutover lease path is not canonical")
+            lease_file_sha256 = str(receipt_document["cutoverLeaseFileSha256"])
+            if re.fullmatch(r"[0-9a-f]{64}", lease_file_sha256) is None:
+                raise ValueError("the completed cutover lease hash is invalid")
+            lease_path, lease_payload, lease = _load_optional_completed_lease(
+                lease_path,
+                expected_file_sha256=lease_file_sha256,
             )
         except Exception as error:
             raise RuntimeRoleError(
@@ -293,9 +301,15 @@ class ProductionRuntimeGuard:
             != origin.origin_receipt_file_sha256
             or run.phase != "final"
             or run.run_id != snapshot.run_id
-            or lease.get("phase") != "completed"
-            or lease.get("runId") != snapshot.run_id
-            or lease_path != Path(str(owner.get("cutoverLeasePath"))).resolve(strict=True)
+            or owner.get("cutoverLeasePath") != str(lease_path)
+            or receipt_document.get("cutoverLeasePath") != str(lease_path)
+            or (
+                lease is not None
+                and (
+                    lease.get("phase") != "completed"
+                    or lease.get("runId") != snapshot.run_id
+                )
+            )
             or Path(str(snapshot.rollback_map["databasePath"])).resolve(strict=True)
             != database.database_path
         ):
@@ -606,17 +620,74 @@ def validate_production_runtime_admission(
             "PRODUCTION_ADMISSION_REQUIRED",
             "A typed production runtime admission is required.",
         )
+    receipt_binding_is_valid = False
+    lease_expected_sha256 = ""
     try:
-        lease_path, lease_payload, lease = _load_lease(admission.cutover_lease_path)
         owner_payload = admission.owner_marker_path.read_bytes()
+        lease_path = admission.cutover_lease_path.resolve(strict=False)
+        lease_payload = b""
+        lease: dict[str, object] | None = None
+        if admission.admission_mode == "python_active":
+            from backend.app.application.runtime_handoff import (
+                _load_runtime_owner,
+                load_handoff_receipt,
+            )
+
+            owner = _load_runtime_owner(owner_payload)
+            receipt = load_handoff_receipt(
+                str(owner["handoffReceiptPath"]),
+                expected_file_sha256=str(owner["handoffReceiptFileSha256"]),
+            )
+            receipt_document = json.loads(receipt.canonical_bytes.decode("utf-8"))
+            lease_expected_sha256 = str(
+                receipt_document["cutoverLeaseFileSha256"]
+            )
+            receipt_binding_is_valid = (
+                owner.get("ownerState") == "python_active"
+                and owner.get("runId") == admission.run_id
+                and owner.get("cutoverLeasePath") == str(lease_path)
+                and owner.get("handoffReceiptPath") == str(receipt.path)
+                and owner.get("handoffReceiptFileSha256") == receipt.file_sha256
+                and receipt.run_id == admission.run_id
+                and receipt_document.get("cutoverLeasePath") == str(lease_path)
+                and re.fullmatch(r"[0-9a-f]{64}", lease_expected_sha256)
+                is not None
+            )
+            lease_path, lease_payload, lease = _load_optional_completed_lease(
+                lease_path,
+                expected_file_sha256=lease_expected_sha256,
+            )
+        else:
+            lease_path, lease_payload, lease = _load_lease(lease_path)
     except Exception as error:
         raise RuntimeRoleError(
             "PRODUCTION_ADMISSION_INVALID",
             "The production runtime admission could not be revalidated.",
         ) from error
-    expected_phase = (
-        "completed" if admission.admission_mode == "python_active" else "handoff_pending"
-    )
+    if admission.admission_mode == "python_active":
+        lease_is_valid = (
+            receipt_binding_is_valid
+            and lease_path == admission.cutover_lease_path
+            and (
+                lease is None
+                or (
+                    hashlib.sha256(lease_payload).hexdigest()
+                    == lease_expected_sha256
+                    and lease.get("phase") == "completed"
+                    and lease.get("runId") == admission.run_id
+                )
+            )
+        )
+    elif admission.admission_mode == "handoff_pending":
+        lease_is_valid = (
+            lease is not None
+            and lease_path == admission.cutover_lease_path
+            and lease_payload == admission.cutover_lease_payload
+            and lease.get("phase") == "handoff_pending"
+            and lease.get("runId") == admission.run_id
+        )
+    else:
+        lease_is_valid = False
     if (
         admission.admission_mode not in {"handoff_pending", "python_active"}
         or admission.role != role
@@ -627,16 +698,36 @@ def validate_production_runtime_admission(
         != getattr(identity, "database_lineage_id", None)
         or admission.subject_database_id != getattr(identity, "subject_database_id", None)
         or getattr(identity, "subject_kind", None) != "live"
-        or lease_path != admission.cutover_lease_path
-        or lease_payload != admission.cutover_lease_payload
-        or lease.get("phase") != expected_phase
-        or lease.get("runId") != admission.run_id
+        or not lease_is_valid
         or owner_payload != admission.pending_owner_payload
     ):
         raise RuntimeRoleError(
             "PRODUCTION_ADMISSION_INVALID",
             "The production runtime admission identity or handoff state changed.",
         )
+
+
+def _load_optional_completed_lease(
+    path: Path,
+    *,
+    expected_file_sha256: str,
+) -> tuple[Path, bytes, dict[str, object] | None]:
+    from backend.app.application.final_window import _load_lease
+
+    # Older completed cutover leases lived under %TEMP%. The exact, self-hashed
+    # receipt and owner remain the durable restart proof after that transient
+    # file is cleaned up. Any surviving path must still be the exact lease.
+    if not path.exists():
+        return path, b"", None
+    if not path.is_file():
+        raise ValueError("the completed cutover lease path is not a file")
+    lease_path, lease_payload, lease = _load_lease(
+        path,
+        require_frozen_node_executable=False,
+    )
+    if hashlib.sha256(lease_payload).hexdigest() != expected_file_sha256:
+        raise ValueError("the completed cutover lease hash drifted")
+    return lease_path, lease_payload, lease
 
 
 def _verify_consumed_authorization(

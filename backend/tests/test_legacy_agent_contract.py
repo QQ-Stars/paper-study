@@ -20,7 +20,7 @@ from agent import explain, extract, translate
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DISPATCH_PATH = REPOSITORY_ROOT / "agent" / "__main__.py"
-REVIEWED_DISPATCH_SHA256 = "a217ed252ff6d3d50cf1455ee0c9b532f0aa1c4f1eb5abd275a75973edfd91f2"
+REVIEWED_DISPATCH_SHA256 = "abb4582f99e08d9bcd06d3821984d3ffb3cb3ea48ee0e9677a35771dca44dd2d"
 
 
 class StubConnection:

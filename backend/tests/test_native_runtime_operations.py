@@ -1218,6 +1218,12 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
         self.assertEqual("running", status["state"])
         self.assertEqual("stopped", stopped["state"])
         self.assertEqual(3, len(factory_calls))
+        self.assertTrue(
+            all(
+                call["require_frozen_node_executable"] is False
+                for call in factory_calls
+            )
+        )
         self.assertEqual(
             ["start", "smoke", "status", "stop"],
             [call[0] if isinstance(call, tuple) else call for call in operations.calls],
@@ -1233,7 +1239,10 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
             create_production_startup_snapshot,
         )
         from backend.app.application.runtime_handoff import ProductionPromotionCoordinator
-        from backend.app.providers.native_runtime import NativeWindowsRuntimeOperations
+        from backend.app.providers.native_runtime import (
+            NativeRuntimeError,
+            NativeWindowsRuntimeOperations,
+        )
         from backend.tests.support.p4_identity import p4_identity_fixture
         from backend.tests.test_runtime_ownership import (
             _Inspector,
@@ -1504,11 +1513,17 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
             operations.stop_fastapi()
             operations.release_locks_connections()
 
+            # Python is the active production owner now. Losing the dormant
+            # rollback executable or the completed cutover-window lease must
+            # not prevent a receipt-bound normal Python restart.
+            node.unlink()
+            lease.path.unlink()
             restart_launcher = _Launcher()
             restarted_operations = NativeWindowsRuntimeOperations(
                 native_runtime_spec=runtime_spec,
                 build_identity_manifest=build.manifest_path,
                 state_directory=fixture.root / "native-state",
+                require_frozen_node_executable=False,
                 launcher=restart_launcher,
                 readiness_probe=lambda _processes: {"ok": True},
                 role_lock_probe=lambda _processes: {
@@ -1516,6 +1531,16 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
                     "scheduler": "d" * 64,
                 },
             )
+            lease.path.mkdir()
+            with self.assertRaises(NativeRuntimeError) as non_file_lease:
+                restarted_operations.start_active_python_roles(
+                    owner_marker=owner_marker,
+                )
+            self.assertEqual(
+                "NATIVE_ACTIVE_OWNER_INVALID",
+                non_file_lease.exception.code,
+            )
+            lease.path.rmdir()
             restarted = restarted_operations.start_active_python_roles(
                 owner_marker=owner_marker,
             )
@@ -1531,6 +1556,12 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
                     request.environment["P6_HANDOFF_RECEIPT_SHA256"],
                 )
             restarted_operations.drain_python_roles(restarted)
+            with self.assertRaises(NativeRuntimeError) as unavailable_rollback:
+                restarted_operations.start_frozen_node(rollback_map)
+            self.assertEqual(
+                "BUILD_NATIVE_RUNTIME_INVALID",
+                unavailable_rollback.exception.code,
+            )
 
             from backend.app.cli.native_runtime import run as run_native_runtime
 
@@ -1810,7 +1841,10 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
     def test_start_smoke_and_drain_bind_exact_native_roles(self) -> None:
         from backend.app.api.compat.build_identity import freeze_build_identity
         from backend.app.application.final_window import ProductionStartupSnapshot
-        from backend.app.providers.native_runtime import NativeWindowsRuntimeOperations
+        from backend.app.providers.native_runtime import (
+            NativeRuntimeError,
+            NativeWindowsRuntimeOperations,
+        )
 
         with tempfile.TemporaryDirectory(prefix="study-app-native-operations-") as raw:
             root = Path(raw)
@@ -2008,6 +2042,42 @@ class NativeRuntimeOperationsTests(unittest.TestCase):
             self.assertEqual(("mcp", "scheduler", "worker", "api"), drained.stopped_roles)
             self.assertTrue(all(child.terminated for child in launcher.children))
             self.assertFalse((root / "state" / "python-runtime-state-v1.json").exists())
+
+            late_exit_launcher = _Launcher()
+
+            def readiness_after_scheduler_exit(
+                processes: object,
+            ) -> dict[str, object]:
+                scheduler = next(
+                    process
+                    for process in processes.processes
+                    if process.role == "scheduler"
+                )
+                scheduler.child.terminate()
+                return {"ok": True}
+
+            late_exit = NativeWindowsRuntimeOperations(
+                native_runtime_spec=runtime_spec,
+                build_identity_manifest=build.manifest_path,
+                state_directory=root / "late-exit-state",
+                launcher=late_exit_launcher,
+                readiness_probe=readiness_after_scheduler_exit,
+                role_lock_probe=lambda _processes: {
+                    "worker": "c" * 64,
+                    "scheduler": "d" * 64,
+                },
+            )
+            late_exit_processes = late_exit.start_python_roles(
+                snapshot,
+                runtime_environment=dynamic_environment,
+            )
+            with self.assertRaises(NativeRuntimeError) as exited_during_readiness:
+                late_exit.smoke_python(late_exit_processes)
+            self.assertEqual(
+                "NATIVE_RUNTIME_EXITED",
+                exited_during_readiness.exception.code,
+            )
+            late_exit.drain_python_roles(late_exit_processes)
 
             database = root / "app.db"
             database.write_bytes(b"sqlite-fixture")

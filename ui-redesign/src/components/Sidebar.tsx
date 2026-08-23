@@ -30,7 +30,9 @@ export function Sidebar({ page, dueCount, libraryCount, onNavigate }: SidebarPro
               key={item.id}
               type="button"
               className={`sidebar__link${active ? ' sidebar__link--active' : ''}`}
+              aria-label={item.label}
               aria-current={active ? 'page' : undefined}
+              title={`${item.label} · ${item.hint}`}
               onClick={() => onNavigate(item.id)}
             >
               <item.Icon size={17} />

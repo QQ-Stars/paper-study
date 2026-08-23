@@ -79,6 +79,9 @@ OCR_DPI = int(_S.get("ocrDpi") or os.getenv("OCR_DPI") or 200)
 OCR_PAGE_BATCH = int(_S.get("ocrPageBatchSize") or os.getenv("OCR_PAGE_BATCH_SIZE") or 4) or 4
 # OCR 最多处理的页数；0=不限（仍受 EXPLAIN_MAX_CHARS 截断保护）。
 OCR_MAX_PAGES = int(_S.get("ocrMaxPages") or os.getenv("OCR_MAX_PAGES") or 0)
+# 批量 PDF→Markdown(OCR) 的篇级并发数（POST /api/ocr-md-batch）。
+# OCR API 按页计费且有限流，并发过高易触发 429；默认 2，可用设置页 ocrMaxConcurrency 调整。
+OCR_BATCH_WORKERS = max(1, min(8, int(_S.get("ocrMaxConcurrency") or os.getenv("OCR_BATCH_WORKERS") or 2)))
 
 # 语义检索的嵌入模型（本地 model2vec 静态嵌入，纯 numpy，无需 GPU/torch/onnx）。
 # 默认多语种 → 中文 query 可直接匹配英文论文。可在 settings.json: embedModel 换。

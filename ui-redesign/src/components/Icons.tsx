@@ -148,6 +148,16 @@ export function ListChecksIcon(props: IconProps) {
   );
 }
 
+export function PlugIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M9 3.5v4M15 3.5v4" />
+      <path d="M7 7.5h10v3.5a5 5 0 0 1-5 5 5 5 0 0 1-5-5z" />
+      <path d="M12 16v4.5" />
+    </svg>
+  );
+}
+
 export function WrenchIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

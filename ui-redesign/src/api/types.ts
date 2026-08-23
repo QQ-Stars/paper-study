@@ -32,6 +32,41 @@ export interface Paper {
   hasPdf: boolean;
 }
 
+export interface BatchRun {
+  id: number;
+  kind: 'ocr' | 'explain';
+  finishedAt: string;
+  total: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  detail: unknown;
+}
+
+export interface DuplicatePaper {
+  id: string;
+  title: string;
+  year: string | null;
+  venue: string | null;
+}
+
+export interface DuplicatePair {
+  left: DuplicatePaper;
+  right: DuplicatePaper;
+  similarity: number;
+}
+
+export interface EnrichStatus {
+  ok: boolean;
+  total: number;
+  missingYear: number;
+  missingVenue: number;
+  missingMetadata: number;
+  withAuthors: number;
+  missingAuthors: number;
+  pending: number;
+}
+
 export interface ReviewItem {
   paper_id: string;
   started_at: string;
@@ -103,7 +138,8 @@ export interface CiteEdge {
 
 export interface CiteGraph {
   nodes: CiteNode[];
-  edges: CiteEdge[];
+  links: CiteEdge[];
+  edgeCount: number;
 }
 
 export interface Candidate {

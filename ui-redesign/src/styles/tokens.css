@@ -16,6 +16,7 @@
   /* ── 色板：墨 ── */
   --ink: hsl(24 14% 12%);
   --ink-soft: hsl(24 7% 34%);
+  --ink-muted: hsl(26 6% 46%);
   --ink-faint: hsl(28 6% 55%);
   --ink-ghost: hsl(30 6% 72%);
 

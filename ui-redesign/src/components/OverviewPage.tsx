@@ -29,7 +29,12 @@ export function OverviewPage({
   useEffect(() => {
     acquireApi
       .citeGraph()
-      .then((graph) => setCiteSummary({ nodes: graph.nodes.length, edges: graph.edges.length }))
+      .then((graph) =>
+        setCiteSummary({
+          nodes: graph.nodes.length,
+          edges: graph.edgeCount ?? graph.links.length,
+        }),
+      )
       .catch(() => setCiteSummary(null));
     artifactApi
       .titleTranslationStatus()

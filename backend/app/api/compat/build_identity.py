@@ -255,6 +255,7 @@ def verify_native_runtime_spec(
     *,
     build_identity_manifest: str | os.PathLike[str],
     native_runtime_spec: str | os.PathLike[str],
+    require_frozen_node_executable: bool = True,
 ) -> BuildIdentityManifest:
     frozen = load_build_identity_manifest(build_identity_manifest)
     if frozen.deployment_kind != "native-windows":
@@ -263,7 +264,28 @@ def verify_native_runtime_spec(
             "A native runtime requires a native-windows build identity.",
         )
     document = _strict_manifest_document(frozen.canonical_bytes)
-    if document["nativeRuntime"] != _native_runtime_document(native_runtime_spec):
+    frozen_runtime = document["nativeRuntime"]
+    frozen_node_executable_sha256: str | None = None
+    if not require_frozen_node_executable:
+        if not isinstance(frozen_runtime, dict):
+            raise BuildIdentityError(
+                "BUILD_IDENTITY_INVALID",
+                "The frozen native runtime identity is invalid.",
+            )
+        frozen_node_rollback = frozen_runtime.get("frozenNodeRollback")
+        if not isinstance(frozen_node_rollback, dict):
+            raise BuildIdentityError(
+                "BUILD_IDENTITY_INVALID",
+                "The frozen native runtime identity is invalid.",
+            )
+        frozen_node_executable_sha256 = _required_hex(
+            frozen_node_rollback.get("executableSha256"),
+            widths=(64,),
+        )
+    if frozen_runtime != _native_runtime_document(
+        native_runtime_spec,
+        frozen_node_executable_sha256=frozen_node_executable_sha256,
+    ):
         raise BuildIdentityError(
             "BUILD_IDENTITY_DRIFT",
             "The native runtime specification drifted from the frozen identity.",
@@ -531,6 +553,8 @@ def _build_artifact_document(
 
 def _native_runtime_document(
     native_runtime_spec: str | os.PathLike[str],
+    *,
+    frozen_node_executable_sha256: str | None = None,
 ) -> dict[str, object]:
     spec_path = Path(native_runtime_spec).resolve(strict=True)
     try:
@@ -584,7 +608,12 @@ def _native_runtime_document(
             "BUILD_NATIVE_RUNTIME_INVALID",
             "The frozen Node rollback specification is invalid.",
         )
-    node_path = _runtime_file(rollback["executablePath"], "Node executable")
+    if frozen_node_executable_sha256 is None:
+        node_path = _runtime_file(rollback["executablePath"], "Node executable")
+        node_sha256 = _file_sha256(node_path)
+    else:
+        node_path = _runtime_path(rollback["executablePath"], "Node executable")
+        node_sha256 = frozen_node_executable_sha256
     entrypoint_path = _runtime_file(rollback["entrypointPath"], "Node entrypoint")
     cwd = _runtime_directory(rollback["cwd"], "Node cwd")
     node_argv = _runtime_argv(rollback["argv"])
@@ -611,7 +640,7 @@ def _native_runtime_document(
         "roles": role_entries,
         "frozenNodeRollback": {
             "executablePath": str(node_path),
-            "executableSha256": _file_sha256(node_path),
+            "executableSha256": node_sha256,
             "entrypointPath": str(entrypoint_path),
             "entrypointSha256": _file_sha256(entrypoint_path),
             "cwd": str(cwd),
@@ -720,6 +749,21 @@ def _runtime_file(value: object, description: str) -> Path:
             f"The native {description} path is not a file.",
         )
     return path
+
+
+def _runtime_path(value: object, description: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {description} path is invalid.",
+        )
+    try:
+        return Path(value).expanduser().resolve(strict=False)
+    except OSError as error:
+        raise BuildIdentityError(
+            "BUILD_NATIVE_RUNTIME_INVALID",
+            f"The native {description} path is invalid.",
+        ) from error
 
 
 def _runtime_directory(value: object, description: str) -> Path:

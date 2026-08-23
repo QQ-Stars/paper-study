@@ -1,4 +1,5 @@
 """SQLite 读写（与 Node 共享同一个 app.db）。"""
+import json
 import sqlite3
 import re
 from pathlib import Path
@@ -25,6 +26,61 @@ def connect_readonly():
     db_path = Path(config.DB_PATH).expanduser().resolve()
     con = sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)
     return _configure_connection(con, writable=False)
+
+
+def _ensure_batch_runs_table(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS batch_runs (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind        TEXT NOT NULL,
+        finished_at TEXT NOT NULL DEFAULT (datetime('now')),
+        total       INTEGER NOT NULL DEFAULT 0,
+        done        INTEGER NOT NULL DEFAULT 0,
+        failed      INTEGER NOT NULL DEFAULT 0,
+        skipped     INTEGER NOT NULL DEFAULT 0,
+        detail      TEXT NOT NULL DEFAULT '{}')""")
+
+
+def record_batch_run(
+    con,
+    kind: str,
+    *,
+    total: int,
+    done: int,
+    failed: int,
+    skipped: int,
+    detail=None,
+):
+    """记录一次已结束的批处理；detail 以 JSON 文本持久化。"""
+    _ensure_batch_runs_table(con)
+    cursor = con.execute(
+        """INSERT INTO batch_runs(kind, total, done, failed, skipped, detail)
+           VALUES(?,?,?,?,?,?)""",
+        (
+            kind,
+            total,
+            done,
+            failed,
+            skipped,
+            json.dumps(detail if detail is not None else {}, ensure_ascii=False),
+        ),
+    )
+    con.commit()
+    return cursor.lastrowid
+
+
+def last_batch_run(con, kind: str):
+    """返回指定类型最近一次批处理；尚无记录时返回 None。"""
+    _ensure_batch_runs_table(con)
+    row = con.execute(
+        """SELECT id, kind, finished_at, total, done, failed, skipped, detail
+           FROM batch_runs WHERE kind=? ORDER BY id DESC LIMIT 1""",
+        (kind,),
+    ).fetchone()
+    if row is None:
+        return None
+    result = dict(row)
+    result["detail"] = json.loads(result["detail"])
+    return result
 
 
 def title_norm(s: str) -> str:

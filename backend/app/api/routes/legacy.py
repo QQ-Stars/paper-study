@@ -132,6 +132,55 @@ def create_legacy_router() -> APIRouter:
             return _markdown_response(None)
         return _markdown_response(row[0] if row else None)
 
+    @router.get("/api/cite-context")
+    async def cite_context(request: Request) -> Response:
+        """单篇论文的库内引用上下文：它引用了谁 / 谁引用了它（cite_edges）。
+        供阅读页「库内引用」区块展示；表不存在（未建过图谱）返回空列表。"""
+        paper_id = _safe_base(request.query_params.get("id"))
+        if not paper_id:
+            return _json_response({"ok": False, "error": "缺少 id"}, 400)
+        brief_sql = (
+            "SELECT p.id, p.title, p.title_zh, p.year, p.venue, p.tldr "
+        )
+        try:
+            async with request.app.state.session_factory() as session:
+                cites = (
+                    await session.execute(
+                        sa_text(
+                            brief_sql
+                            + "FROM cite_edges e JOIN papers p ON p.id = e.dst_id "
+                            "WHERE e.src_id = :pid ORDER BY p.year DESC, p.title"
+                        ),
+                        {"pid": paper_id},
+                    )
+                ).all()
+                cited_by = (
+                    await session.execute(
+                        sa_text(
+                            brief_sql
+                            + "FROM cite_edges e JOIN papers p ON p.id = e.src_id "
+                            "WHERE e.dst_id = :pid ORDER BY p.year DESC, p.title"
+                        ),
+                        {"pid": paper_id},
+                    )
+                ).all()
+        except Exception:
+            return _json_response({"ok": True, "cites": [], "citedBy": []})
+
+        def brief(row):
+            return {
+                "id": row[0],
+                "title": row[1] or "",
+                "titleZh": row[2] or "",
+                "year": row[3] or "",
+                "venue": row[4] or "",
+                "tldr": (row[5] or "")[:160],
+            }
+
+        return _json_response(
+            {"ok": True, "cites": [brief(r) for r in cites], "citedBy": [brief(r) for r in cited_by]}
+        )
+
     @router.get("/api/ocr-md-batch")
     async def ocr_batch_status(request: Request) -> Response:
         """批量 OCR 统计：总数 / 已有 OCR / 有 PDF 待转换 / 缺 PDF。"""
@@ -151,6 +200,7 @@ def create_legacy_router() -> APIRouter:
                     ).all()
                 except Exception:
                     have_rows = []  # 表不存在（从未执行过 OCR）
+                last_run = await _last_batch_run(session, "ocr")
             have = {str(row[0]) for row in have_rows}
             resolver = _pdf_files(request)
             total = len(rows)
@@ -178,6 +228,7 @@ def create_legacy_router() -> APIRouter:
                 "withPdf": with_pdf,
                 "pending": pending,
                 "noPdf": no_pdf,
+                "lastRun": last_run,
             }
         )
 
@@ -290,9 +341,125 @@ def create_legacy_router() -> APIRouter:
     async def explain_batch_status(request: Request) -> Response:
         try:
             status = await _artifact_store(request).explain_batch_status()
+            async with request.app.state.session_factory() as session:
+                last_run = await _last_batch_run(session, "explain")
         except Exception as error:
             return _safe_json_error(error)
-        return _json_response(status)
+        return _json_response({**status, "lastRun": last_run})
+
+    @router.get("/api/dup-scan")
+    async def duplicate_scan(request: Request) -> Response:
+        """只读扫描当前运行时数据库中的疑似重复论文。"""
+        try:
+            async with request.app.state.session_factory() as session:
+                papers = (
+                    await session.execute(
+                        sa_text(
+                            "SELECT id, title, title_norm, year, venue "
+                            "FROM papers ORDER BY id"
+                        )
+                    )
+                ).all()
+            from agent.dedup import find_duplicate_pairs
+
+            pairs = await anyio.to_thread.run_sync(find_duplicate_pairs, papers)
+        except Exception as error:
+            return _safe_json_error(error)
+        return _json_response({"ok": True, "count": len(pairs), "pairs": pairs})
+
+    @router.get("/api/enrich-status")
+    async def enrich_status(request: Request) -> Response:
+        try:
+            async with request.app.state.session_factory() as session:
+                papers = (
+                    await session.execute(
+                        sa_text("SELECT id, year, venue FROM papers ORDER BY id")
+                    )
+                ).all()
+                try:
+                    author_rows = (
+                        await session.execute(sa_text("SELECT paper_id FROM paper_authors"))
+                    ).all()
+                except Exception:
+                    author_rows = []
+        except Exception as error:
+            return _safe_json_error(error)
+
+        author_ids = {str(row[0]) for row in author_rows}
+        paper_ids = {str(row[0]) for row in papers}
+        covered_author_ids = author_ids & paper_ids
+        missing_year = sum(not str(row[1] or "").strip() for row in papers)
+        missing_venue = sum(not str(row[2] or "").strip() for row in papers)
+        missing_metadata = sum(
+            not str(row[1] or "").strip() or not str(row[2] or "").strip()
+            for row in papers
+        )
+        pending = sum(
+            not str(row[1] or "").strip()
+            or not str(row[2] or "").strip()
+            or str(row[0]) not in covered_author_ids
+            for row in papers
+        )
+        return _json_response(
+            {
+                "ok": True,
+                "total": len(papers),
+                "missingYear": missing_year,
+                "missingVenue": missing_venue,
+                "missingMetadata": missing_metadata,
+                "withAuthors": len(covered_author_ids),
+                "missingAuthors": len(papers) - len(covered_author_ids),
+                "pending": pending,
+            }
+        )
+
+    @router.post("/api/enrich")
+    async def enrich(request: Request) -> Response:
+        body = await _body(request)
+        return ndjson_response(
+            _agent_events(
+                request,
+                "enrich",
+                _optional_args(body, "limit"),
+                terminal_fields={
+                    "total": 0,
+                    "done": 0,
+                    "failed": [],
+                    "skipped": [],
+                },
+            )
+        )
+
+    @router.get("/api/paper-authors")
+    async def paper_authors(request: Request) -> Response:
+        paper_id = _safe_base(request.query_params.get("id"))
+        if not paper_id:
+            return _json_response({"ok": False, "error": "缺少 id"}, 400)
+        try:
+            async with request.app.state.session_factory() as session:
+                row = (
+                    await session.execute(
+                        sa_text(
+                            "SELECT authors FROM paper_authors WHERE paper_id = :paper_id"
+                        ),
+                        {"paper_id": paper_id},
+                    )
+                ).first()
+        except Exception:
+            row = None
+        authors: list[str] = []
+        if row is not None and isinstance(row[0], str):
+            try:
+                decoded = json.loads(row[0])
+            except (TypeError, ValueError):
+                decoded = []
+            if isinstance(decoded, list):
+                authors = [
+                    item.strip()
+                    for item in decoded
+                    if isinstance(item, str) and item.strip()
+                ]
+        return _json_response({"ok": True, "id": paper_id, "authors": authors})
 
     @router.get("/api/scan-pdfs")
     async def scan_pdfs(request: Request) -> Response:
@@ -1178,6 +1345,39 @@ def _parse_int(value: object) -> int | None:
         return int(str(value), 10)
     except (TypeError, ValueError):
         return None
+
+
+async def _last_batch_run(session: Any, kind: str) -> dict[str, object] | None:
+    try:
+        row = (
+            await session.execute(
+                sa_text(
+                    "SELECT id, kind, finished_at, total, done, failed, skipped, detail "
+                    "FROM batch_runs WHERE kind = :kind ORDER BY id DESC LIMIT 1"
+                ),
+                {"kind": kind},
+            )
+        ).first()
+    except Exception:
+        return None
+    if row is None:
+        return None
+    detail = row[7]
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except (TypeError, ValueError):
+            pass
+    return {
+        "id": row[0],
+        "kind": str(row[1]),
+        "finishedAt": str(row[2]),
+        "total": int(row[3] or 0),
+        "done": int(row[4] or 0),
+        "failed": int(row[5] or 0),
+        "skipped": int(row[6] or 0),
+        "detail": detail,
+    }
 
 
 def _json_response(value: object, status_code: int = 200) -> Response:

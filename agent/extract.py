@@ -21,6 +21,17 @@ _TAIL_RE = re.compile(
     r'(references?|bibliography|参\s*考\s*文\s*献|acknowledge?ments?|致\s*谢)'
     r'\s*\**\s*:?\s*$', re.I)
 
+# 附录/补充材料可能出现在参考文献之后。翻译时跳过参考文献内容，
+# 但遇到同级（或更高层级）的附录标题应恢复正文，避免把附录一并裁掉。
+_APPENDIX_TITLE_RE = re.compile(
+    r'^(?:appendix(?:es)?|supplement(?:ary|al)?|'
+    r'supporting(?:\s+(?:information|material|data))?|'
+    r'附录(?:\s*[A-Za-z0-9一二三四五六七八九十百]+)?|'
+    r'补充(?:材料|信息|数据)?)'
+    r'(?:\s|$|[:：.\-])',
+    re.I,
+)
+
 _BLANK_RUN = re.compile(r'\n{3,}')
 _TRAIL_WS = re.compile(r'[ \t]+\n')
 
@@ -48,18 +59,87 @@ def _tidy(md: str) -> str:
     return _BLANK_RUN.sub('\n\n', _TRAIL_WS.sub('\n', md)).strip()
 
 
+def _heading_level(line: str):
+    """返回 Markdown ATX 标题层级；普通标题（或 OCR 纯文本标题）返回 None。"""
+    match = re.match(r'^\s*(#{1,6})\s*', line)
+    return len(match.group(1)) if match else None
+
+
+def _section_title(line: str) -> str:
+    """移除常见 Markdown/编号装饰，得到用于识别附录的标题文本。"""
+    title = line.strip()
+    title = re.sub(r'^\s*#{1,6}\s*', '', title)
+    title = re.sub(r'^[>*]+\s*', '', title)
+    title = re.sub(r'^(?:[-+*]\s+)', '', title)
+    title = re.sub(r'^\*+\s*|\s*\*+$', '', title)
+    title = re.sub(r'^\d+(?:\.\d+)*[.)]?\s+', '', title)
+    return title.strip()
+
+
+def _appendix_heading_level(line: str):
+    """若一行是附录/补充材料标题，返回其层级（纯文本标题为 0）；否则返回 None。
+
+    除关键词标题（appendix/supplement/附录/补充材料…）外，兼容 OCR 输出中常见的
+    LaTeX 式附录节标题：ATX 标题且首个 token 为单个大写字母，如
+    「# A Precision-recall tradeoffs with weaker models」——LaTeX 论文附录节以
+    单字母编号、正文节标题是单词，且参考文献条目不会带 # 前缀，误判概率低。
+    纯文本行不适用单字母规则（参考文献条目常以作者缩写「A. Author」开头）。"""
+    title = _section_title(line)
+    if _heading_level(line) is not None and re.match(r'^[A-Z](?:\s+\S|[.)])', title):
+        return _heading_level(line)
+    candidates = [title]
+    # 常见 OCR 标题会把附录编号放在词前，例如“ A APPENDIX”。
+    prefixed_title = re.sub(r'^[A-Z](?:[.)]|\s+)\s*', '', title, count=1)
+    if prefixed_title != title:
+        candidates.append(prefixed_title)
+    if not any(_APPENDIX_TITLE_RE.match(candidate) for candidate in candidates):
+        return None
+    return _heading_level(line) or 0
+
+
 def strip_references(md: str):
-    """裁掉「参考文献 / 致谢」标题及其后全部内容（含其后的附录），返回 (裁剪后文本, 是否裁剪)。
-    _TAIL_RE 只匹配“整行就是该词”的标题行（如 **References**），正文里对 references 的提及不会命中；
-    故只设 15% 下限挡掉首页/目录的极端误命中——附录很长把参考文献顶到前半段的论文(如 30%)也能正确裁剪。"""
+    """跳过「参考文献 / 致谢」章节，同时保留其后同级附录/补充材料。
+
+    _TAIL_RE 只匹配“整行就是该词”的标题行（如 **References**），正文里对
+    references 的提及不会命中；仍保留 15% 下限以挡掉首页/目录的极端误命中。
+    参考文献若位于文末则行为与旧实现一致；若后面出现同级（或纯文本）附录，
+    从附录标题开始恢复输出。
+    """
     if not md:
         return md, False
     lines = md.split("\n")
     n = len(lines)
-    for i, ln in enumerate(lines):
-        if i > n * 0.15 and _TAIL_RE.match(ln.strip()):
-            return "\n".join(lines[:i]).rstrip(), True
-    return md, False
+    out = []
+    skipping = False
+    skipped_level = None
+    stripped = False
+
+    for i, line in enumerate(lines):
+        if not skipping:
+            if i > n * 0.15 and _TAIL_RE.match(line.strip()):
+                skipping = True
+                skipped_level = _heading_level(line)
+                stripped = True
+                continue
+            out.append(line)
+            continue
+
+        # 跳过态的恢复规则：附录/补充材料标题（任意层级），或任何同级/更高级的
+        # 新标题（参考文献之后的同级标题即后续正文，如附录节、伦理声明等）。
+        # 若该标题仍是参考文献/致谢类尾词（如 Acknowledgments 后接 References），
+        # 则保持跳过并刷新层级。
+        level = _heading_level(line)
+        same_or_higher = level is not None and (
+            skipped_level is None or level <= skipped_level
+        )
+        if _appendix_heading_level(line) is not None or same_or_higher:
+            if _TAIL_RE.match(line.strip()):
+                skipped_level = level
+                continue
+            skipping = False
+            out.append(line)
+
+    return "\n".join(out).rstrip(), stripped
 
 
 def _plain_pages(path, n: int = 0) -> str:
@@ -197,10 +277,11 @@ def _ocr_transcribe(images_b64: list, cfg: dict) -> str:
     return _ocr_clean_grounding(text)
 
 
-def _ocr_full_text(path, paper_id=None) -> str:
+def _ocr_full_text(path, paper_id=None, quiet=False) -> str:
     """整篇 PDF → OCR 文本；进度 → stderr（OCRPG::i/n）。配置不全直接抛错由调用方回退。
     传入 paper_id 且转换成功（≥200 字阈值防乱码落库）时写入 DB ocr_markdown 表，
-    供讲解/翻译管道与阅读页复用。"""
+    供讲解/翻译管道与阅读页复用。quiet=True 时不输出逐页/落库进度（篇级并发批量场景，
+    避免多篇 OCRPG 行交错，批次自身有 ITEM:: 进度契约）。"""
     cfg = _ocr_settings()
     if not cfg["base"] or not cfg["model"]:
         raise RuntimeError("OCR API 未配置（需在设置中填写 OCR 地址与模型）")
@@ -211,7 +292,8 @@ def _ocr_full_text(path, paper_id=None) -> str:
     total = len(images)
     for start in range(0, total, cfg["batch"]):
         chunk = images[start:start + cfg["batch"]]
-        print(f"OCRPG::{min(start + len(chunk), total)}/{total}", file=sys.stderr, flush=True)
+        if not quiet:
+            print(f"OCRPG::{min(start + len(chunk), total)}/{total}", file=sys.stderr, flush=True)
         parts.append(_ocr_transcribe(chunk, cfg))
     text = "\n\n".join((p or "").strip() for p in parts if (p or "").strip())
     if paper_id and len(text.strip()) >= 200:
@@ -222,7 +304,8 @@ def _ocr_full_text(path, paper_id=None) -> str:
                 _db.set_ocr_markdown(con, paper_id, text)
             finally:
                 con.close()
-            print(f"OCRSAVE::已落库（{len(text)} 字）", file=sys.stderr, flush=True)
+            if not quiet:
+                print(f"OCRSAVE::已落库（{len(text)} 字）", file=sys.stderr, flush=True)
         except Exception as e:
             print(f"OCRSAVE-ERR::{e}（落库失败，不影响本次结果）", file=sys.stderr, flush=True)
     return text

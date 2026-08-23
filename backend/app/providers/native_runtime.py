@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 
 from backend.app.api.compat.build_identity import (
+    BuildIdentityError,
     BuildIdentityManifest,
     native_role_argv,
     verify_native_runtime_spec,
@@ -448,16 +449,21 @@ class NativeWindowsRuntimeOperations:
         native_runtime_spec: str | os.PathLike[str],
         build_identity_manifest: str | os.PathLike[str],
         state_directory: str | os.PathLike[str],
+        require_frozen_node_executable: bool = True,
         launcher: RuntimeLauncher | None = None,
         readiness_probe: Callable[[RuntimeProcessSet], Mapping[str, object]] | None = None,
         role_lock_probe: Callable[[RuntimeProcessSet], Mapping[str, str]] | None = None,
         legacy_probe: Callable[[RuntimeProcess], Mapping[str, object]] | None = None,
         stop_timeout_seconds: float = 30.0,
     ) -> None:
-        self._configuration = load_native_runtime_configuration(native_runtime_spec)
+        self._configuration = load_native_runtime_configuration(
+            native_runtime_spec,
+            require_frozen_node_executable=require_frozen_node_executable,
+        )
         self._build_identity = verify_native_runtime_spec(
             build_identity_manifest=build_identity_manifest,
             native_runtime_spec=self._configuration.spec_path,
+            require_frozen_node_executable=require_frozen_node_executable,
         )
         self._state_directory = Path(state_directory).expanduser().resolve(strict=False)
         self._state_path = self._state_directory / "python-runtime-state-v1.json"
@@ -570,6 +576,7 @@ class NativeWindowsRuntimeOperations:
                 expected_file_sha256=str(
                     receipt_document["startupSnapshotFileSha256"]
                 ),
+                require_frozen_node_executable=False,
             )
             database = DatabaseSettings(str(snapshot.rollback_map["databasePath"]))
             ProductionRuntimeGuard().validate_active_owner(
@@ -613,6 +620,11 @@ class NativeWindowsRuntimeOperations:
             )
         readiness = self._readiness_probe(process_set)
         role_locks = dict(self._role_lock_probe(process_set))
+        if any(process.child.poll() is not None for process in process_set.processes):
+            raise NativeRuntimeError(
+                "NATIVE_RUNTIME_EXITED",
+                "A native runtime role exited while readiness was being checked.",
+            )
         if (
             not isinstance(readiness, Mapping)
             or readiness.get("ok") is not True
@@ -802,6 +814,7 @@ class NativeWindowsRuntimeOperations:
         self._active_processes = None
 
     def start_frozen_node(self, rollback_map: Mapping[str, object]) -> RuntimeProcess:
+        self._require_frozen_node_executable()
         validated = validate_frozen_node_rollback_map(dict(rollback_map))
         self._verify_native_rollback_map(validated)
         if self._active_frozen_node is not None or self._node_state_path.exists():
@@ -1161,6 +1174,7 @@ class NativeWindowsRuntimeOperations:
         return validate_frozen_node_rollback_map(rollback_map)
 
     def attach_frozen_node(self, rollback_map: Mapping[str, object]) -> RuntimeProcess:
+        self._require_frozen_node_executable()
         validated = validate_frozen_node_rollback_map(dict(rollback_map))
         self._verify_native_rollback_map(validated)
         if self._active_frozen_node is None:
@@ -1308,6 +1322,15 @@ class NativeWindowsRuntimeOperations:
                 "The rollback map does not match the frozen native runtime identity.",
             )
 
+    def _require_frozen_node_executable(self) -> None:
+        try:
+            verify_native_runtime_spec(
+                build_identity_manifest=self._build_identity.manifest_path,
+                native_runtime_spec=self._configuration.spec_path,
+            )
+        except BuildIdentityError as error:
+            raise NativeRuntimeError(error.code, str(error)) from error
+
     def _ensure_attached_python_processes(self) -> RuntimeProcessSet:
         if self._active_processes is not None:
             return self._active_processes
@@ -1334,6 +1357,7 @@ class NativeWindowsRuntimeOperations:
             snapshot = load_production_startup_snapshot(
                 str(document["startupSnapshotPath"]),
                 expected_file_sha256=str(document["startupSnapshotSha256"]),
+                require_frozen_node_executable=False,
             )
             self._verify_startup_snapshot(snapshot)
         except Exception as error:
@@ -1824,6 +1848,8 @@ class NativeWindowsRuntimeOperations:
 
 def load_native_runtime_configuration(
     native_runtime_spec: str | os.PathLike[str],
+    *,
+    require_frozen_node_executable: bool = True,
 ) -> NativeRuntimeConfiguration:
     path = Path(native_runtime_spec).expanduser().resolve(strict=True)
     try:
@@ -1899,8 +1925,13 @@ def load_native_runtime_configuration(
             "NATIVE_RUNTIME_SPEC_INVALID",
             "The frozen Node rollback configuration is invalid.",
         )
+    node_executable = (
+        _existing_file(rollback_value["executablePath"], "Node executable")
+        if require_frozen_node_executable
+        else _configured_path(rollback_value["executablePath"], "Node executable")
+    )
     rollback = NativeRollbackConfiguration(
-        executable_path=_existing_file(rollback_value["executablePath"], "Node executable"),
+        executable_path=node_executable,
         entrypoint_path=_existing_file(rollback_value["entrypointPath"], "Node entrypoint"),
         cwd=_existing_directory(rollback_value["cwd"], "Node cwd"),
         argv=_argv(rollback_value["argv"]),
@@ -2381,6 +2412,18 @@ def _existing_file(value: object, label: str) -> Path:
     if not path.is_file():
         raise NativeRuntimeError("NATIVE_RUNTIME_SPEC_INVALID", f"{label} is not a file.")
     return path
+
+
+def _configured_path(value: object, label: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise NativeRuntimeError("NATIVE_RUNTIME_SPEC_INVALID", f"{label} is required.")
+    try:
+        return Path(value).expanduser().resolve(strict=False)
+    except OSError as error:
+        raise NativeRuntimeError(
+            "NATIVE_RUNTIME_SPEC_INVALID",
+            f"{label} path is invalid.",
+        ) from error
 
 
 def _existing_directory(value: object, label: str) -> Path:

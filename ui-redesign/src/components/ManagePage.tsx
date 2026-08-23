@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { acquireApi, artifactApi, libraryApi } from '../api/client';
-import type { Paper, StudyStatus } from '../api/types';
+import { acquireApi, artifactApi, libraryApi, maintenanceApi } from '../api/client';
+import type { BatchRun, DuplicatePair, EnrichStatus, Paper, StudyStatus } from '../api/types';
 import { DeleteConfirmDialog } from './DeleteConfirmDialog';
 import { PlusIcon, SearchIcon } from './Icons';
 import { StreamConsole, useStream } from './StreamConsole';
@@ -41,6 +41,32 @@ const EDIT_LABELS: Array<{ key: EditField; label: string; wide?: boolean }> = [
   { key: 'tldr', label: 'TL;DR 摘要', wide: true },
   { key: 'contribution', label: '核心贡献', wide: true },
 ];
+
+function normalizeBatchLimit(value: string): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function batchLimitLabel(value: string): string {
+  const limit = normalizeBatchLimit(value);
+  return limit === 0 ? '全部' : `limit=${limit}`;
+}
+
+function updateBatchLimit(value: string, setter: (next: string) => void) {
+  if (value === '' || /^\d+$/.test(value)) setter(value);
+}
+
+function formatLastRun(run: BatchRun | null | undefined): string {
+  if (!run) return '上次运行：暂无记录';
+  const normalized = run.finishedAt.includes('T') ? run.finishedAt : run.finishedAt.replace(' ', 'T');
+  /* SQLite datetime('now') 保存 UTC；无时区后缀时显式按 UTC 解析，避免显示慢 8 小时。 */
+  const timestamp = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized) ? normalized : `${normalized}Z`;
+  const parsed = new Date(timestamp);
+  const time = Number.isNaN(parsed.getTime())
+    ? run.finishedAt
+    : parsed.toLocaleString('zh-CN', { hour12: false });
+  return `上次运行：${time} · 成 ${run.done} / 败 ${run.failed} / 跳 ${run.skipped}`;
+}
 
 export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePageProps) {
   /* ── 新增论文 ── */
@@ -128,18 +154,30 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
   const batchStream = useStream();
   const ocrBatchStream = useStream();
   const embedStream = useStream();
+  const enrichStream = useStream();
 
   const [titlePending, setTitlePending] = useState<number | null>(null);
-  const [batchStatus, setBatchStatus] = useState<{ pending?: number; withPdf?: number; running?: boolean } | null>(null);
+  const [batchStatus, setBatchStatus] = useState<{
+    pending?: number;
+    withPdf?: number;
+    running?: boolean;
+    lastRun?: BatchRun | null;
+  } | null>(null);
   const [ocrBatchStatus, setOcrBatchStatus] = useState<{
     total?: number;
     hasOcr?: number;
     pending?: number;
     noPdf?: number;
+    lastRun?: BatchRun | null;
   } | null>(null);
   const [scanDir, setScanDir] = useState('');
   const [scanFiles, setScanFiles] = useState<Array<{ path: string; size: number }>>([]);
   const [scanPicked, setScanPicked] = useState<ReadonlySet<string>>(new Set());
+  const [duplicatePairs, setDuplicatePairs] = useState<DuplicatePair[] | null>(null);
+  const [duplicateLoading, setDuplicateLoading] = useState(false);
+  const [duplicateError, setDuplicateError] = useState('');
+  const [enrichStatus, setEnrichStatus] = useState<EnrichStatus | null>(null);
+  const [enrichLimit, setEnrichLimit] = useState('10');
 
   const refreshTitleStatus = () => {
     artifactApi
@@ -159,10 +197,17 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
       .then((stats) => setOcrBatchStatus(stats.ok ? stats : null))
       .catch(() => setOcrBatchStatus(null));
   };
+  const refreshEnrichStatus = () => {
+    maintenanceApi
+      .enrichStatus()
+      .then((status) => setEnrichStatus(status.ok ? status : null))
+      .catch(() => setEnrichStatus(null));
+  };
   useEffect(() => {
     refreshTitleStatus();
     refreshBatchStatus();
     refreshOcrBatchStatus();
+    refreshEnrichStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -244,7 +289,10 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
     const anchor = batchStream.anchorRef.current + 1;
     batchStream.begin();
     try {
-      await artifactApi.explainBatch({ limit: 3 }, (event) => batchStream.accept(anchor, event));
+      await artifactApi.explainBatch(
+        { limit: 3 },
+        (event) => batchStream.accept(anchor, event),
+      );
       refreshBatchStatus();
       notify('批量讲解完成');
     } catch (error) {
@@ -256,11 +304,59 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
     const anchor = ocrBatchStream.anchorRef.current + 1;
     ocrBatchStream.begin();
     try {
-      await artifactApi.ocrBatch({ limit: 3 }, (event) => ocrBatchStream.accept(anchor, event));
+      await artifactApi.ocrBatch(
+        { limit: 3 },
+        (event) => ocrBatchStream.accept(anchor, event),
+      );
       refreshOcrBatchStatus();
       notify('批量 PDF → Markdown 完成（已落库并写入 OCR 目录）');
     } catch (error) {
       ocrBatchStream.fail(anchor, error);
+    }
+  };
+
+  const runDuplicateScan = async () => {
+    setDuplicateLoading(true);
+    setDuplicateError('');
+    try {
+      const result = await maintenanceApi.duplicateScan();
+      if (!result.ok) throw new Error(result.error || '扫描失败');
+      setDuplicatePairs(result.pairs ?? []);
+      notify(`疑似重复扫描完成：发现 ${result.count ?? result.pairs?.length ?? 0} 对`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setDuplicatePairs(null);
+      setDuplicateError(message);
+      notify(`疑似重复扫描失败：${message}`);
+    } finally {
+      setDuplicateLoading(false);
+    }
+  };
+
+  const runEnrich = async () => {
+    const anchor = enrichStream.anchorRef.current + 1;
+    enrichStream.begin();
+    try {
+      let sawTerminal = false;
+      let terminalError = '';
+      await maintenanceApi.enrich(
+        { limit: normalizeBatchLimit(enrichLimit) },
+        (event) => {
+          enrichStream.accept(anchor, event);
+          if (event.type === 'done' || event.type === 'result') {
+            sawTerminal = true;
+            if (event.ok === false) terminalError = String(event.error || '元数据补全失败');
+          }
+        },
+      );
+      if (!sawTerminal) throw new Error('元数据补全未返回终态事件');
+      if (terminalError) throw new Error(terminalError);
+      await reloadPapers();
+      refreshEnrichStatus();
+      notify('元数据补全完成');
+    } catch (error) {
+      enrichStream.fail(anchor, error);
+      notify(`元数据补全失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -574,9 +670,9 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
             <div className="manage__tool">
               <h4>标题中文翻译补齐</h4>
               <p className="deep__fact">
-                待翻译 {titlePending ?? '—'} 篇（GET /api/title-translations）
+                待翻译 {titlePending ?? '—'} 篇 <code className="manage__endpoint">GET /api/title-translations</code>
               </p>
-              <button type="button" className="btn btn--sm" onClick={() => void runTitleTranslations()} disabled={titleStream.state.running}>
+              <button type="button" className="btn btn--primary btn--sm" onClick={() => void runTitleTranslations()} disabled={titleStream.state.running}>
                 补齐 10 篇
               </button>
               <StreamConsole state={titleStream.state} />
@@ -584,8 +680,10 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
 
             <div className="manage__tool">
               <h4>会议名规范</h4>
-              <p className="deep__fact">统一 venue 缩写为权威名称（POST /api/norm-venues）</p>
-              <button type="button" className="btn btn--sm" onClick={() => void runNormVenues()} disabled={venueStream.state.running}>
+              <p className="deep__fact">
+                统一 venue 缩写为权威名称 <code className="manage__endpoint">POST /api/norm-venues</code>
+              </p>
+              <button type="button" className="btn btn--primary btn--sm" onClick={() => void runNormVenues()} disabled={venueStream.state.running}>
                 执行规范
               </button>
               <StreamConsole state={venueStream.state} />
@@ -643,9 +741,9 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
             <div className="manage__tool">
               <h4>PDF 批量补下载</h4>
               <p className="deep__fact">
-                为有 PDF 链接但缺本地文件的论文补齐（POST /api/download-pdfs）
+                为有 PDF 链接但缺本地文件的论文补齐 <code className="manage__endpoint">POST /api/download-pdfs</code>
               </p>
-              <button type="button" className="btn btn--sm" onClick={() => void runDownload()} disabled={downloadStream.state.running}>
+              <button type="button" className="btn btn--primary btn--sm" onClick={() => void runDownload()} disabled={downloadStream.state.running}>
                 补下载（最多 20 篇）
               </button>
               <StreamConsole state={downloadStream.state} />
@@ -654,10 +752,17 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
             <div className="manage__tool">
               <h4>批量生成讲解</h4>
               <p className="deep__fact">
-                待生成 {batchStatus?.pending ?? '—'} 篇 · 有 PDF {batchStatus?.withPdf ?? '—'} 篇（GET /api/explain-batch）
+                待生成 {batchStatus?.pending ?? '—'} 篇 · 有 PDF {batchStatus?.withPdf ?? '—'} 篇{' '}
+                <code className="manage__endpoint">GET /api/explain-batch</code>
               </p>
-              <button type="button" className="btn btn--sm" onClick={() => void runExplainBatch()} disabled={batchStream.state.running}>
-                批量讲解（limit=3）
+              <p className="manage__last-run">{formatLastRun(batchStatus?.lastRun)}</p>
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={() => void runExplainBatch()}
+                disabled={batchStream.state.running}
+              >
+                {batchStream.state.running ? '讲解进行中…' : '批量讲解（limit=3）'}
               </button>
               <StreamConsole state={batchStream.state} />
             </div>
@@ -666,11 +771,12 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
               <h4>批量 PDF → Markdown</h4>
               <p className="deep__fact">
                 待转换 {ocrBatchStatus?.pending ?? '—'} 篇 · 已有 OCR {ocrBatchStatus?.hasOcr ?? '—'} 篇 · 缺少 PDF{' '}
-                {ocrBatchStatus?.noPdf ?? '—'} 篇（GET /api/ocr-md-batch）
+                {ocrBatchStatus?.noPdf ?? '—'} 篇 <code className="manage__endpoint">GET /api/ocr-md-batch</code>
               </p>
+              <p className="manage__last-run">{formatLastRun(ocrBatchStatus?.lastRun)}</p>
               <button
                 type="button"
-                className="btn btn--sm"
+                className="btn btn--primary btn--sm"
                 onClick={() => void runOcrBatch()}
                 disabled={ocrBatchStream.state.running || (ocrBatchStatus ? ocrBatchStatus.pending === 0 : false)}
               >
@@ -684,8 +790,88 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
             </div>
 
             <div className="manage__tool">
+              <h4>疑似重复扫描</h4>
+              <p className="deep__fact" aria-live="polite">
+                {duplicatePairs === null ? '尚未扫描' : `发现 ${duplicatePairs.length} 对疑似重复论文`}{' '}
+                <code className="manage__endpoint">GET /api/dup-scan</code>
+              </p>
+              {duplicateError && (
+                <p className="manage__tool-error" role="alert">
+                  扫描失败：{duplicateError}
+                </p>
+              )}
+              {duplicatePairs && duplicatePairs.length > 0 && (
+                <ol className="manage__pairs" aria-label="疑似重复论文对">
+                  {duplicatePairs.map((pair) => (
+                    <li key={`${pair.left.id}:${pair.right.id}`}>
+                      <div>
+                        <strong title={pair.left.title || pair.left.id}>{pair.left.title || pair.left.id}</strong>
+                        <small>{[pair.left.venue, pair.left.year].filter(Boolean).join(' · ') || '元数据缺失'}</small>
+                      </div>
+                      <span className="manage__pair-score" aria-label={`相似度 ${Math.round(pair.similarity * 100)}%`}>
+                        ≈ {Math.round(pair.similarity * 100)}%
+                      </span>
+                      <div>
+                        <strong title={pair.right.title || pair.right.id}>{pair.right.title || pair.right.id}</strong>
+                        <small>{[pair.right.venue, pair.right.year].filter(Boolean).join(' · ') || '元数据缺失'}</small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={() => void runDuplicateScan()}
+                disabled={duplicateLoading}
+              >
+                {duplicateLoading ? '扫描中…' : '扫描'}
+              </button>
+            </div>
+
+            <div className="manage__tool">
+              <h4>元数据补全</h4>
+              <p className="deep__fact">
+                缺 year/venue {enrichStatus?.missingMetadata ?? '—'} 篇 · 已录作者{' '}
+                {enrichStatus?.withAuthors ?? '—'} 篇 · 待补作者 {enrichStatus?.missingAuthors ?? '—'} 篇{' '}
+                <code className="manage__endpoint">POST /api/enrich</code>
+              </p>
+              <label className="manage__limit-control">
+                <span>本次处理篇数</span>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  aria-label="元数据补全篇数"
+                  value={enrichLimit}
+                  placeholder="10"
+                  disabled={enrichStream.state.running}
+                  onChange={(event) => updateBatchLimit(event.target.value, setEnrichLimit)}
+                />
+                <small>留空或 0 = 全部</small>
+              </label>
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={() => void runEnrich()}
+                disabled={enrichStream.state.running || (enrichStatus ? enrichStatus.pending === 0 : false)}
+              >
+                {enrichStream.state.running
+                  ? '补全进行中…'
+                  : enrichStatus && enrichStatus.pending === 0
+                    ? '无需补全'
+                    : `补全（${batchLimitLabel(enrichLimit)}）`}
+              </button>
+              <StreamConsole state={enrichStream.state} />
+            </div>
+
+            <div className="manage__tool">
               <h4>语义索引维护</h4>
-              <p className="deep__fact">重建本地嵌入索引以支持语义检索（POST /api/embed）</p>
+              <p className="deep__fact">
+                重建本地嵌入索引以支持语义检索 <code className="manage__endpoint">POST /api/embed</code>
+              </p>
               <div className="deep__actions">
                 <button type="button" className="btn btn--sm" onClick={() => void runEmbed('missing')} disabled={embedStream.state.running}>
                   补齐缺失

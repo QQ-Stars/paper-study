@@ -863,6 +863,7 @@ def load_production_startup_snapshot(
     path: str | os.PathLike[str],
     *,
     expected_file_sha256: str | None = None,
+    require_frozen_node_executable: bool = True,
 ) -> ProductionStartupSnapshot:
     snapshot_path = Path(path).resolve(strict=True)
     try:
@@ -894,7 +895,10 @@ def load_production_startup_snapshot(
             "The production startup snapshot identity or self hash is invalid.",
         )
     try:
-        rollback_map = validate_frozen_node_rollback_map(document["frozenNodeRollbackMap"])
+        rollback_map = validate_frozen_node_rollback_map(
+            document["frozenNodeRollbackMap"],
+            require_frozen_node_executable=require_frozen_node_executable,
+        )
     except (KeyError, ProductionRollbackError) as error:
         raise FinalWindowError("STARTUP_SNAPSHOT_INVALID", str(error)) from error
     rollback_sha = hashlib.sha256(canonical_json_bytes(rollback_map)).hexdigest()
@@ -1032,6 +1036,8 @@ def _verify_snapshot_identity(
 
 def _load_lease(
     value: str | os.PathLike[str],
+    *,
+    require_frozen_node_executable: bool = True,
 ) -> tuple[Path, bytes, dict[str, object]]:
     path = Path(value).resolve(strict=True)
     try:
@@ -1039,7 +1045,8 @@ def _load_lease(
         document = _strict_json_document(payload, _LEASE_FIELDS)
         unsigned = {key: item for key, item in document.items() if key != "leaseSha256"}
         rollback_map = validate_frozen_node_rollback_map(
-            document["frozenNodeRollbackMap"]
+            document["frozenNodeRollbackMap"],
+            require_frozen_node_executable=require_frozen_node_executable,
         )
         decoded_owner = base64.b64decode(
             _required_string(document["nodeActiveOwnerPayloadBase64"]), validate=True

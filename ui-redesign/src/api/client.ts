@@ -2,8 +2,11 @@
  * NDJSON 流式接口统一通过 streamNdjson 消费（后端逐行推送事件，终态事件 type === 'done'）。 */
 
 import type {
+  BatchRun,
   Candidate,
   CiteGraph,
+  DuplicatePair,
+  EnrichStatus,
   LegacyJob,
   Paper,
   ReviewSnapshot,
@@ -113,6 +116,18 @@ export const libraryApi = {
       `/api/pdf/status?id=${encodeURIComponent(id)}`,
     ),
   pdfUrl: (id: string) => `/pdfbytes?id=${encodeURIComponent(id)}`,
+  /* 库内引用上下文（cite_edges）：它引用了谁 / 谁引用了它。 */
+  citeContext: (id: string) =>
+    get<{
+      ok: boolean;
+      cites?: Array<{ id: string; title: string; titleZh: string; year: string; venue: string; tldr: string }>;
+      citedBy?: Array<{ id: string; title: string; titleZh: string; year: string; venue: string; tldr: string }>;
+      error?: string;
+    }>(`/api/cite-context?id=${encodeURIComponent(id)}`),
+  paperAuthors: (id: string) =>
+    get<{ ok: boolean; id: string; authors: string[]; error?: string }>(
+      `/api/paper-authors?id=${encodeURIComponent(id)}`,
+    ),
 };
 
 /* ── 笔记与 AI 工件（legacy） ────────────────────── */
@@ -142,6 +157,7 @@ export const artifactApi = {
       pending?: number;
       running?: boolean;
       withPdf?: number;
+      lastRun?: BatchRun | null;
       [key: string]: unknown;
     }>('/api/explain-batch'),
   explainBatch: (
@@ -176,12 +192,23 @@ export const artifactApi = {
       withPdf?: number;
       pending?: number;
       noPdf?: number;
+      lastRun?: BatchRun | null;
       error?: string;
     }>('/api/ocr-md-batch'),
   /* 批量 PDF→Markdown(OCR)：NDJSON 流，逐篇 ITEM:: 进度 → progress 事件，
    * 终态 result 事件 summary 字段（与 explainBatch 同契约）。 */
   ocrBatch: (options: { limit?: number }, onEvent: (event: StreamEvent) => void) =>
     streamNdjson('/api/ocr-md-batch', options, onEvent),
+};
+
+/* ── 元数据与库维护（只读扫描 + NDJSON 补全） ─────── */
+
+export const maintenanceApi = {
+  duplicateScan: () =>
+    get<{ ok: boolean; count: number; pairs: DuplicatePair[]; error?: string }>('/api/dup-scan'),
+  enrichStatus: () => get<EnrichStatus>('/api/enrich-status'),
+  enrich: (options: { limit?: number }, onEvent: (event: StreamEvent) => void) =>
+    streamNdjson('/api/enrich', options, onEvent),
 };
 
 /* ── 复习 ───────────────────────────────────────── */

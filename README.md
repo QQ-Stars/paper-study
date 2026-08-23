@@ -182,7 +182,7 @@ $ownerMarker = (Resolve-Path -LiteralPath 'data/compatibility/runtime/production
 .\.venv\Scripts\python.exe -B -m backend.app.cli.native_runtime stop --native-runtime-spec $nativeSpec --build-identity-manifest $buildIdentity --state-directory $runtimeState
 ```
 
-`start` 会在启动子进程前复验 owner marker 引用的 exact HandoffReceipt、startup snapshot、BuildIdentity、DatabaseIdentity、OriginReceipt 与 completed cutover lease；六个 HTTP 端点和 MCP `tools/list` 九工具未全部通过时会自动排空刚启动的角色。若 marker 仍是 `node_active`，说明尚未完成一次性 P6 接管，不能绕过 admission 直接连接 Live 数据库。
+`start` 会在启动子进程前复验 owner marker 引用的 exact HandoffReceipt、startup snapshot、BuildIdentity、DatabaseIdentity 与 OriginReceipt。早期接管把 completed cutover lease 写在 `%TEMP%`；该临时文件已被系统清理时，日常重启改用 owner 与 receipt/snapshot 的自哈希绑定，文件仍存在时则继续严格复验其 SHA、phase 和 run ID。首次接管、pending handoff 与真正的 frozen Node 回滚仍严格要求原始 lease 和冻结 Node 身份。六个 HTTP 端点和 MCP `tools/list` 九工具未全部通过时会自动排空刚启动的角色。若 marker 仍是 `node_active`，说明尚未完成一次性 P6 接管，不能绕过 admission 直接连接 Live 数据库。
 
 默认入口行为如下：
 
