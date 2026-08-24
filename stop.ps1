@@ -19,9 +19,47 @@ $py = Join-Path $repo '.venv\Scripts\python.exe'
 $ownerMarker = Join-Path $repo 'data\compatibility\runtime\production-owner.json'
 $nativeSpec  = Join-Path $repo 'data\compatibility\runtime\native-runtime-v1.json'
 $stateDir    = Join-Path $repo 'data\compatibility\runtime\native-state'
+$localStateDir = Join-Path $repo 'data\local-runtime'
+$localPidPath = Join-Path $localStateDir 'server.pid'
+$localStopped = $false
+
+# ── 0) 停止首次运行的隔离 Node 进程（只接受本地状态文件中的 PID + Node 可执行文件） ──
+if (Test-Path -LiteralPath $localPidPath) {
+    $localRecord = $null
+    try { $localRecord = Get-Content -Raw -LiteralPath $localPidPath | ConvertFrom-Json } catch { $localRecord = $null }
+    $localPid = 0
+    if ($localRecord -and $localRecord.pid) {
+        try { $localPid = [int]$localRecord.pid } catch { $localPid = 0 }
+    } else {
+        try { $localPid = [int](Get-Content -Raw -LiteralPath $localPidPath) } catch { $localPid = 0 }
+    }
+    $localProcess = if ($localPid -gt 0) { Get-Process -Id $localPid -ErrorAction SilentlyContinue } else { $null }
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    $expectedExecutable = if ($localRecord -and $localRecord.executable) { [string]$localRecord.executable } else { [string]$nodeCommand.Source }
+    $sameNode = $localProcess -and $localProcess.Path -and $expectedExecutable -and
+        [string]::Equals($localProcess.Path, $expectedExecutable, [System.StringComparison]::OrdinalIgnoreCase)
+    $sameStart = $true
+    if ($localProcess -and $localRecord -and $localRecord.startedAt) {
+        try {
+            $actualStart = ([DateTimeOffset]$localProcess.StartTime).ToUnixTimeMilliseconds()
+            $sameStart = [Math]::Abs($actualStart - [int64]$localRecord.startedAt) -le 30000
+        } catch { $sameStart = $false }
+    }
+    if ($localProcess -and $sameNode -and $sameStart) {
+        Write-Host ('正在停止本地隔离运行时（PID ' + $localPid + '）…')
+        Stop-Process -Id $localPid -Force -ErrorAction SilentlyContinue
+        $localStopped = $true
+        Start-Sleep -Seconds 1
+    } elseif ($localProcess) {
+        Write-Host ('警告：本地 PID 文件未匹配当前 Node 进程（PID ' + $localPid + '），未结束该进程。')
+    }
+    if (-not (Get-Process -Id $localPid -ErrorAction SilentlyContinue)) {
+        Remove-Item -LiteralPath $localPidPath -Force -ErrorAction SilentlyContinue
+    }
+}
 
 # ── 1) 优雅停止后端 ──
-if (Test-PortListen 5173) {
+if ((Test-PortListen 5173) -and -not $localStopped) {
     Write-Host '正在优雅停止后端（native_runtime stop）…'
     try {
         $owner = Get-Content -Raw -Encoding UTF8 -LiteralPath $ownerMarker | ConvertFrom-Json

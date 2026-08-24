@@ -14,7 +14,9 @@
     "frontend:build": "npm run build --prefix frontend",
     "test:all": "npm test && npm run frontend:test",
     "rename-pdfs": "node scripts/rename-pdfs-by-title.js",
-    "start": "node server.js"
+    "start": "node scripts/start-local.js --install-missing --build-missing",
+    "start:local": "node scripts/start-local.js",
+    "start:legacy": "node server.js"
   },
   "repository": {
     "type": "git",

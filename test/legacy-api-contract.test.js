@@ -237,6 +237,22 @@ test('legacy server process boots current server.js on an OS-assigned loopback p
   assert.deepEqual(liveDatabaseState(), before);
 });
 
+test('a fresh local runtime serves the committed workspace build', async () => {
+  const { startLegacyServer } = require('./support/legacy-server-process');
+  const child = await startLegacyServer({ localRuntime: true });
+  try {
+    const papers = await child.request('/api/papers');
+    assert.equal(papers.status, 200);
+    assert.deepEqual(await papers.json(), []);
+
+    const workspace = await child.request('/workspace/');
+    assert.equal(workspace.status, 200);
+    assert.match(await workspace.text(), /<title>Paper Study · 研究工作区<\/title>/u);
+  } finally {
+    await child.stop();
+  }
+});
+
 test('legacy black-box freezes paper reads, writes, and reviews', async () => {
   const { startLegacyServer } = require('./support/legacy-server-process');
   const child = await startLegacyServer();

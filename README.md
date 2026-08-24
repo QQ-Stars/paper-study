@@ -157,9 +157,13 @@ macOS / Linux 将 `npm.cmd` 换成 `npm`。旧 `frontend/` 应用的构建（`np
 
 ### 5) 一键启动（推荐）
 
-Windows 用户直接**双击 `start.cmd`**（或在终端执行 `powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1`）：脚本会检查 owner marker 门禁 → 缺失前端产物时自动构建 → 拉起 FastAPI 四角色（api/worker/scheduler/mcp）→ 打开 <http://localhost:5173/workspace/>。加 `-SkipBrowser` 参数可跳过自动开浏览器。
+Windows 用户直接**双击 `start.cmd`**（或在终端执行 `powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1`）。新克隆没有 P6 production owner 时，脚本会自动启动**隔离的本地模式**：使用 `data/local-runtime/app.db`，不会读取或写入 Live 数据库；缺少 Node 依赖或前端构建产物时会自动安装/构建。浏览器打开 <http://localhost:5173/workspace/>。加 `-SkipBrowser` 参数可跳过自动开浏览器。
 
-**一键关闭**：双击 `stop.cmd` —— 先优雅执行 `native_runtime stop`，未停干净时自动强制结束残留的后端进程，并同时关闭 ui-redesign 开发服务器（5180，若在运行）。
+macOS / Linux 可在项目根目录执行 `npm start`（或 `npm run start:local`）；前者首次运行会自动补齐 Node 依赖和缺失的前端构建，命令以前台方式运行，按 `Ctrl+C` 停止。也可以手动执行 `node scripts/start-local.js --detach --install-missing --build-missing` 让它后台运行。需要直接运行保留的旧 Node 入口时使用 `npm run start:legacy`。
+
+如果本机已经完成 P6 接管且存在有效的 `data/compatibility/runtime/production-owner.json`，`start.cmd` 会自动切回受保护的 FastAPI production runtime，不会使用本地回退模式。
+
+**一键关闭**：双击 `stop.cmd` —— 本地模式会按 PID 安全停止隔离的 Node 进程；P6 模式先优雅执行 `native_runtime stop`，未停干净时再结束本项目残留的后端进程，并同时关闭 ui-redesign 开发服务器（5180，若在运行）。
 
 ### 6) 手动启动原生 Windows production runtime（可选）
 
@@ -346,6 +350,7 @@ DB_PATH = '<项目路径>\data\app.db'
 
 ## 八、常见问题
 
+- **首次克隆提示没有 owner marker**：直接运行 `start.cmd` 即可进入隔离本地模式；P6 owner marker 只在 production runtime 已完成受控接管后才需要。
 - **端口 5173 被占用 / 无法打开**：先执行 native `status`/`stop` 排除残留角色。端口属于 frozen native runtime spec；更换端口必须重新 `configure`、冻结 BuildIdentity 并完成受控接管，不能只改当前 shell 环境。
 - **采集 / 讲解报错或无响应**：通常是**未配置 API Key 或 Key 有误**，请在 ⚙ 设置中点击「测试连接」排查。
 - **提示 `python` 命令不存在**：安装 Python 时未勾选「Add Python to PATH」。请重装并勾选，或改用 `py`（Windows）/ `python3`（macOS/Linux）。

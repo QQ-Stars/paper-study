@@ -41,20 +41,118 @@ type EditField =
   | 'tldr'
   | 'contribution';
 
-const EDIT_LABELS: Array<{ key: EditField; label: string; wide?: boolean }> = [
-  { key: 'title', label: '英文题名', wide: true },
-  { key: 'title_zh', label: '中文题名', wide: true },
-  { key: 'venue', label: '会议/期刊' },
-  { key: 'year', label: '年份' },
-  { key: 'type', label: '研究类型' },
-  { key: 'topic', label: '主题' },
-  { key: 'arxiv_id', label: 'arXiv ID' },
-  { key: 'doi', label: 'DOI' },
-  { key: 'url', label: '来源链接', wide: true },
-  { key: 'pdf_url', label: 'PDF 链接', wide: true },
-  { key: 'tldr', label: 'TL;DR 摘要', wide: true },
-  { key: 'contribution', label: '核心贡献', wide: true },
+const EDIT_GROUPS: Array<{
+  id: string;
+  label: string;
+  wide?: boolean;
+  fields: Array<{ key: EditField; label: string; wide?: boolean }>;
+}> = [
+  {
+    id: 'basic',
+    label: '基本信息',
+    fields: [
+      { key: 'title', label: '英文题名', wide: true },
+      { key: 'title_zh', label: '中文题名', wide: true },
+      { key: 'venue', label: '会议/期刊' },
+      { key: 'year', label: '年份' },
+      { key: 'type', label: '研究类型' },
+      { key: 'topic', label: '主题' },
+    ],
+  },
+  {
+    id: 'identifiers',
+    label: '标识与链接',
+    fields: [
+      { key: 'arxiv_id', label: 'arXiv ID' },
+      { key: 'doi', label: 'DOI' },
+      { key: 'url', label: '来源链接', wide: true },
+      { key: 'pdf_url', label: 'PDF 链接', wide: true },
+    ],
+  },
+  {
+    id: 'summary',
+    label: '摘要信息',
+    wide: true,
+    fields: [
+      { key: 'tldr', label: 'TL;DR 摘要', wide: true },
+      { key: 'contribution', label: '核心贡献', wide: true },
+    ],
+  },
 ];
+
+const EDIT_LABELS = EDIT_GROUPS.flatMap((group) => group.fields);
+
+const MANAGE_SECTIONS = [
+  { id: 'manage-add', label: '单篇新增' },
+  { id: 'manage-edit', label: '单篇编辑' },
+  { id: 'manage-tools', label: '批量维护' },
+  { id: 'manage-delete', label: '危险操作' },
+] as const;
+
+function PaperFields({
+  idPrefix,
+  accessiblePrefix,
+  values,
+  titleRequired,
+  onChange,
+}: {
+  idPrefix: string;
+  accessiblePrefix: string;
+  values: Partial<Record<EditField, string>>;
+  titleRequired?: boolean;
+  onChange: (key: EditField, value: string) => void;
+}) {
+  return (
+    <div className="manage__field-groups">
+      {EDIT_GROUPS.map((group) => (
+        <fieldset
+          key={group.id}
+          className={`manage__field-group${group.wide ? ' manage__field-group--wide' : ''}`}
+        >
+          <legend>{group.label}</legend>
+          <div className="manage__form">
+            {group.fields.map((field) => {
+              const fieldId = `${idPrefix}-${field.key}`;
+              const isLongText = field.key === 'tldr' || field.key === 'contribution';
+              const required = titleRequired && field.key === 'title';
+              return (
+                <label
+                  key={field.key}
+                  className={field.wide ? 'manage__field manage__field--wide' : 'manage__field'}
+                  htmlFor={fieldId}
+                >
+                  <span>
+                    {field.label}
+                    {required && <em className="manage__required"> *</em>}
+                  </span>
+                  {isLongText ? (
+                    <textarea
+                      className="input"
+                      id={fieldId}
+                      aria-label={`${accessiblePrefix}${field.label}`}
+                      aria-required={required || undefined}
+                      value={values[field.key] ?? ''}
+                      onChange={(event) => onChange(field.key, event.target.value)}
+                    />
+                  ) : (
+                    <input
+                      className="input"
+                      id={fieldId}
+                      aria-label={`${accessiblePrefix}${field.label}`}
+                      aria-required={required || undefined}
+                      value={values[field.key] ?? ''}
+                      onChange={(event) => onChange(field.key, event.target.value)}
+                    />
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+      ))}
+    </div>
+  );
+}
 
 function BatchLimitControl({
   id,
@@ -570,52 +668,42 @@ export function ManagePage({
 
   return (
     <div className="page page-enter manage">
+      <nav className="manage__section-nav" aria-label="管理页分区">
+        {MANAGE_SECTIONS.map((section) => (
+          <a key={section.id} href={`#${section.id}`}>
+            {section.label}
+          </a>
+        ))}
+      </nav>
+
       <div className="manage__grid">
         {/* ── 新增论文 ── */}
-        <section className="card manage__panel" aria-labelledby="manage-add">
+        <section className="card manage__panel" id="manage-add" aria-labelledby="manage-add-title">
           <header className="insights__panel-head">
-            <h3 className="section-title" id="manage-add">
+            <h2 className="section-title" id="manage-add-title">
               手动新增论文
-            </h3>
+            </h2>
             <span className="eyebrow">POST /api/paper/add</span>
           </header>
-          <div className="manage__form">
-            {EDIT_LABELS.map((field) => (
-              <label key={field.key} className={field.wide ? 'manage__field manage__field--wide' : 'manage__field'}>
-                <span>
-                  {field.label}
-                  {field.key === 'title' && <em className="manage__required"> *</em>}
-                </span>
-                {field.key === 'tldr' || field.key === 'contribution' ? (
-                  <textarea
-                    className="input"
-                    aria-label={field.label}
-                    value={draft[field.key] ?? ''}
-                    onChange={(event) => setDraft((prev) => ({ ...prev, [field.key]: event.target.value }))}
-                  />
-                ) : (
-                  <input
-                    className="input"
-                    aria-label={field.label}
-                    value={draft[field.key] ?? ''}
-                    onChange={(event) => setDraft((prev) => ({ ...prev, [field.key]: event.target.value }))}
-                  />
-                )}
-              </label>
-            ))}
-          </div>
+          <PaperFields
+            idPrefix="manage-add"
+            accessiblePrefix="新增论文"
+            values={draft}
+            titleRequired
+            onChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
+          />
           <button type="button" className="btn btn--primary" onClick={() => void addPaper()} disabled={adding}>
             <PlusIcon size={14} />
-            入库
+            {adding ? '入库中…' : '入库'}
           </button>
         </section>
 
         {/* ── 编辑论文 ── */}
-        <section className="card manage__panel" aria-labelledby="manage-edit">
+        <section className="card manage__panel" id="manage-edit" aria-labelledby="manage-edit-title">
           <header className="insights__panel-head">
-            <h3 className="section-title" id="manage-edit">
+            <h2 className="section-title" id="manage-edit-title">
               编辑论文字段
-            </h3>
+            </h2>
             <span className="eyebrow">POST /api/paper/update</span>
           </header>
           <label className="library__search input">
@@ -653,32 +741,17 @@ export function ManagePage({
           ) : (
             <p className="manage__picks-empty">未找到匹配的论文，请调整检索词。</p>
           )}
-          {editTarget && (
-            <div className="manage__form">
-              {EDIT_LABELS.map((field) => (
-                <label key={field.key} className={field.wide ? 'manage__field manage__field--wide' : 'manage__field'}>
-                  <span>{field.label}</span>
-                  {field.wide && (field.key === 'tldr' || field.key === 'contribution') ? (
-                    <textarea
-                      className="input"
-                      aria-label={field.label}
-                      value={editDraft[field.key] ?? ''}
-                      onChange={(event) =>
-                        setEditDraft((prev) => ({ ...prev, [field.key]: event.target.value }))
-                      }
-                    />
-                  ) : (
-                    <input
-                      className="input"
-                      aria-label={field.label}
-                      value={editDraft[field.key] ?? ''}
-                      onChange={(event) =>
-                        setEditDraft((prev) => ({ ...prev, [field.key]: event.target.value }))
-                      }
-                    />
-                  )}
-                </label>
-              ))}
+          {editTarget ? (
+            <PaperFields
+              idPrefix="manage-edit"
+              accessiblePrefix="编辑论文"
+              values={editDraft}
+              onChange={(key, value) => setEditDraft((prev) => ({ ...prev, [key]: value }))}
+            />
+          ) : (
+            <div className="manage__edit-empty" role="status">
+              <strong>选择一篇论文后编辑</strong>
+              <span>从上方最近论文或检索结果中选择，完整字段将在此处展开。</span>
             </div>
           )}
           {editTarget && (
@@ -696,110 +769,26 @@ export function ManagePage({
           )}
         </section>
 
-        {/* ── 条件批量删除 ── */}
-        <section className="card manage__panel manage__panel--wide manage__panel--danger" aria-labelledby="manage-delete">
-          <header className="insights__panel-head">
-            <h3 className="section-title" id="manage-delete">
-              条件批量删除
-            </h3>
-            <span className="eyebrow">POST /api/delete · 危险操作</span>
-          </header>
-          <p className="manage__delete-hint">
-            组合以下条件圈定待删论文，删除前会弹出确认框逐篇核对；删除不可撤销。
-          </p>
-          <div className="manage__form">
-            <label className="manage__field">
-              <span>学习状态</span>
-              <select className="input" aria-label="删除条件：学习状态" value={delStatus} onChange={(event) => setDelStatus(event.target.value as typeof delStatus)}>
-                <option value="all">全部</option>
-                <option value="未开始">未开始</option>
-                <option value="学习中">学习中</option>
-                <option value="已理解">已理解</option>
-              </select>
-            </label>
-            <label className="manage__field">
-              <span>采集来源</span>
-              <select className="input" aria-label="删除条件：来源" value={delSource} onChange={(event) => setDelSource(event.target.value)}>
-                <option value="all">全部</option>
-                {sourceOptions.map((source) => (
-                  <option key={source} value={source}>
-                    {source}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="manage__field">
-              <span>主题</span>
-              <select className="input" aria-label="删除条件：主题" value={delTopic} onChange={(event) => setDelTopic(event.target.value)}>
-                <option value="all">全部</option>
-                {topicOptions.map((topic) => (
-                  <option key={topic} value={topic}>
-                    {topic}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="manage__field">
-              <span>年份</span>
-              <select className="input" aria-label="删除条件：年份" value={delYear} onChange={(event) => setDelYear(event.target.value)}>
-                <option value="all">全部</option>
-                {yearOptions.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="manage__field">
-              <span>本地 PDF</span>
-              <select className="input" aria-label="删除条件：PDF" value={delPdf} onChange={(event) => setDelPdf(event.target.value as typeof delPdf)}>
-                <option value="all">全部</option>
-                <option value="with">有 PDF</option>
-                <option value="without">无 PDF</option>
-              </select>
-            </label>
-            <label className="manage__field">
-              <span>收藏状态</span>
-              <select className="input" aria-label="删除条件：收藏" value={delFavorite} onChange={(event) => setDelFavorite(event.target.value as typeof delFavorite)}>
-                <option value="all">全部</option>
-                <option value="fav">已收藏</option>
-                <option value="unfav">未收藏</option>
-              </select>
-            </label>
-          </div>
-          <div className="manage__delete-preview">
-            <p>
-              当前条件命中 <strong className="manage__delete-count">{deleteMatches.length}</strong> 篇
-              {deleteMatches.length > 0 && (
-                <span className="manage__delete-sample">
-                  ：{(deleteMatches[0].title_zh || deleteMatches[0].title).slice(0, 30)}
-                  {deleteMatches.length > 1 ? ' 等' : ''}
-                </span>
-              )}
-            </p>
-            <button
-              type="button"
-              className="btn btn--danger"
-              disabled={deleteMatches.length === 0}
-              onClick={() => setDeleteTargets(deleteMatches)}
-            >
-              批量删除（{deleteMatches.length} 篇）
-            </button>
-          </div>
-        </section>
-
         {/* ── 批量工具 ── */}
-        <section className="card manage__panel manage__panel--wide" aria-labelledby="manage-tools">
+        <section
+          className="card manage__panel manage__panel--wide manage__panel--tools"
+          id="manage-tools"
+          aria-labelledby="manage-tools-title"
+        >
           <header className="insights__panel-head">
-            <h3 className="section-title" id="manage-tools">
+            <h2 className="section-title" id="manage-tools-title">
               批量维护工具
-            </h3>
+            </h2>
             <span className="eyebrow">NDJSON 流式任务</span>
           </header>
 
           <div className="manage__tools">
-            <div className="manage__tool">
-              <h4>标题中文翻译补齐</h4>
+            <article
+              className="manage__tool"
+              aria-labelledby="manage-tool-title-translations"
+              aria-busy={titleStream.state.running}
+            >
+              <h3 id="manage-tool-title-translations">标题中文翻译补齐</h3>
               <p className="deep__fact">
                 待翻译 {titlePending ?? '—'} 篇 <code className="manage__endpoint">GET /api/title-translations</code>
               </p>
@@ -825,10 +814,14 @@ export function ManagePage({
                   : `补齐（${batchLimitLabel(titleLimit.value, titleLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={titleStream.state} />
-            </div>
+            </article>
 
-            <div className="manage__tool">
-              <h4>会议名规范</h4>
+            <article
+              className="manage__tool"
+              aria-labelledby="manage-tool-normalize-venues"
+              aria-busy={venueStream.state.running}
+            >
+              <h3 id="manage-tool-normalize-venues">会议名规范</h3>
               <p className="deep__fact">
                 统一 venue 缩写为权威名称 <code className="manage__endpoint">POST /api/norm-venues</code>
               </p>
@@ -836,10 +829,14 @@ export function ManagePage({
                 执行规范
               </button>
               <StreamConsole state={venueStream.state} />
-            </div>
+            </article>
 
-            <div className="manage__tool">
-              <h4>本地 PDF 导入</h4>
+            <article
+              className="manage__tool"
+              aria-labelledby="manage-tool-import-pdfs"
+              aria-busy={scanStream.state.running}
+            >
+              <h3 id="manage-tool-import-pdfs">本地 PDF 导入</h3>
               <div className="reviews__start-row">
                 <input
                   className="input"
@@ -885,10 +882,14 @@ export function ManagePage({
                 导入所选（{scanPicked.size}）
               </button>
               <StreamConsole state={scanStream.state} />
-            </div>
+            </article>
 
-            <div className="manage__tool">
-              <h4>PDF 批量补下载</h4>
+            <article
+              className="manage__tool"
+              aria-labelledby="manage-tool-download-pdfs"
+              aria-busy={downloadStream.state.running}
+            >
+              <h3 id="manage-tool-download-pdfs">PDF 批量补下载</h3>
               <p className="deep__fact">
                 为有 PDF 链接但缺本地文件的论文补齐 <code className="manage__endpoint">POST /api/download-pdfs</code>
               </p>
@@ -914,10 +915,14 @@ export function ManagePage({
                   : `补下载（${batchLimitLabel(downloadLimit.value, downloadLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={downloadStream.state} />
-            </div>
+            </article>
 
-            <div className="manage__tool">
-              <h4>批量生成讲解</h4>
+            <article
+              className="manage__tool"
+              aria-labelledby="manage-tool-explain-batch"
+              aria-busy={batchStream.state.running}
+            >
+              <h3 id="manage-tool-explain-batch">批量生成讲解</h3>
               <p className="deep__fact">
                 待生成 {batchStatus?.pending ?? '—'} 篇 · 有 PDF {batchStatus?.withPdf ?? '—'} 篇{' '}
                 <code className="manage__endpoint">GET /api/explain-batch</code>
@@ -947,10 +952,14 @@ export function ManagePage({
                     : `批量讲解（${batchLimitLabel(explainLimit.value, explainLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={batchStream.state} />
-            </div>
+            </article>
 
-            <div className="manage__tool">
-              <h4>批量 PDF → Markdown</h4>
+            <article
+              className="manage__tool"
+              aria-labelledby="manage-tool-ocr-batch"
+              aria-busy={ocrBatchStream.state.running}
+            >
+              <h3 id="manage-tool-ocr-batch">批量 PDF → Markdown</h3>
               <p className="deep__fact">
                 待转换 {ocrBatchStatus?.pending ?? '—'} 篇 · 已有 OCR {ocrBatchStatus?.hasOcr ?? '—'} 篇 · 缺少 PDF{' '}
                 {ocrBatchStatus?.noPdf ?? '—'} 篇 <code className="manage__endpoint">GET /api/ocr-md-batch</code>
@@ -980,10 +989,14 @@ export function ManagePage({
                     : `批量转换（${batchLimitLabel(ocrLimit.value, ocrLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={ocrBatchStream.state} />
-            </div>
+            </article>
 
-            <div className="manage__tool">
-              <h4>疑似重复扫描</h4>
+            <article
+              className="manage__tool"
+              aria-labelledby="manage-tool-duplicate-scan"
+              aria-busy={duplicateLoading}
+            >
+              <h3 id="manage-tool-duplicate-scan">疑似重复扫描</h3>
               <p className="deep__fact" aria-live="polite">
                 {duplicatePairs === null ? '尚未扫描' : `发现 ${duplicatePairs.length} 对疑似重复论文`}{' '}
                 <code className="manage__endpoint">GET /api/dup-scan</code>
@@ -1020,10 +1033,14 @@ export function ManagePage({
               >
                 {duplicateLoading ? '扫描中…' : '扫描'}
               </button>
-            </div>
+            </article>
 
-            <div className="manage__tool">
-              <h4>元数据补全</h4>
+            <article
+              className="manage__tool"
+              aria-labelledby="manage-tool-enrichment"
+              aria-busy={enrichStream.state.running}
+            >
+              <h3 id="manage-tool-enrichment">元数据补全</h3>
               <p className="deep__fact">
                 缺 year/venue {enrichStatus?.missingMetadata ?? '—'} 篇 · 已录作者{' '}
                 {enrichStatus?.withAuthors ?? '—'} 篇 · 待补作者 {enrichStatus?.missingAuthors ?? '—'} 篇{' '}
@@ -1053,10 +1070,14 @@ export function ManagePage({
                     : `补全（${batchLimitLabel(enrichLimit.value, enrichLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={enrichStream.state} />
-            </div>
+            </article>
 
-            <div className="manage__tool">
-              <h4>语义索引维护</h4>
+            <article
+              className="manage__tool"
+              aria-labelledby="manage-tool-embeddings"
+              aria-busy={embedStream.state.running}
+            >
+              <h3 id="manage-tool-embeddings">语义索引维护</h3>
               <p className="deep__fact">
                 重建本地嵌入索引以支持语义检索 <code className="manage__endpoint">POST /api/embed</code>
               </p>
@@ -1069,7 +1090,134 @@ export function ManagePage({
                 </button>
               </div>
               <StreamConsole state={embedStream.state} />
-            </div>
+            </article>
+          </div>
+        </section>
+
+        {/* ── 条件批量删除 ── */}
+        <section
+          className="card manage__panel manage__panel--wide manage__panel--danger"
+          id="manage-delete"
+          aria-labelledby="manage-delete-title"
+          aria-describedby="manage-delete-warning"
+        >
+          <header className="insights__panel-head">
+            <h2 className="section-title" id="manage-delete-title">
+              条件批量删除
+            </h2>
+            <span className="eyebrow">POST /api/delete · 危险操作</span>
+          </header>
+          <p className="manage__delete-hint" id="manage-delete-warning">
+            组合以下条件圈定待删论文，删除前会弹出确认框逐篇核对；删除不可撤销。
+          </p>
+          <div className="manage__form">
+            <label className="manage__field">
+              <span>学习状态</span>
+              <select
+                className="input"
+                aria-label="删除条件：学习状态"
+                value={delStatus}
+                onChange={(event) => setDelStatus(event.target.value as typeof delStatus)}
+              >
+                <option value="all">全部</option>
+                <option value="未开始">未开始</option>
+                <option value="学习中">学习中</option>
+                <option value="已理解">已理解</option>
+              </select>
+            </label>
+            <label className="manage__field">
+              <span>采集来源</span>
+              <select
+                className="input"
+                aria-label="删除条件：来源"
+                value={delSource}
+                onChange={(event) => setDelSource(event.target.value)}
+              >
+                <option value="all">全部</option>
+                {sourceOptions.map((source) => (
+                  <option key={source} value={source}>
+                    {source}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="manage__field">
+              <span>主题</span>
+              <select
+                className="input"
+                aria-label="删除条件：主题"
+                value={delTopic}
+                onChange={(event) => setDelTopic(event.target.value)}
+              >
+                <option value="all">全部</option>
+                {topicOptions.map((topic) => (
+                  <option key={topic} value={topic}>
+                    {topic}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="manage__field">
+              <span>年份</span>
+              <select
+                className="input"
+                aria-label="删除条件：年份"
+                value={delYear}
+                onChange={(event) => setDelYear(event.target.value)}
+              >
+                <option value="all">全部</option>
+                {yearOptions.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="manage__field">
+              <span>本地 PDF</span>
+              <select
+                className="input"
+                aria-label="删除条件：PDF"
+                value={delPdf}
+                onChange={(event) => setDelPdf(event.target.value as typeof delPdf)}
+              >
+                <option value="all">全部</option>
+                <option value="with">有 PDF</option>
+                <option value="without">无 PDF</option>
+              </select>
+            </label>
+            <label className="manage__field">
+              <span>收藏状态</span>
+              <select
+                className="input"
+                aria-label="删除条件：收藏"
+                value={delFavorite}
+                onChange={(event) => setDelFavorite(event.target.value as typeof delFavorite)}
+              >
+                <option value="all">全部</option>
+                <option value="fav">已收藏</option>
+                <option value="unfav">未收藏</option>
+              </select>
+            </label>
+          </div>
+          <div className="manage__delete-preview" aria-live="polite">
+            <p>
+              当前条件命中 <strong className="manage__delete-count">{deleteMatches.length}</strong> 篇
+              {deleteMatches.length > 0 && (
+                <span className="manage__delete-sample">
+                  ：{(deleteMatches[0].title_zh || deleteMatches[0].title).slice(0, 30)}
+                  {deleteMatches.length > 1 ? ' 等' : ''}
+                </span>
+              )}
+            </p>
+            <button
+              type="button"
+              className="btn btn--danger"
+              disabled={deleteMatches.length === 0}
+              onClick={() => setDeleteTargets(deleteMatches)}
+            >
+              批量删除（{deleteMatches.length} 篇）
+            </button>
           </div>
         </section>
       </div>

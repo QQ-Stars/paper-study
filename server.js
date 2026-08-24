@@ -24,7 +24,9 @@ const {
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
-const REACT_DIST = path.join(ROOT, 'frontend', 'dist');
+const REACT_DIST = process.env.STUDY_APP_LOCAL_RUNTIME === '1'
+  ? path.join(ROOT, 'ui-redesign', 'dist')
+  : path.join(ROOT, 'frontend', 'dist');
 const UI_ENTRY = process.env.UI_ENTRY;
 const FRONTEND_ROOTS = Object.freeze({
   react: REACT_DIST,

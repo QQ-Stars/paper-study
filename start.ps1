@@ -3,15 +3,14 @@
 # 或双击 start.cmd。
 #
 # 架构：
-#   后端 = FastAPI（native_runtime 四角色，端口 5173）；旧 Node server.js 已退役。
+#   已完成 P6 接管时：后端 = FastAPI（native_runtime 四角色，端口 5173）。
+#   新克隆/未接管时：使用隔离的 Node 本地运行时（data/local-runtime），不接触 Live 数据库。
 #   前端 = ui-redesign（纸墨风 React+Vite）构建产物由后端 /workspace/ 路由托管；
 #          构建产物缺失时自动执行 ui-redesign npm run build。
 #
 # 逻辑：
-#   1. owner marker 不是 python_active -> 报错退出（需先完成一次性 P6 接管）
-#   2. ui-redesign/dist 缺失 -> 尝试 npm run build（失败仅警告，后端会回退旧前端产物）
-#   3. 5173 已在监听且 /health/live 200 -> 视为已运行，直接打开浏览器
-#   4. 否则用 owner marker 中记录的精确 frozen identity 路径执行 native_runtime start
+#   1. 缺少 owner marker -> 启动隔离的 scripts/start-local.js（首次克隆可直接运行）
+#   2. 有 owner marker -> 严格验证 P6 身份，再启动 native_runtime
 
 param([switch]$SkipBrowser)
 
@@ -25,12 +24,29 @@ $env:PYTHONIOENCODING = 'utf-8'
 $sqliteDll = 'D:\Programming\Environment\Anaconda\pkgs\sqlite-3.51.2-hee5a0db_0\Library\bin'
 if (Test-Path $sqliteDll) { $env:P3_SQLITE_DLL_DIR = $sqliteDll }
 
-$py = Join-Path $repo '.venv\Scripts\python.exe'
-if (-not (Test-Path $py)) { Write-Host 'ERROR: .venv 不存在，请先执行 python -m venv .venv 并安装 requirements.txt'; exit 1 }
-
 $ownerMarker = Join-Path $repo 'data\compatibility\runtime\production-owner.json'
 $nativeSpec  = Join-Path $repo 'data\compatibility\runtime\native-runtime-v1.json'
 $stateDir    = Join-Path $repo 'data\compatibility\runtime\native-state'
+
+if (-not (Test-Path -LiteralPath $ownerMarker)) {
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node) {
+        Write-Host 'ERROR: 未找到 Node.js。请先安装 Node.js 20+，再重新运行 start.cmd。'
+        exit 1
+    }
+    Write-Host '未检测到 P6 production owner，启动隔离的本地运行时（data/local-runtime）…'
+    & $node.Source (Join-Path $repo 'scripts\start-local.js') --detach --install-missing --build-missing --port 5173
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ('ERROR: 本地运行时启动失败（退出码 ' + $LASTEXITCODE + '）。')
+        exit $LASTEXITCODE
+    }
+    Write-Host '启动成功：打开 http://localhost:5173/workspace/（本地隔离模式）'
+    if (-not $SkipBrowser) { Start-Process 'http://localhost:5173/workspace/' }
+    exit 0
+}
+
+$py = Join-Path $repo '.venv\Scripts\python.exe'
+if (-not (Test-Path $py)) { Write-Host 'ERROR: .venv 不存在，请先执行 python -m venv .venv 并安装 requirements.txt'; exit 1 }
 
 function Test-Alive {
     try {
@@ -39,10 +55,6 @@ function Test-Alive {
     } catch { return $false }
 }
 
-if (-not (Test-Path $ownerMarker)) {
-    Write-Host 'ERROR: 未找到 owner marker，尚未完成一次性 P6 接管，不能直接启动。'
-    exit 1
-}
 $owner = Get-Content -Raw -Encoding UTF8 -LiteralPath $ownerMarker | ConvertFrom-Json
 if ($owner.ownerState -ne 'python_active') {
     Write-Host ('ERROR: ownerState=' + $owner.ownerState + '（非 python_active）。请先完成受控 P6 接管，勿绕过门禁。')

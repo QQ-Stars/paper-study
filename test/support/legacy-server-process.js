@@ -33,7 +33,11 @@ function removeOwnedTempRoot(tempRoot) {
   if (existsSync(resolved)) rmSync(resolved, { recursive: true, force: true });
 }
 
-async function startLegacyServer({ agentErrorCommands = [], titleTranslationDelayMs = 0 } = {}) {
+async function startLegacyServer({
+  agentErrorCommands = [],
+  titleTranslationDelayMs = 0,
+  localRuntime = false,
+} = {}) {
   if (!Array.isArray(agentErrorCommands) || agentErrorCommands.some((command) => typeof command !== 'string')) {
     throw new TypeError('agentErrorCommands must be an array of command names');
   }
@@ -75,6 +79,7 @@ async function startLegacyServer({ agentErrorCommands = [], titleTranslationDela
       LEGACY_FIXTURE_TITLE_TRANSLATION_DELAY_MS: String(titleTranslationDelayMs),
       PYTHONIOENCODING: 'utf-8',
       PYTHONUTF8: '1',
+      ...(localRuntime ? { STUDY_APP_LOCAL_RUNTIME: '1' } : {}),
     },
     execArgv: ['--require', PRELOAD_PATH],
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
