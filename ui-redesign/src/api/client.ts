@@ -14,7 +14,10 @@ import type {
   Settings,
   StreamEvent,
   StudyStatus,
+  V2JobDetail,
+  V2JobEventsPage,
   V2JobSummary,
+  V2RetryJobResult,
 } from './types';
 
 async function json<T>(response: Response): Promise<T> {
@@ -313,14 +316,31 @@ export const settingsApi = {
 export const v2Api = {
   health: () => get<{ ok: boolean; schemaRevision: string }>('/api/v2/health'),
   readiness: () => get<{ status: string; schemaRevision?: string }>('/health/ready'),
-  listJobs: () => get<{ items: V2JobSummary[]; nextCursor: string | null }>('/api/v2/jobs'),
-  getJob: (id: string) => get<V2JobSummary>(`/api/v2/jobs/${encodeURIComponent(id)}`),
-  jobEvents: (id: string) =>
-    get<Array<Record<string, unknown>>>(
-      `/api/v2/jobs/${encodeURIComponent(id)}/events`,
-    ),
-  cancelJob: (id: string) => post<V2JobSummary>(`/api/v2/jobs/${encodeURIComponent(id)}/cancel`),
-  retryJob: (id: string) => post<V2JobSummary>(`/api/v2/jobs/${encodeURIComponent(id)}/retry`),
+  listJobs: (params: {
+    paperId?: string;
+    status?: string;
+    jobType?: string;
+    limit?: number;
+    cursor?: string;
+  } = {}) => {
+    const query = new URLSearchParams();
+    if (params.paperId) query.set('paperId', params.paperId);
+    if (params.status) query.set('status', params.status);
+    if (params.jobType) query.set('jobType', params.jobType);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.cursor) query.set('cursor', params.cursor);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return get<{ items: V2JobDetail[]; nextCursor: string | null }>(`/api/v2/jobs${suffix}`);
+  },
+  getJob: (id: string) => get<V2JobDetail>(`/api/v2/jobs/${encodeURIComponent(id)}`),
+  jobEvents: (id: string, afterSequence = 0) => {
+    const query = afterSequence > 0 ? `?afterSequence=${afterSequence}` : '';
+    return get<V2JobEventsPage>(
+      `/api/v2/jobs/${encodeURIComponent(id)}/events${query}`,
+    );
+  },
+  cancelJob: (id: string) => post<V2JobDetail>(`/api/v2/jobs/${encodeURIComponent(id)}/cancel`),
+  retryJob: (id: string) => post<V2RetryJobResult>(`/api/v2/jobs/${encodeURIComponent(id)}/retry`),
   listSources: (paperId: string) =>
     get<{ items: Array<Record<string, unknown>>; nextCursor: string | null }>(
       `/api/v2/papers/${encodeURIComponent(paperId)}/sources`,

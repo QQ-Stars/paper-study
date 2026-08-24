@@ -216,13 +216,50 @@ export interface Settings {
   s2KeyTail: string;
 }
 
+export type V2JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export interface V2JobError {
+  code: string;
+  message?: string;
+}
+
 export interface V2JobSummary {
   id: string;
-  type: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
+  paperId: string | null;
+  jobType: string;
+  sourceMode: string | null;
+  status: V2JobStatus | string;
   [key: string]: unknown;
+}
+
+export interface V2JobDetail extends V2JobSummary {
+  progress: Record<string, unknown>;
+  attempt: number;
+  maxAttempts: number;
+  error: V2JobError | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  cancelledAt: string | null;
+}
+
+export interface V2JobEvent {
+  sequence: number;
+  type: string;
+  progress: Record<string, unknown>;
+  error: V2JobError | null;
+  createdAt: string;
+}
+
+export interface V2JobEventsPage {
+  items: V2JobEvent[];
+  nextAfterSequence: number;
+}
+
+export interface V2RetryJobResult {
+  job: V2JobSummary;
+  retriedFromJobId: string;
+  deduplicated: boolean;
 }
 
 export interface StreamEvent {
