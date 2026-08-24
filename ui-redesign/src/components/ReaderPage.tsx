@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { artifactApi, libraryApi } from '../api/client';
 import type { Paper, StudyStatus } from '../api/types';
-import { ArrowRightIcon, StarIcon } from './Icons';
+import { ArrowRightIcon, BookmarkIcon, StarIcon } from './Icons';
 import { MarkdownView } from './MarkdownView';
 import { PdfViewer } from './PdfViewer';
 import { SelectionTranslate } from './SelectionTranslate';
@@ -14,6 +14,8 @@ interface ReaderPageProps {
   onBack: () => void;
   notify: (message: string) => void;
   reloadPapers: () => Promise<void>;
+  readingQueueIds: string[];
+  updateReadingQueue: (id: string, queued: boolean) => void;
 }
 
 type ReaderTab = 'overview' | 'explainer' | 'translation' | 'ocr' | 'note' | 'pdf';
@@ -102,6 +104,8 @@ export function ReaderPage({
   onBack,
   notify,
   reloadPapers,
+  readingQueueIds,
+  updateReadingQueue,
 }: ReaderPageProps) {
   const [tab, setTab] = useState<ReaderTab>('overview');
   const [fStatus, setFStatus] = useState<'all' | StudyStatus>('all');
@@ -109,6 +113,7 @@ export function ReaderPage({
   const [fSource, setFSource] = useState('all');
   const [fYear, setFYear] = useState('all');
   const [fFav, setFFav] = useState<'all' | 'fav'>('all');
+  const [fQueue, setFQueue] = useState<'all' | 'queue'>('all');
   const [content, setContent] = useState({ loading: false, text: '', error: '' });
   const [regen, setRegen] = useState<{
     kind: 'explainer' | 'translation' | null;
@@ -150,9 +155,10 @@ export function ReaderPage({
           (fTopic === 'all' || item.topic === fTopic) &&
           (fSource === 'all' || item.source === fSource) &&
           (fYear === 'all' || item.year === fYear) &&
-          (fFav === 'all' || item.favorite === 1),
+          (fFav === 'all' || item.favorite === 1) &&
+          (fQueue === 'all' || readingQueueIds.includes(item.id)),
       ),
-    [papers, fStatus, fTopic, fSource, fYear, fFav],
+    [papers, fStatus, fTopic, fSource, fYear, fFav, fQueue, readingQueueIds],
   );
   const scopeIndex = paper ? scope.findIndex((item) => item.id === paper.id) : -1;
   const prevPaper = scopeIndex > 0 ? scope[scopeIndex - 1] : null;
@@ -450,6 +456,12 @@ export function ReaderPage({
     }
   };
 
+  const queued = readingQueueIds.includes(paper.id);
+  const toggleReadingQueue = () => {
+    updateReadingQueue(paper.id, !queued);
+    notify(queued ? '已移出稍后阅读' : '已加入稍后阅读');
+  };
+
   const advanceStatus = async () => {
     const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(paper.status) + 1) % STATUS_CYCLE.length];
     try {
@@ -479,9 +491,11 @@ export function ReaderPage({
           <select
             className="input reader__picker"
             aria-label="选择论文"
-            value={paper.id}
+            value={scope.length === 0 ? '' : paper.id}
+            disabled={scope.length === 0}
             onChange={(event) => onSwitch(event.target.value)}
           >
+            {scope.length === 0 && <option value="">无符合条件的论文</option>}
             {scope.map((item) => (
               <option key={item.id} value={item.id}>
                 {(item.title_zh || item.title).slice(0, 48)}
@@ -508,6 +522,10 @@ export function ReaderPage({
             <option value="all">含未收藏</option>
             <option value="fav">仅收藏</option>
           </select>
+          <select className="input" aria-label="筛选：稍后阅读" value={fQueue} onChange={(event) => setFQueue(event.target.value as typeof fQueue)}>
+            <option value="all">全部阅读安排</option>
+            <option value="queue">仅稍后阅读</option>
+          </select>
           <select className="input" aria-label="筛选：主题" value={fTopic} onChange={(event) => setFTopic(event.target.value)}>
             <option value="all">全部主题</option>
             {topics.map((topic) => (
@@ -529,7 +547,16 @@ export function ReaderPage({
         </div>
       </header>
 
-      <article className="reader__main">
+      {scope.length === 0 ? (
+        <article className="reader__main">
+          <p className="reader__empty" role="status">
+            {fQueue === 'queue'
+              ? '稍后阅读中没有符合当前筛选条件的论文。'
+              : '没有符合当前筛选条件的论文。'}
+          </p>
+        </article>
+      ) : (
+        <article className="reader__main">
         <header className="reader__head">
           <span className="eyebrow">
             {paper.venue} {paper.year}
@@ -553,6 +580,10 @@ export function ReaderPage({
             <button type="button" className="btn btn--sm" onClick={() => void toggleFavorite()}>
               <StarIcon size={13} />
               {paper.favorite === 1 ? '取消收藏' : '收藏'}
+            </button>
+            <button type="button" className="btn btn--sm" onClick={toggleReadingQueue} aria-pressed={queued}>
+              <BookmarkIcon size={13} />
+              {queued ? '移出稍后阅读' : '加入稍后阅读'}
             </button>
             <button type="button" className="btn btn--sm" onClick={() => void advanceStatus()}>
               状态流转 → {STATUS_CYCLE[(STATUS_CYCLE.indexOf(paper.status) + 1) % 3]}
@@ -922,7 +953,8 @@ export function ReaderPage({
             <ArrowRightIcon size={15} />
           </button>
         )}
-      </article>
+        </article>
+      )}
     </div>
   );
 }

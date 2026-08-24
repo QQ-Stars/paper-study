@@ -69,6 +69,19 @@ test('favorite view always uses created_at descending order', () => {
   assert.deepEqual(result.map((paper) => paper.id), ['new-favorite', 'old-favorite']);
 });
 
+test('reading queue view composes with the existing filters without using favorite state', () => {
+  const result = filterLibraryPapers(papers, {
+    mode: 'keyword',
+    query: '',
+    status: 'all',
+    topic: 'all',
+    view: 'queue',
+    readingQueueIds: ['unfavorite', 'old-favorite'],
+  });
+
+  assert.deepEqual(result.map((paper) => paper.id), ['unfavorite', 'old-favorite']);
+});
+
 test('pagination reports final result bounds and empty pages safely', () => {
   const secondPage = paginateLibraryPapers(papers, 2, 2);
   assert.deepEqual(secondPage, {

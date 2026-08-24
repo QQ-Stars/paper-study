@@ -228,6 +228,10 @@
   color: var(--info);
 }
 
+.glyph-queue {
+  color: var(--seal);
+}
+
 .detail-tabs {
   display: flex;
   gap: var(--space-1);
@@ -287,6 +291,11 @@
 .library__detail-actions-mini .is-favorite {
   color: var(--amber);
   border-color: var(--amber);
+}
+
+.library__detail-actions-mini .is-queued {
+  color: var(--seal);
+  border-color: var(--seal);
 }
 
 .library__detail-pdffact {

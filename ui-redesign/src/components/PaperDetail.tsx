@@ -4,13 +4,15 @@ import { acquireApi, libraryApi, reviewApi } from '../api/client';
 import type { Paper, StudyStatus } from '../api/types';
 import { PaperArtifacts } from './PaperArtifacts';
 import { PaperDeep } from './PaperDeep';
-import { CloseIcon, StarIcon } from './Icons';
+import { BookmarkIcon, CloseIcon, StarIcon } from './Icons';
 
 interface PaperDetailProps {
   paper: Paper;
   notify: (message: string) => void;
   reloadPapers: () => Promise<void>;
   reloadReviews: () => Promise<void>;
+  readingQueueIds: string[];
+  updateReadingQueue: (id: string, queued: boolean) => void;
   openReader: () => void;
   onDeleted: () => void;
 }
@@ -47,6 +49,8 @@ export function PaperDetail({
   notify,
   reloadPapers,
   reloadReviews,
+  readingQueueIds,
+  updateReadingQueue,
   openReader,
   onDeleted,
 }: PaperDetailProps) {
@@ -100,6 +104,12 @@ export function PaperDetail({
     }
   };
 
+  const queued = readingQueueIds.includes(paper.id);
+  const toggleReadingQueue = () => {
+    updateReadingQueue(paper.id, !queued);
+    notify(queued ? '已移出稍后阅读' : '已加入稍后阅读');
+  };
+
   const startReview = async () => {
     try {
       const result = await reviewApi.start(paper.id);
@@ -115,6 +125,7 @@ export function PaperDetail({
     try {
       await libraryApi.deletePaper(paper.id);
       await reloadPapers();
+      updateReadingQueue(paper.id, false);
       notify('论文已删除');
       onDeleted();
     } catch (error) {
@@ -137,6 +148,15 @@ export function PaperDetail({
               onClick={() => void toggleFavorite()}
             >
               <StarIcon size={14} />
+            </button>
+            <button
+              type="button"
+              className={`btn btn--ghost btn--sm${queued ? ' is-queued' : ''}`}
+              aria-label={queued ? '移出稍后阅读' : '加入稍后阅读'}
+              aria-pressed={queued}
+              onClick={toggleReadingQueue}
+            >
+              <BookmarkIcon size={14} />
             </button>
             <button
               type="button"

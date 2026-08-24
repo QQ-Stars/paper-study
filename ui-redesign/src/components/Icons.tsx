@@ -174,6 +174,14 @@ export function StarIcon(props: IconProps) {
   );
 }
 
+export function BookmarkIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M6.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16l-5.5-3.2-5.5 3.2z" />
+    </svg>
+  );
+}
+
 export function PdfIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

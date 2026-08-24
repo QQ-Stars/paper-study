@@ -23,6 +23,7 @@ interface ManagePageProps {
   papers: Paper[];
   notify: (message: string) => void;
   reloadPapers: () => Promise<void>;
+  removeReadingQueue: (ids: readonly string[]) => void;
   openPaper: (id: string) => void;
 }
 
@@ -142,7 +143,13 @@ function formatLastRun(run: BatchRun | null | undefined): string {
   return `上次运行：${time} · 成 ${run.done} / 败 ${run.failed} / 跳 ${run.skipped}`;
 }
 
-export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePageProps) {
+export function ManagePage({
+  papers,
+  notify,
+  reloadPapers,
+  removeReadingQueue,
+  openPaper,
+}: ManagePageProps) {
   /* ── 新增论文 ── */
   const [draft, setDraft] = useState<Partial<Record<EditField, string>>>({});
   const [adding, setAdding] = useState(false);
@@ -539,15 +546,18 @@ export function ManagePage({ papers, notify, reloadPapers, openPaper }: ManagePa
     setDeleting(true);
     let ok = 0;
     let failed = 0;
+    const deletedIds: string[] = [];
     for (let i = 0; i < deleteTargets.length; i++) {
       setDeleteProgress(`正在删除 ${i + 1}/${deleteTargets.length}…`);
       try {
         await libraryApi.deletePaper(deleteTargets[i].id);
+        deletedIds.push(deleteTargets[i].id);
         ok += 1;
       } catch {
         failed += 1;
       }
     }
+    if (deletedIds.length > 0) removeReadingQueue(deletedIds);
     await reloadPapers();
     setDeleting(false);
     setDeleteProgress('');

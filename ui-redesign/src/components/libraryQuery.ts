@@ -2,7 +2,7 @@ import type { Paper, StudyStatus } from '../api/types';
 
 export type LibrarySearchMode = 'keyword' | 'semantic' | 'chunks';
 export type LibrarySortKey = 'recent' | 'year' | 'citations' | 'relevance';
-export type LibraryView = LibrarySortKey | 'favorites';
+export type LibraryView = LibrarySortKey | 'favorites' | 'queue';
 
 export interface LibraryFilterQuery {
   mode: LibrarySearchMode;
@@ -10,6 +10,7 @@ export interface LibraryFilterQuery {
   status: 'all' | StudyStatus;
   topic: string;
   view: LibraryView;
+  readingQueueIds?: readonly string[];
 }
 
 export interface LibraryPageResult {
@@ -21,7 +22,7 @@ export interface LibraryPageResult {
 }
 
 function sortKeyForView(view: LibraryView): LibrarySortKey {
-  return view === 'favorites' ? 'recent' : view;
+  return view === 'favorites' || view === 'queue' ? 'recent' : view;
 }
 
 function matchesKeyword(paper: Paper, query: string): boolean {
@@ -42,13 +43,16 @@ export function filterLibraryPapers(
   filter: LibraryFilterQuery,
 ): Paper[] {
   const favoritesOnly = filter.view === 'favorites';
+  const queueOnly = filter.view === 'queue';
+  const readingQueue = queueOnly ? new Set(filter.readingQueueIds ?? []) : null;
   const sortKey = sortKeyForView(filter.view);
   const filtered = papers.filter(
     (paper) =>
       (filter.mode !== 'keyword' || matchesKeyword(paper, filter.query)) &&
       (filter.status === 'all' || paper.status === filter.status) &&
       (filter.topic === 'all' || paper.topic === filter.topic) &&
-      (!favoritesOnly || paper.favorite === 1),
+      (!favoritesOnly || paper.favorite === 1) &&
+      (!queueOnly || readingQueue?.has(paper.id)),
   );
 
   const byKey = (a: Paper, b: Paper): number => {

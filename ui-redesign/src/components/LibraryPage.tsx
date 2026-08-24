@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { acquireApi, v2Api } from '../api/client';
 import type { Paper, StudyStatus } from '../api/types';
-import { CloseIcon, NoteIcon, PdfIcon, SearchIcon, StarIcon } from './Icons';
+import { BookmarkIcon, CloseIcon, NoteIcon, PdfIcon, SearchIcon, StarIcon } from './Icons';
 import { PaperDetail } from './PaperDetail';
 import { StreamConsole, useStream } from './StreamConsole';
 import {
@@ -20,6 +20,8 @@ interface LibraryPageProps {
   notify: (message: string) => void;
   reloadPapers: () => Promise<void>;
   reloadReviews: () => Promise<void>;
+  updateReadingQueue: (id: string, queued: boolean) => void;
+  readingQueueIds: string[];
   openPaper: (id: string) => void;
   openReader: (id: string) => void;
 }
@@ -55,6 +57,8 @@ export function LibraryPage({
   notify,
   reloadPapers,
   reloadReviews,
+  updateReadingQueue,
+  readingQueueIds,
   openPaper,
   openReader,
 }: LibraryPageProps) {
@@ -71,6 +75,7 @@ export function LibraryPage({
   const semStream = useStream();
   const chunkBusy = useState({ busy: false })[0];
   const favoritesOnly = libraryView === 'favorites';
+  const queueOnly = libraryView === 'queue';
 
   const topics = useMemo(
     () => Array.from(new Set(papers.map((paper) => paper.topic).filter(Boolean))),
@@ -78,8 +83,15 @@ export function LibraryPage({
   );
 
   const filtered = useMemo(
-    () => filterLibraryPapers(papers, { mode, query, status, topic, view: libraryView }),
-    [papers, mode, query, status, topic, libraryView],
+    () => filterLibraryPapers(papers, {
+      mode,
+      query,
+      status,
+      topic,
+      view: libraryView,
+      readingQueueIds,
+    }),
+    [papers, mode, query, status, topic, libraryView, readingQueueIds],
   );
 
   const selected = papers.find((paper) => paper.id === selectedId) ?? null;
@@ -89,10 +101,10 @@ export function LibraryPage({
     setPage(1);
   }, [query, status, topic, libraryView, mode, pageSize, papers.length]);
   useEffect(() => {
-    if (favoritesOnly && selectedId && !filtered.some((paper) => paper.id === selectedId)) {
+    if ((favoritesOnly || queueOnly) && selectedId && !filtered.some((paper) => paper.id === selectedId)) {
       onSelect(null);
     }
-  }, [favoritesOnly, filtered, onSelect, selectedId]);
+  }, [favoritesOnly, filtered, onSelect, queueOnly, selectedId]);
   const pageResult = useMemo(
     () => paginateLibraryPapers(filtered, page, pageSize),
     [filtered, page, pageSize],
@@ -224,12 +236,13 @@ export function LibraryPage({
             </select>
             <select
               className="input library__topic"
-              aria-label="排序与收藏筛选"
+              aria-label="排序与收藏及稍后阅读筛选"
               value={libraryView}
               onChange={(event) => setLibraryView(event.target.value as LibraryView)}
             >
               <option value="recent">最近入库</option>
               <option value="favorites">已收藏</option>
+              <option value="queue">稍后阅读</option>
               <option value="year">年份</option>
               <option value="citations">被引数</option>
               <option value="relevance">相关度</option>
@@ -319,6 +332,7 @@ export function LibraryPage({
                     <span className="library__row-glyphs">
                       <span className={`status-dot status-dot--${paper.status}`} aria-hidden="true" />
                       {paper.favorite === 1 && <StarIcon size={13} className="glyph-star" />}
+                      {readingQueueIds.includes(paper.id) && <BookmarkIcon size={13} className="glyph-queue" aria-label="已加入稍后阅读" />}
                       {paper.hasPdf && <PdfIcon size={13} className="glyph-pdf" />}
                       {paper.hasNote === 1 && <NoteIcon size={13} className="glyph-note" />}
                     </span>
@@ -352,7 +366,11 @@ export function LibraryPage({
                   ? query.trim() || status !== 'all' || topic !== 'all'
                     ? '没有符合当前条件的已收藏文献，调整关键词或筛选条件试试。'
                     : '暂无已收藏的文献'
-                  : '没有符合筛选条件的文献，换个关键词试试。'}
+                  : queueOnly
+                    ? query.trim() || status !== 'all' || topic !== 'all'
+                      ? '没有符合当前条件的稍后阅读文献，调整关键词或筛选条件试试。'
+                      : '暂无稍后阅读的文献'
+                    : '没有符合筛选条件的文献，换个关键词试试。'}
               </li>
             )}
           </ul>
@@ -406,6 +424,8 @@ export function LibraryPage({
               notify={notify}
               reloadPapers={reloadPapers}
               reloadReviews={reloadReviews}
+              readingQueueIds={readingQueueIds}
+              updateReadingQueue={updateReadingQueue}
               openReader={() => openReader(selected.id)}
               onDeleted={() => onSelect(null)}
             />

@@ -14,6 +14,11 @@ import { McpPage } from './components/McpPage';
 import { OverviewPage } from './components/OverviewPage';
 import { ReaderPage } from './components/ReaderPage';
 import { ReviewsPage } from './components/ReviewsPage';
+import {
+  readReadingQueue,
+  removeReadingQueueIds,
+  updateReadingQueueIds,
+} from './components/readingQueue';
 import { SettingsPage } from './components/SettingsPage';
 import { Sidebar } from './components/Sidebar';
 import { Toast } from './components/Toast';
@@ -23,6 +28,7 @@ import { NAV_ITEMS, type PageId } from './nav';
 export default function App() {
   const [page, setPage] = useState<PageId>('overview');
   const [papers, setPapers] = useState<Paper[] | null>(null);
+  const [readingQueueIds, setReadingQueueIds] = useState<string[]>(readReadingQueue);
   const [papersError, setPapersError] = useState('');
   const [reviews, setReviews] = useState<ReviewSnapshot | null>(null);
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
@@ -101,6 +107,14 @@ export default function App() {
     }
   }, []);
 
+  const updateReadingQueue = useCallback((id: string, queued: boolean) => {
+    setReadingQueueIds((current) => updateReadingQueueIds(current, id, queued));
+  }, []);
+
+  const removeReadingQueue = useCallback((ids: readonly string[]) => {
+    setReadingQueueIds((current) => removeReadingQueueIds(current, ids));
+  }, []);
+
   useEffect(() => {
     void reloadPapers();
     void reloadReviews();
@@ -131,6 +145,9 @@ export default function App() {
     notify,
     reloadPapers,
     reloadReviews,
+    updateReadingQueue,
+    removeReadingQueue,
+    readingQueueIds,
     openPaper,
     openReader: (id: string) => {
       setReaderPaperId(id);
@@ -194,6 +211,8 @@ export default function App() {
               onBack={() => setPage('library')}
               notify={notify}
               reloadPapers={reloadPapers}
+              readingQueueIds={readingQueueIds}
+              updateReadingQueue={updateReadingQueue}
             />
           )}
           </ErrorBoundary>
