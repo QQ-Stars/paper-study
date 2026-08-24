@@ -21,12 +21,16 @@ class CompositeCredentialStore:
         environment: EnvironmentCredentialStore,
         keyring: KeyringCredentialStore,
         legacy: LegacySettingsCredentialStore,
+        *,
+        allow_legacy_fallback: bool = False,
     ) -> None:
         self._environment = environment
         self._keyring = keyring
         self._legacy = legacy
+        self._allow_legacy_fallback = allow_legacy_fallback
         self._locks = {kind: asyncio.Lock() for kind in CredentialKind}
         self._migrated: set[CredentialKind] = set()
+        self._keyring_unavailable: set[CredentialKind] = set()
 
     async def get(self, kind: CredentialKind) -> Credential | None:
         normalized = CredentialKind(kind)
@@ -59,12 +63,15 @@ class CompositeCredentialStore:
             if not submitted_value.strip():
                 return await self._status_unlocked(normalized)
             await self._ensure_migrated(normalized)
-            previous_keyring = await self._keyring.get(normalized)
+            previous_keyring = await self._keyring_get(normalized)
             previous_legacy = await self._legacy.get(normalized)
+            if normalized in self._keyring_unavailable:
+                await self._legacy.set(normalized, submitted_value)
+                return await self._status_unlocked(normalized)
             legacy_mutation_started = False
             try:
                 await self._keyring.set(normalized, submitted_value)
-                verified = await self._keyring.get(normalized)
+                verified = await self._keyring_get(normalized)
                 if verified is None or not hmac.compare_digest(verified.value, submitted_value):
                     raise CredentialBackendError(operation="credential_keyring_verify")
                 legacy_mutation_started = True
@@ -78,6 +85,10 @@ class CompositeCredentialStore:
                 )
                 raise
             except Exception as error:
+                if self._allow_legacy_fallback and isinstance(error, CredentialBackendError):
+                    self._keyring_unavailable.add(normalized)
+                    await self._legacy.set(normalized, submitted_value)
+                    return await self._status_unlocked(normalized)
                 await self._compensate(normalized, previous_keyring)
                 if isinstance(error, CredentialBackendError):
                     raise CredentialBackendError(
@@ -90,8 +101,11 @@ class CompositeCredentialStore:
         normalized = CredentialKind(kind)
         async with self._locks[normalized]:
             await self._ensure_migrated(normalized)
-            previous_keyring = await self._keyring.get(normalized)
+            previous_keyring = await self._keyring_get(normalized)
             previous_legacy = await self._legacy.get(normalized)
+            if normalized in self._keyring_unavailable:
+                await self._legacy.delete(normalized)
+                return await self._status_unlocked(normalized)
             legacy_mutation_started = False
             try:
                 await self._keyring.delete(normalized)
@@ -106,6 +120,10 @@ class CompositeCredentialStore:
                 )
                 raise
             except Exception as error:
+                if self._allow_legacy_fallback and isinstance(error, CredentialBackendError):
+                    self._keyring_unavailable.add(normalized)
+                    await self._legacy.delete(normalized)
+                    return await self._status_unlocked(normalized)
                 await self._compensate(normalized, previous_keyring)
                 if isinstance(error, CredentialBackendError):
                     raise CredentialBackendError(
@@ -117,23 +135,31 @@ class CompositeCredentialStore:
     async def _ensure_migrated(self, kind: CredentialKind) -> None:
         if kind in self._migrated:
             return
-        keyring_value = await self._keyring.get(kind)
+        keyring_value = await self._keyring_get(kind)
         legacy_value = await self._legacy.get(kind)
         if keyring_value is None and legacy_value is not None:
-            await self._keyring.set(kind, legacy_value.value)
-            verified = await self._keyring.get(kind)
-            if verified is None or not hmac.compare_digest(
-                verified.value,
-                legacy_value.value,
-            ):
-                raise CredentialBackendError(operation="credential_migration_verify")
+            if kind not in self._keyring_unavailable:
+                try:
+                    await self._keyring.set(kind, legacy_value.value)
+                    verified = await self._keyring_get(kind)
+                    if verified is None or not hmac.compare_digest(
+                        verified.value,
+                        legacy_value.value,
+                    ):
+                        raise CredentialBackendError(
+                            operation="credential_migration_verify"
+                        )
+                except CredentialBackendError:
+                    if not self._allow_legacy_fallback:
+                        raise
+                    self._keyring_unavailable.add(kind)
         self._migrated.add(kind)
 
     async def _effective(self, kind: CredentialKind) -> Credential | None:
         environment = await self._environment.get(kind)
         if environment is not None:
             return environment
-        keyring = await self._keyring.get(kind)
+        keyring = await self._keyring_get(kind)
         if keyring is not None:
             return keyring
         return await self._legacy.get(kind)
@@ -142,7 +168,7 @@ class CompositeCredentialStore:
         environment = await self._environment.get(kind)
         effective = environment
         if effective is None:
-            effective = await self._keyring.get(kind)
+            effective = await self._keyring_get(kind)
         if effective is None:
             effective = await self._legacy.get(kind)
         return CredentialStatus(
@@ -151,6 +177,17 @@ class CompositeCredentialStore:
             key_tail=_tail(effective.value) if effective is not None else None,
             environment_managed=environment is not None,
         )
+
+    async def _keyring_get(self, kind: CredentialKind) -> Credential | None:
+        if kind in self._keyring_unavailable:
+            return None
+        try:
+            return await self._keyring.get(kind)
+        except CredentialBackendError:
+            if not self._allow_legacy_fallback:
+                raise
+            self._keyring_unavailable.add(kind)
+            return None
 
     async def _compensate(
         self,

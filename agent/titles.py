@@ -99,4 +99,7 @@ def run_batch(limit=0):
             _emit({"type": "progress", "stage": "item", "state": "failed",
                    "index": index, "total": len(rows), **failure})
     con.close()
-    _emit({"type": "result", "ok": True, "summary": summary})
+    result = {"type": "result", "ok": not bool(summary["failed"]), "summary": summary}
+    if summary["failed"]:
+        result["error"] = "部分标题翻译失败，请检查模型连接"
+    _emit(result)

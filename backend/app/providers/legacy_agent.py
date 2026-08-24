@@ -7,11 +7,15 @@ small so tests can inject a fake provider without network or model access.
 """
 
 import asyncio
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+import importlib
+import io
 import json
 import os
 from pathlib import Path
 import sys
+import threading
 from typing import Awaitable, Mapping, Sequence, TypeVar
 
 
@@ -34,11 +38,16 @@ class LegacyAgentProvider:
         cwd: str | Path | None = None,
         environment: Mapping[str, str] | None = None,
         timeout_seconds: float = 900.0,
+        in_process: bool = False,
     ) -> None:
         self.executable = str(executable or sys.executable)
         self.cwd = str(cwd or Path(__file__).resolve().parents[3])
         self.environment = dict(environment or os.environ)
         self.timeout_seconds = timeout_seconds
+        # The local Windows runtime must not spawn a second Python process for
+        # every button click.  Tests and external callers keep the historical
+        # subprocess mode unless the runtime opts in explicitly.
+        self.in_process = in_process
 
     async def run(
         self,
@@ -47,6 +56,8 @@ class LegacyAgentProvider:
         *,
         stdin: str | bytes | None = None,
     ) -> LegacyAgentResult:
+        if self.in_process:
+            return await self._run_in_process(command, args, stdin=stdin)
         process = await self._start(command, args, stdin=stdin)
         input_bytes = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
         communication = asyncio.create_task(process.communicate(input_bytes))
@@ -104,6 +115,19 @@ class LegacyAgentProvider:
         stdout_text_field: str | None = None,
         stdout_object_field: str | None = None,
     ):
+        if self.in_process:
+            async for event in self._stream_in_process_events(
+                command,
+                args,
+                terminal_type=terminal_type,
+                terminal_fields=terminal_fields,
+                stdin=stdin,
+                stdout_array_field=stdout_array_field,
+                stdout_text_field=stdout_text_field,
+                stdout_object_field=stdout_object_field,
+            ):
+                yield event
+            return
         if command in self._STRUCTURED_STDOUT_COMMANDS:
             async for event in self._stream_stdout_json_events(
                 command,
@@ -123,6 +147,7 @@ class LegacyAgentProvider:
         input_bytes = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
         timed_out = False
         stdout = b""
+        stderr_lines: list[str] = []
         try:
             if process.stdin is not None:
                 if input_bytes:
@@ -137,6 +162,7 @@ class LegacyAgentProvider:
                     break
                 line = line_bytes.decode("utf-8", errors="replace").rstrip("\r\n")
                 if line.strip():
+                    stderr_lines.append(line)
                     yield {"type": "progress", "line": line}
 
             await _wait_before_deadline(process.wait(), deadline)
@@ -193,13 +219,19 @@ class LegacyAgentProvider:
                 payload[stdout_text_field] = stdout_text
         for key, value in dict(terminal_fields or {}).items():
             payload.setdefault(key, value)
-        payload.setdefault("ok", returncode == 0)
-        payload.setdefault(
-            "error",
-            "legacy agent timed out"
-            if timed_out
-            else ("" if returncode == 0 else "legacy agent failed"),
-        )
+        if returncode != 0:
+            # A command may have emitted a stale/optimistic ``ok: true`` before
+            # failing. The process exit status is authoritative.
+            payload["ok"] = False
+            payload["error"] = _friendly_error(
+                LegacyAgentResult(returncode, stdout_text, "\n".join(stderr_lines)),
+                command=command,
+                timed_out=timed_out,
+            )
+        else:
+            payload.setdefault("ok", True)
+            _mark_partial_failure(payload)
+            payload.setdefault("error", "")
         yield {"type": terminal_type, **payload}
 
     async def _stream_stdout_json_events(
@@ -222,7 +254,7 @@ class LegacyAgentProvider:
             else None
         )
         background = tuple(task for task in (drain_task,) if task is not None)
-        saw_terminal = False
+        terminal_event: dict[str, object] | None = None
         timed_out = False
         try:
             while True:
@@ -240,8 +272,9 @@ class LegacyAgentProvider:
                     continue
                 if isinstance(event, dict):
                     if event.get("type") == terminal_type:
-                        saw_terminal = True
-                    yield event
+                        terminal_event = event
+                    else:
+                        yield event
             await _wait_before_deadline(process.wait(), deadline)
             if drain_task is not None:
                 await drain_task
@@ -253,7 +286,17 @@ class LegacyAgentProvider:
             raise
         else:
             await _finish_process(process, background, kill=False)
-        if not saw_terminal:
+        if terminal_event is not None:
+            if timed_out or process.returncode not in (0, None):
+                terminal_event = dict(terminal_event)
+                terminal_event["ok"] = False
+                terminal_event["error"] = (
+                    "legacy agent timed out"
+                    if timed_out
+                    else "legacy agent failed"
+                )
+            yield terminal_event
+        else:
             returncode = 124 if timed_out else int(process.returncode or 0)
             yield {
                 "type": terminal_type,
@@ -263,6 +306,98 @@ class LegacyAgentProvider:
                 if timed_out
                 else ("" if returncode == 0 else "legacy agent failed"),
             }
+
+    async def _run_in_process(
+        self,
+        command: str,
+        args: Sequence[str],
+        *,
+        stdin: str | bytes | None,
+    ) -> LegacyAgentResult:
+        task = asyncio.create_task(
+            asyncio.to_thread(_invoke_agent_main, command, args, stdin)
+        )
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), self.timeout_seconds)
+        except asyncio.TimeoutError:
+            return LegacyAgentResult(124, "", "legacy agent timed out")
+
+    async def _stream_in_process_events(
+        self,
+        command: str,
+        args: Sequence[str],
+        *,
+        terminal_type: str,
+        terminal_fields: Mapping[str, object] | None,
+        stdin: str | bytes | None,
+        stdout_array_field: str | None,
+        stdout_text_field: str | None,
+        stdout_object_field: str | None,
+    ):
+        result = await self._run_in_process(command, args, stdin=stdin)
+        for line in result.stderr.splitlines():
+            if line.strip():
+                yield {"type": "progress", "line": line}
+
+        fields = dict(terminal_fields or {})
+        if command in self._STRUCTURED_STDOUT_COMMANDS:
+            terminal_event: dict[str, object] | None = None
+            for line in result.stdout.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("type") == terminal_type:
+                    terminal_event = event
+                else:
+                    yield event
+            if terminal_event is not None:
+                if result.returncode != 0:
+                    terminal_event = dict(terminal_event)
+                    terminal_event["ok"] = False
+                    terminal_event["error"] = _friendly_error(
+                        result, command=command
+                    )
+                yield terminal_event
+                return
+            fallback = {"type": terminal_type, **fields}
+            fallback["ok"] = result.returncode == 0
+            fallback["error"] = "" if result.returncode == 0 else _friendly_error(
+                result, command=command
+            )
+            yield fallback
+            return
+
+        payload: dict[str, object] = {}
+        raw_stdout = result.stdout or ""
+        try:
+            parsed = json.loads(raw_stdout) if raw_stdout.strip() else {}
+            if isinstance(parsed, dict):
+                if stdout_object_field is not None:
+                    payload[stdout_object_field] = parsed
+                else:
+                    payload.update(parsed)
+            elif isinstance(parsed, list) and stdout_array_field is not None:
+                payload[stdout_array_field] = parsed
+            elif stdout_text_field is not None and raw_stdout.strip():
+                payload[stdout_text_field] = raw_stdout
+        except (TypeError, ValueError):
+            if stdout_text_field is not None and raw_stdout.strip():
+                payload[stdout_text_field] = raw_stdout
+        for key, value in fields.items():
+            payload.setdefault(key, value)
+        if result.returncode != 0:
+            payload["ok"] = False
+            payload["error"] = _friendly_error(result, command=command)
+        else:
+            payload.setdefault("ok", True)
+            _mark_partial_failure(payload)
+            payload.setdefault("error", "")
+        yield {"type": terminal_type, **payload}
 
     async def confirm_candidates(
         self,
@@ -293,6 +428,97 @@ class LegacyAgentProvider:
             "error": "" if result.returncode == 0 else "legacy agent failed",
             "jobId": job_id,
         }
+
+
+_IN_PROCESS_LOCK = threading.Lock()
+
+
+def _invoke_agent_main(
+    command: str,
+    args: Sequence[str],
+    stdin: str | bytes | None,
+) -> LegacyAgentResult:
+    """Run the legacy command dispatcher without creating a child process.
+
+    The old command modules still provide the compatibility behavior, but
+    their process boundary is the source of ``WinError 10013`` on Windows.
+    Serializing this small adapter also keeps redirected stdout/stderr isolated
+    while a command uses its own worker threads.
+    """
+    output = io.StringIO()
+    errors = io.StringIO()
+    input_text = (
+        stdin.decode("utf-8", errors="replace")
+        if isinstance(stdin, bytes)
+        else (stdin or "")
+    )
+    previous_argv = sys.argv
+    previous_stdin = sys.stdin
+    returncode = 0
+    with _IN_PROCESS_LOCK, redirect_stdout(output), redirect_stderr(errors):
+        try:
+            # Settings are written by the running FastAPI process. Refresh the
+            # legacy module's config before each command so toggling OCR/local
+            # extraction in the settings page takes effect without a restart.
+            from agent import config as agent_config
+
+            importlib.reload(agent_config)
+            from agent.__main__ import main
+
+            sys.argv = ["agent", command, *(str(item) for item in args)]
+            sys.stdin = io.StringIO(input_text)
+            main()
+        except SystemExit as error:
+            value = error.code
+            returncode = value if isinstance(value, int) else 1
+        except BaseException as error:
+            returncode = 1
+            print(f"ERROR::{type(error).__name__}: {error}", file=sys.stderr)
+        finally:
+            sys.argv = previous_argv
+            sys.stdin = previous_stdin
+    return LegacyAgentResult(returncode, output.getvalue(), errors.getvalue())
+
+
+def _friendly_error(
+    result: LegacyAgentResult,
+    *,
+    command: str | None = None,
+    timed_out: bool = False,
+) -> str:
+    if result.returncode == 124:
+        return "legacy agent timed out"
+    lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+    for line in lines:
+        if line.startswith("OCRERR::"):
+            return line.split("::", 1)[1].strip()
+    for line in lines:
+        if "WinError 10013" in line or "Connection error" in line:
+            if command in {"ocr-md", "ocr-md-batch"}:
+                return "OCR/模型连接失败，请检查 OCR 地址、密钥或网络权限"
+            return "模型连接失败，请检查 API 地址、密钥或网络权限"
+    for line in reversed(lines):
+        if line.startswith("ERR::"):
+            return line.split("::", 1)[1].strip()
+        if line.startswith("ERROR::"):
+            return line.split("::", 1)[1].strip()
+    return "legacy agent timed out" if timed_out else "legacy agent failed"
+
+
+def _mark_partial_failure(payload: dict[str, object]) -> None:
+    """Make batch failures visible to the NDJSON console instead of hiding them."""
+    if payload.get("ok") is not True:
+        return
+    failed = payload.get("failed")
+    summary = payload.get("summary")
+    if isinstance(summary, Mapping):
+        failed = summary.get("failed")
+    has_failures = (
+        isinstance(failed, (list, tuple, set)) and bool(failed)
+    ) or (isinstance(failed, int) and failed > 0)
+    if has_failures:
+        payload["ok"] = False
+        payload.setdefault("error", "部分任务失败，请查看进度详情")
 
 
 async def _pump_stderr(

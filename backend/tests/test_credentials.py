@@ -233,6 +233,27 @@ class LegacyCredentialMigrationTests(CredentialFixture):
             await failed_store.get(CredentialKind.LLM)
         self.assertEqual(before, self.settings_path.read_bytes())
 
+    async def test_local_fallback_reads_and_updates_legacy_when_keyring_is_unavailable(self) -> None:
+        failing = FakeKeyringAdapter()
+        failing.fail_set = True
+        store = CompositeCredentialStore(
+            EnvironmentCredentialStore({}),
+            KeyringCredentialStore(failing),
+            LegacySettingsCredentialStore(self.settings_path),
+            allow_legacy_fallback=True,
+        )
+
+        credential = await store.get(CredentialKind.LLM)
+        self.assertIsNotNone(credential)
+        self.assertEqual("legacy-llm-secret", credential.value)
+
+        status = await store.status(CredentialKind.LLM)
+        self.assertTrue(status.has_key)
+
+        await store.update(CredentialKind.LLM, "replacement-secret")
+        persisted = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        self.assertEqual("replacement-secret", persisted["apiKey"])
+
     async def test_obsidian_fields_survive_credential_mutation(self) -> None:
         obsidian = {
             "obsidianEnabled": True,

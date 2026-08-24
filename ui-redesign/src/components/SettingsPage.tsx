@@ -406,7 +406,7 @@ export function SettingsPage({ notify }: SettingsPageProps) {
           <Section id="sec-ocr" title="OCR 与 PDF 文本提取" desc="扫描版 PDF 的文字识别通道">
             <Row
               title="启用 OCR 提取"
-              desc="开启后讲解/翻译通读全文优先用 OCR 模型（结果落库复用）；关闭则本地解析"
+              desc="开启后讲解/翻译全文只使用 OCR 模型，失败不会改用本地解析；关闭则使用本地解析"
               isSwitch
             >
               <input

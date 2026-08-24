@@ -27,8 +27,12 @@ def run():
         mapping = llm.canonicalize_venues(venues)
     except Exception as e:
         _p(f"LLMERR::{e}")
-        sys.stdout.write(json.dumps({"ok": False, "error": str(e), "changed": 0}, ensure_ascii=False))
-        sys.stdout.flush(); con.close(); return
+        mapping = {}
+    if not mapping:
+        # Keep this maintenance action useful without an LLM endpoint.  The
+        # local table only applies explicit aliases and never invents names.
+        mapping = {venue: db.norm_venue(venue) for venue in venues}
+        _p("LOCAL::使用内置会议名规范表")
 
     _p("STAGE::apply")
     changed, applied = 0, {}

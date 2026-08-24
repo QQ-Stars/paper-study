@@ -164,6 +164,7 @@ def bootstrap(
     generation_provider_factory: Callable[[], Any] = LegacyGenerationProvider,
     environment_snapshot: dict[str, str] | None = None,
     keyring_adapter: Any = None,
+    allow_legacy_credential_fallback: bool = False,
     legacy_settings_path: Path | None = None,
     credential_probe: Any = None,
     ocr_registry_factory: Callable[[], Any] | None = None,
@@ -249,6 +250,7 @@ def bootstrap(
         EnvironmentCredentialStore(effective_environment),
         KeyringCredentialStore(keyring_adapter),
         LegacySettingsCredentialStore(resolved_settings_path),
+        allow_legacy_fallback=allow_legacy_credential_fallback,
     )
     credential_service = CredentialService(
         credential_store,
@@ -267,7 +269,14 @@ def bootstrap(
             "translationDir": repository_root / "data" / "translations",
         },
     )
-    legacy_agent = LegacyAgentProvider(cwd=repository_root)
+    # Keep compatibility commands inside the current runtime.  Spawning a
+    # second Python process for every legacy button is blocked by Windows
+    # socket policy and surfaces as the misleading "legacy agent failed".
+    legacy_agent = LegacyAgentProvider(
+        cwd=repository_root,
+        in_process=True,
+        timeout_seconds=120.0,
+    )
     legacy_ingest = LegacyIngestService(
         session_factory,
         provider=legacy_agent,
@@ -481,6 +490,7 @@ def bootstrap_processing_worker(
     obsidian_enabled: bool = False,
     environment_snapshot: dict[str, str] | None = None,
     legacy_settings_path: Path | None = None,
+    allow_legacy_credential_fallback: bool = False,
     obsidian_auto_export_debounce_seconds: float = 1.0,
 ) -> ApplicationContainer:
     """Compose, but never start, the single stage-specific processing worker."""
@@ -548,6 +558,7 @@ def bootstrap_processing_worker(
             EnvironmentCredentialStore(effective_environment),
             KeyringCredentialStore(None),
             LegacySettingsCredentialStore(resolved_settings_path),
+            allow_legacy_fallback=allow_legacy_credential_fallback,
         )
         if obsidian_enabled:
             if (obsidian_job_service is None) != (obsidian_exporter is None):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import ntpath
 
@@ -15,6 +16,7 @@ from backend.app.api.middleware.ndjson import ndjson_response
 
 
 _JSON_CONTENT_TYPE = "application/json; charset=utf-8"
+_DURABLE_STREAM_TIMEOUT_SECONDS = 45.0
 
 
 def create_legacy_router() -> APIRouter:
@@ -1130,17 +1132,24 @@ async def _durable_artifact_events(
     agent_args: list[str] | tuple[str, ...] = (),
 ):
     # 优先走 durable processing 管道；存量 legacy 论文没有 ready source
-    # document（SOURCE_IDENTITY_MISSING）时，回退到旧 Node 同款行为：
-    # spawn agent 子进程（explain/translate），stdout 纯文本包进 markdown 字段。
+    # document（SOURCE_IDENTITY_MISSING）时回退到兼容适配器。旧实现会无限
+    # 等待外部模型，导致阅读页按钮看起来像“卡死”；这里给 durable 作业
+    # 一个明确的边界，并把超时作业取消后再执行兼容路径。
     service = _processing_streams(request)
     stream = getattr(service, "artifact_events", None)
     durable_error: str | None = None
     durable_terminal: dict[str, object] | None = None
     if callable(stream):
-        try:
+        observed: list[dict[str, object]] = []
+
+        async def collect() -> None:
             async for event in stream(paper_id, kind, profile=profile):
-                # 流内部会把异常转成失败终态事件：成功直接透传返回；
-                # 失败（如 SOURCE_IDENTITY_MISSING）则不转发，转走 agent 回退。
+                if isinstance(event, dict):
+                    observed.append(event)
+
+        try:
+            await asyncio.wait_for(collect(), timeout=_DURABLE_STREAM_TIMEOUT_SECONDS)
+            for event in observed:
                 if isinstance(event, dict) and event.get("type") == "result":
                     durable_terminal = event
                     if event.get("ok"):
@@ -1148,6 +1157,22 @@ async def _durable_artifact_events(
                         return
                     continue
                 yield event
+        except asyncio.TimeoutError:
+            durable_error = "PROCESSING_TIMEOUT"
+            for event in observed:
+                if event.get("type") != "result":
+                    yield event
+            job_ids = {
+                str(event.get("jobId"))
+                for event in observed
+                if str(event.get("jobId") or "").strip()
+            }
+            for job_id in job_ids:
+                try:
+                    await request.app.state.container.processing_api.cancel_job(job_id)
+                except Exception:
+                    pass
+            yield {"type": "progress", "line": "DURABLE::timeout，已取消并切换兼容处理"}
         except Exception as error:
             durable_terminal = {"ok": False, "error": _safe_error(error)}
         if durable_terminal is not None:
@@ -1308,8 +1333,14 @@ async def _agent_events(
                 decoded[stdout_text_field] = raw_stdout
         for key, value in fields.items():
             decoded.setdefault(key, value)
-        decoded.setdefault("ok", int(getattr(result, "returncode", 1)) == 0)
-        decoded.setdefault("error", "" if decoded["ok"] else "legacy agent failed")
+        returncode = int(getattr(result, "returncode", 1))
+        if returncode != 0:
+            decoded["ok"] = False
+            error_lines = str(getattr(result, "stderr", "") or "").strip().splitlines()
+            decoded["error"] = error_lines[-1] if error_lines else "legacy agent failed"
+        else:
+            decoded.setdefault("ok", True)
+            decoded.setdefault("error", "")
         yield {"type": terminal_type, **decoded}
     except Exception:
         yield {"type": terminal_type, "ok": False, **fields, "error": "legacy agent failed"}

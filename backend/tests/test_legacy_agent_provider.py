@@ -42,6 +42,10 @@ elif command in {"cancel", "timeout"}:
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
         time.sleep(0.05)
+elif command == "fail":
+    print("ERR::OCR transport failed", file=sys.stderr, flush=True)
+    print(json.dumps({"ok": True, "markdown": "stale"}), flush=True)
+    raise SystemExit(3)
 '''
 
 
@@ -140,6 +144,18 @@ class LegacyAgentProviderTests(unittest.TestCase):
             self.assertEqual("result", timeout_events[-1]["type"])
             self.assertFalse(timeout_events[-1]["ok"])
             self.assertEqual("legacy agent timed out", timeout_events[-1]["error"])
+
+            failed_events = [
+                event async for event in provider.stream_events(
+                    "fail",
+                    terminal_fields={"markdown": ""},
+                    stdout_text_field="markdown",
+                )
+            ]
+            self.assertEqual("result", failed_events[-1]["type"])
+            self.assertFalse(failed_events[-1]["ok"])
+            self.assertEqual("OCR transport failed", failed_events[-1]["error"])
+            self.assertEqual("stale", failed_events[-1]["markdown"])
 
 
 async def _wait_for_path(path: Path, *, timeout: float = 1.0) -> None:

@@ -3,7 +3,7 @@
                失败回退 PyMuPDF 纯文本。用于采集分类 / 本地导入抽元数据。
 - full_text:   写讲解 / 翻译时通读全文，同样 pymupdf4llm 优先、纯文本回退。
                可选 OCR 模式（settings.json: pdfTextProvider=ocr）：把页面渲染成
-               图片交给 OCR 模型 API 转录；失败 / 配置不全时自动回退本地解析。
+               图片交给 OCR 模型 API 转录；OCR 失败时直接报错，不混用本地解析。
 - strip_references: 裁掉文末「参考文献 / 致谢」段（讲解、翻译共用，避免把书目灌给模型）。
 所有输出都过 _tidy 压掉 pymupdf4llm 的多余空行。
 """
@@ -180,19 +180,17 @@ def first_pages(path, n: int = 8, abstract: str = None) -> str:
 
 def full_text(path, abstract: str = None, max_chars: int = 120000) -> str:
     """整篇 PDF → Markdown（pymupdf4llm 优先，保留版面结构）。
-    pdfTextProvider=ocr 时先尝试 OCR 模型 API，失败 / 结果过短自动回退本地解析。
+    pdfTextProvider=ocr 时只调用 OCR 模型 API；失败 / 结果过短直接抛错，
+    不回退到本地解析，避免把两种来源混在一起。
     max_chars 仅为防超长论文撑爆模型上下文的安全上限。"""
     if (config.PDF_TEXT_PROVIDER or "default") == "ocr":
-        try:
-            ocr_text = _ocr_full_text(path)
-        except Exception as e:
-            print(f"OCRERR::{e}（回退本地解析）", file=sys.stderr, flush=True)
-            ocr_text = ""
-        if len((ocr_text or "").strip()) >= 200:
-            text = _tidy(ocr_text)
-            if abstract:
-                text = f"摘要:{abstract}\n\n{text}"
-            return text[:max_chars]
+        ocr_text = _ocr_full_text(path)
+        if len((ocr_text or "").strip()) < 200:
+            raise RuntimeError("OCR 结果为空或过短")
+        text = _tidy(ocr_text)
+        if abstract:
+            text = f"摘要:{abstract}\n\n{text}"
+        return text[:max_chars]
     text = ""
     try:
         import pymupdf4llm
@@ -278,7 +276,7 @@ def _ocr_transcribe(images_b64: list, cfg: dict) -> str:
 
 
 def _ocr_full_text(path, paper_id=None, quiet=False) -> str:
-    """整篇 PDF → OCR 文本；进度 → stderr（OCRPG::i/n）。配置不全直接抛错由调用方回退。
+    """整篇 PDF → OCR 文本；进度 → stderr（OCRPG::i/n）。配置不全或请求失败直接抛错。
     传入 paper_id 且转换成功（≥200 字阈值防乱码落库）时写入 DB ocr_markdown 表，
     供讲解/翻译管道与阅读页复用。quiet=True 时不输出逐页/落库进度（篇级并发批量场景，
     避免多篇 OCRPG 行交错，批次自身有 ITEM:: 进度契约）。"""

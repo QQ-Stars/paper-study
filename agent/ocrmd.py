@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """PDF → Markdown（OCR）：调用 extract._ocr_full_text（方案 A：DeepSeek-OCR 官方
 Markdown 提示词 + grounding 标记清理）。进度 → stderr（OCRPG::i/n），Markdown → stdout。
-不落库（纯转换，供阅读页即时查看）；讲解/翻译链路若启用 pdfTextProvider=ocr 也走同一函数。"""
+成功结果会写入 ocr_markdown，供阅读页与讲解/翻译复用；失败不会写入或覆盖本地结果。"""
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed

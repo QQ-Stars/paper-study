@@ -146,16 +146,21 @@ def translate_paper(pid: str, workers: int = 0) -> str:
             body = cached_md[:config.TRANSLATE_MAX_CHARS]
     if body is None:
         if pdf:
-            # OCR 模式无缓存：先触发 OCR（成功后自动落库），失败回退本地解析
+            # OCR 模式无缓存：只触发 OCR。失败时终止本次翻译，不能改用本地解析。
             if config.PDF_TEXT_PROVIDER == "ocr":
                 try:
                     _p("STAGE::pdf::OCR 转换中（结果将落库供下次复用）…")
                     ocr_text = extract._ocr_full_text(str(pdf), paper_id=r["id"])
-                    if len(ocr_text.strip()) >= 200:
-                        body = ocr_text[:config.TRANSLATE_MAX_CHARS]
                 except Exception as e:
-                    _p(f"OCRERR::{e}（回退本地解析）")
-            if body is None:
+                    con.close()
+                    _p(f"OCRERR::{e}")
+                    raise SystemExit(4)
+                if len((ocr_text or "").strip()) < 200:
+                    con.close()
+                    _p("OCRERR::OCR 结果为空或过短")
+                    raise SystemExit(4)
+                body = ocr_text[:config.TRANSLATE_MAX_CHARS]
+            else:
                 _p(f"STAGE::pdf::读取 PDF 全文（共 {extract.page_count(pdf)} 页）…")
                 body = extract.full_text(pdf, None, config.TRANSLATE_MAX_CHARS)
         else:
@@ -205,6 +210,7 @@ def translate_paper(pid: str, workers: int = 0) -> str:
 
     results = [None] * len(chunks)
     done = 0
+    failed_chunks = 0
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
         futs = {ex.submit(llm.translate_md, chunks[i]): i for i in range(len(chunks))}
         for fut in as_completed(futs):
@@ -213,10 +219,15 @@ def translate_paper(pid: str, workers: int = 0) -> str:
                 results[i] = fut.result()
             except Exception as e:
                 results[i] = f"> [本段翻译失败：{e}]"
+                failed_chunks += 1
             done += 1
             _p(f"CHUNK::{done}::{len(chunks)}")
 
     md = "\n\n".join(x for x in results if x).strip()
+    if failed_chunks == len(chunks):
+        con.close()
+        _p("ERR::所有段落翻译失败（请检查模型连接与配置）")
+        raise SystemExit(4)
     if not md:
         con.close(); _p("ERR::翻译结果为空"); raise SystemExit(4)
     db.set_translation(con, pid, md)

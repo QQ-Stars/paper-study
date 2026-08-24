@@ -129,6 +129,31 @@ def _author_names(payload):
     return names
 
 
+def _offline_metadata(paper):
+    """Recover metadata that is already derivable from local paper identity."""
+    assignments = []
+    parameters = []
+    arxiv_id = str(paper.get("arxiv_id") or "").strip()
+    if not str(paper.get("year") or "").strip() and len(arxiv_id) >= 4:
+        prefix = arxiv_id[:4]
+        if prefix.isdigit():
+            assignments.append("year=?")
+            parameters.append(prefix)
+    if not str(paper.get("venue") or "").strip() and arxiv_id:
+        assignments.append("venue=?")
+        parameters.append("arXiv")
+    authors = []
+    raw_authors = paper.get("authors")
+    if raw_authors:
+        try:
+            decoded = json.loads(raw_authors) if isinstance(raw_authors, str) else raw_authors
+        except (TypeError, ValueError):
+            decoded = []
+        if isinstance(decoded, list):
+            authors = [str(item).strip() for item in decoded if str(item).strip()]
+    return assignments, parameters, authors
+
+
 def _write_result(payload):
     sys.stdout.write(json.dumps(payload, ensure_ascii=False))
     sys.stdout.flush()
@@ -141,7 +166,7 @@ def run(limit: int = 0) -> dict:
     try:
         _ensure_authors_table(connection)
         rows = connection.execute(
-            """SELECT p.id, p.title, p.arxiv_id, p.doi, p.year, p.venue,
+            """SELECT p.id, p.title, p.arxiv_id, p.doi, p.year, p.venue, p.authors,
                       CASE WHEN pa.paper_id IS NULL THEN 1 ELSE 0 END AS needs_authors
                FROM papers p
                LEFT JOIN paper_authors pa ON pa.paper_id = p.id
@@ -164,21 +189,28 @@ def run(limit: int = 0) -> dict:
             _p(f"ITEM::{index}::{total}::start::{paper_id}::{paper['title'][:60]}")
             try:
                 payload = _fetch_metadata(paper)
-                if not payload:
-                    skipped.append(paper_id)
-                    _p(f"ITEM::{index}::{total}::skip::{paper_id}::未找到元数据")
-                    continue
+                offline = not payload
+                if offline:
+                    assignments, parameters, authors = _offline_metadata(paper)
+                    if not assignments and not authors:
+                        skipped.append(paper_id)
+                        _p(f"ITEM::{index}::{total}::skip::{paper_id}::未找到元数据")
+                        continue
+                    payload = {}
 
                 assignments = []
                 parameters = []
-                if not str(paper.get("year") or "").strip() and payload.get("year"):
+                if offline:
+                    assignments, parameters, authors = _offline_metadata(paper)
+                elif not str(paper.get("year") or "").strip() and payload.get("year"):
                     assignments.append("year=?")
                     parameters.append(str(payload["year"]))
-                if not str(paper.get("venue") or "").strip() and payload.get("venue"):
+                if not offline and not str(paper.get("venue") or "").strip() and payload.get("venue"):
                     assignments.append("venue=?")
                     parameters.append(db.norm_venue(payload["venue"]))
 
-                authors = _author_names(payload) if paper["needs_authors"] else []
+                if not offline:
+                    authors = _author_names(payload) if paper["needs_authors"] else []
                 if not assignments and not authors:
                     skipped.append(paper_id)
                     _p(
@@ -201,7 +233,8 @@ def run(limit: int = 0) -> dict:
                             (paper_id, json.dumps(authors, ensure_ascii=False)),
                         )
                 done += 1
-                _p(f"ITEM::{index}::{total}::done::{paper_id}")
+                suffix = "（本地身份信息）" if offline else ""
+                _p(f"ITEM::{index}::{total}::done::{paper_id}{suffix}")
             except Exception as error:
                 failed.append(paper_id)
                 _p(f"ITEM::{index}::{total}::fail::{paper_id}::{str(error)[:120]}")
@@ -209,15 +242,16 @@ def run(limit: int = 0) -> dict:
         _p(
             f"BATCH::finish::done={done}::fail={len(failed)}::skip={len(skipped)}"
         )
-        return _write_result(
-            {
-                "ok": True,
-                "total": total,
-                "done": done,
-                "failed": failed,
-                "skipped": skipped,
-            }
-        )
+        result = {
+            "ok": not bool(failed),
+            "total": total,
+            "done": done,
+            "failed": failed,
+            "skipped": skipped,
+        }
+        if failed:
+            result["error"] = "部分元数据补全失败，请检查 Semantic Scholar 网络或密钥"
+        return _write_result(result)
     finally:
         connection.close()
 

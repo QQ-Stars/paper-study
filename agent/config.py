@@ -68,7 +68,8 @@ else:
 LLM_TIMEOUT = int(_S.get("llmTimeout") or os.getenv("LLM_TIMEOUT") or 0)
 
 # PDF 文本提取方式：default=本地 pymupdf4llm 解析（默认，行为不变）；
-# ocr=调用 OCR 模型 API（OpenAI 兼容 chat/vision 接口）提取文本，失败自动回退本地解析。
+# ocr=调用 OCR 模型 API（OpenAI 兼容 chat/vision 接口）提取文本；失败直接报错，
+# 不与 default 的本地解析结果混用。
 # 在网页 ⚙ 设置里改；只影响讲解/翻译的全文读取（full_text），不影响采集分类。
 PDF_TEXT_PROVIDER = (_S.get("pdfTextProvider") or os.getenv("PDF_TEXT_PROVIDER") or "default").strip().lower()
 OCR_API_BASE = (_S.get("ocrBaseUrl") or _S.get("ocrApiBase") or os.getenv("OCR_BASE_URL") or "").strip().rstrip("/")

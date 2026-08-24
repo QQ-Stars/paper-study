@@ -58,17 +58,22 @@ def _explain_core(con, r: dict, deep: bool) -> str:
                     pages = extract.page_count(pdf)
                 except Exception:
                     pages = "?"
-                _p(f"STAGE::pdf::读取 PDF 全文（共 {pages} 页）…")
-                # OCR 模式无缓存：先触发 OCR（成功后自动落库），失败回退本地解析
+                mode_label = "OCR 转换中" if config.PDF_TEXT_PROVIDER == "ocr" else "读取 PDF 全文"
+                _p(f"STAGE::pdf::{mode_label}（共 {pages} 页）…")
+                # OCR 模式无缓存：只触发 OCR。失败时终止本次深度讲解，不能改用本地解析。
                 if config.PDF_TEXT_PROVIDER == "ocr":
                     try:
                         ocr_text = extract._ocr_full_text(str(pdf), paper_id=r["id"])
-                        if len(ocr_text.strip()) >= 200:
-                            fulltext = ocr_text[:config.EXPLAIN_MAX_CHARS]
-                            _p(f"PDFOK::OCR 转换完成并已落库（{len(fulltext)} 字）")
                     except Exception as e:
-                        _p(f"OCRERR::{e}（回退本地解析）")
-                if fulltext is None:
+                        _p(f"OCRERR::{e}")
+                        raise
+                    if len((ocr_text or "").strip()) < 200:
+                        error = RuntimeError("OCR 结果为空或过短")
+                        _p(f"OCRERR::{error}")
+                        raise error
+                    fulltext = ocr_text[:config.EXPLAIN_MAX_CHARS]
+                    _p(f"PDFOK::OCR 转换完成并已落库（{len(fulltext)} 字）")
+                else:
                     try:
                         fulltext = extract.full_text(pdf, r.get("abstract"), config.EXPLAIN_MAX_CHARS)
                         _p(f"PDFOK::已读取全文 {len(fulltext)} 字")
@@ -77,6 +82,9 @@ def _explain_core(con, r: dict, deep: bool) -> str:
                 if fulltext:
                     fulltext, cut = extract.strip_references(fulltext)
                     _p("PDFOK::已跳过参考文献" if cut else "PDFOK::全文就绪")
+            elif config.PDF_TEXT_PROVIDER == "ocr":
+                _p("PDFMISS::未找到本地PDF，无法执行 OCR")
+                raise RuntimeError("OCR requires a local PDF")
             else:
                 _p("PDFMISS::未找到本地PDF，改用摘要 / TLDR 生成")
 
@@ -97,8 +105,10 @@ def explain_paper(pid: str, deep: bool = False) -> str:
         raise SystemExit(2)
     r = dict(row)
     _p(f"STAGE::load::{(r.get('title') or '')[:48]}")
-    md = _explain_core(con, r, deep)
-    con.close()
+    try:
+        md = _explain_core(con, r, deep)
+    finally:
+        con.close()
     if not md:
         _p("ERR::模型返回为空")
         raise SystemExit(3)

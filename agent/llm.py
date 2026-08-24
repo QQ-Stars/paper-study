@@ -260,7 +260,12 @@ def translate_md(chunk: str) -> str:
             return out
         user = ("下面是英文论文片段，请**完整翻译成简体中文**，"
                 "不要原样返回英文（即使它从句子中间开始）：\n\n" + chunk)
-    return best or chunk                                # 实在译不动，返回最后结果/原文，至少不丢内容
+    # Returning the source text here made a failed model call look successful
+    # and caused the reader to persist English as a Chinese translation.  Let
+    # the caller record a failed chunk instead.
+    if best and (src_en < 40 or _cjk_ratio(best) >= 0.25):
+        return best
+    raise RuntimeError("翻译模型未返回中文译文")
 
 
 TRANSLATE_SNIPPET_SYSTEM = (

@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from agent import explain, extract, translate
+from agent import db, explain, extract, translate
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -74,12 +74,16 @@ class LegacyAgentContractTests(unittest.TestCase):
 
     def test_full_text_freezes_markdown_fallback_abstract_and_caller_cap(self) -> None:
         markdown = SimpleNamespace(to_markdown=mock.Mock(return_value="M" * 220))
-        with mock.patch.dict(sys.modules, {"pymupdf4llm": markdown}):
+        with (
+            mock.patch.object(extract.config, "PDF_TEXT_PROVIDER", "default"),
+            mock.patch.dict(sys.modules, {"pymupdf4llm": markdown}),
+        ):
             self.assertEqual("M" * 220, extract.full_text("paper.pdf"))
         markdown.to_markdown.assert_called_once_with("paper.pdf", show_progress=False)
 
         short_markdown = SimpleNamespace(to_markdown=mock.Mock(return_value="short"))
         with (
+            mock.patch.object(extract.config, "PDF_TEXT_PROVIDER", "default"),
             mock.patch.dict(sys.modules, {"pymupdf4llm": short_markdown}),
             mock.patch.object(extract, "_plain_pages", return_value="plain fallback" * 25) as fallback,
         ):
@@ -89,6 +93,98 @@ class LegacyAgentContractTests(unittest.TestCase):
         fallback.assert_called_once_with("paper.pdf")
         self.assertEqual(180, len(value))
         self.assertTrue(value.startswith("摘要:Known abstract\n\nplain fallback"))
+
+    def test_ocr_full_text_does_not_fall_back_to_native_extraction(self) -> None:
+        native = SimpleNamespace(to_markdown=mock.Mock(return_value="N" * 500))
+        with (
+            mock.patch.object(extract.config, "PDF_TEXT_PROVIDER", "ocr"),
+            mock.patch.object(
+                extract,
+                "_ocr_full_text",
+                side_effect=RuntimeError("OCR transport failed"),
+            ),
+            mock.patch.object(extract, "_plain_pages", return_value="P" * 500) as plain,
+            mock.patch.dict(sys.modules, {"pymupdf4llm": native}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "OCR transport failed"):
+                extract.full_text("paper.pdf")
+        native.to_markdown.assert_not_called()
+        plain.assert_not_called()
+
+    def test_ocr_failure_does_not_write_ocr_markdown(self) -> None:
+        with (
+            mock.patch.object(
+                extract,
+                "_ocr_settings",
+                return_value={"base": "https://ocr.example/v1", "model": "vision", "dpi": 200, "batch": 1, "max_pages": 0},
+            ),
+            mock.patch.object(extract, "_ocr_page_images", return_value=["image"]),
+            mock.patch.object(
+                extract,
+                "_ocr_transcribe",
+                side_effect=RuntimeError("OCR transport failed"),
+            ),
+            mock.patch.object(db, "set_ocr_markdown") as write,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "OCR transport failed"):
+                extract._ocr_full_text("paper.pdf", paper_id="paper-1")
+        write.assert_not_called()
+
+    def test_translate_ocr_failure_does_not_use_local_pdf_text(self) -> None:
+        row = {"id": "paper-1", "title": "Paper", "pdf_path": "paper.pdf"}
+        connection = StubConnection(row)
+        with (
+            mock.patch.object(translate.config, "PDF_TEXT_PROVIDER", "ocr"),
+            mock.patch.object(translate.db, "get_ocr_markdown", return_value=None),
+            mock.patch.object(translate, "_find_pdf", return_value=Path("paper.pdf")),
+            mock.patch.object(translate.extract, "page_count", return_value=1),
+            mock.patch.object(
+                translate.extract,
+                "_ocr_full_text",
+                side_effect=RuntimeError("OCR transport failed"),
+            ),
+            mock.patch.object(translate.extract, "full_text", return_value="local text") as native,
+            mock.patch.object(translate.db, "set_translation") as write,
+            redirect_stdout(io.StringIO()) as stdout,
+            redirect_stderr(io.StringIO()) as stderr,
+            mock.patch.object(translate.db, "connect", return_value=connection),
+        ):
+            with self.assertRaises(SystemExit) as raised:
+                translate.translate_paper("paper-1")
+        self.assertEqual(4, raised.exception.code)
+        self.assertEqual("", stdout.getvalue())
+        self.assertIn("OCRERR::OCR transport failed", stderr.getvalue())
+        native.assert_not_called()
+        write.assert_not_called()
+        self.assertTrue(connection.closed)
+
+    def test_deep_explain_ocr_failure_does_not_use_local_pdf_text(self) -> None:
+        row = {"id": "paper-1", "title": "Paper", "authors": "[]", "pdf_path": "paper.pdf"}
+        connection = StubConnection(row)
+        with (
+            mock.patch.object(explain.config, "PDF_TEXT_PROVIDER", "ocr"),
+            mock.patch.object(explain.db, "get_ocr_markdown", return_value=None),
+            mock.patch.object(explain, "_find_pdf", return_value=Path("paper.pdf")),
+            mock.patch.object(
+                explain.extract,
+                "_ocr_full_text",
+                side_effect=RuntimeError("OCR transport failed"),
+            ),
+            mock.patch.object(explain.extract, "full_text", return_value="local text") as native,
+            mock.patch.object(explain.llm, "generate_explainer", return_value="# fallback") as generate,
+            mock.patch.object(explain.db, "set_explainer") as write,
+            redirect_stdout(io.StringIO()) as stdout,
+            redirect_stderr(io.StringIO()) as stderr,
+            mock.patch.object(explain.db, "connect", return_value=connection),
+        ):
+            with self.assertRaises(RuntimeError, msg="OCR failure must be visible to the caller"):
+                explain.explain_paper("paper-1", deep=True)
+        self.assertEqual("", stdout.getvalue())
+        self.assertIn("OCRERR::OCR transport failed", stderr.getvalue())
+        native.assert_not_called()
+        generate.assert_not_called()
+        write.assert_not_called()
+        self.assertTrue(connection.closed)
 
     def test_explain_freezes_missing_empty_and_successful_write_contracts(self) -> None:
         missing = StubConnection(None)
@@ -144,6 +240,7 @@ class LegacyAgentContractTests(unittest.TestCase):
         with (
             mock.patch.object(explain.db, "connect", return_value=connection),
             mock.patch.object(explain, "_find_pdf", return_value=None),
+            mock.patch.object(explain.config, "PDF_TEXT_PROVIDER", "default"),
             mock.patch.object(explain.llm, "generate_explainer", return_value="# metadata") as generate,
             mock.patch.object(explain.db, "set_explainer"),
             redirect_stdout(io.StringIO()) as stdout,
@@ -178,6 +275,7 @@ class LegacyAgentContractTests(unittest.TestCase):
         with (
             mock.patch.object(translate.db, "connect", return_value=empty_body),
             mock.patch.object(translate, "_find_pdf", return_value=Path("paper.pdf")),
+            mock.patch.object(translate.config, "PDF_TEXT_PROVIDER", "default"),
             mock.patch.object(translate.extract, "page_count", return_value=1),
             mock.patch.object(translate.extract, "full_text", return_value=""),
             mock.patch.object(translate.db, "set_translation") as write,
@@ -194,6 +292,7 @@ class LegacyAgentContractTests(unittest.TestCase):
         with (
             mock.patch.object(translate.db, "connect", return_value=empty_result),
             mock.patch.object(translate, "_find_pdf", return_value=Path("paper.pdf")),
+            mock.patch.object(translate.config, "PDF_TEXT_PROVIDER", "default"),
             mock.patch.object(translate.extract, "page_count", return_value=1),
             mock.patch.object(translate.extract, "full_text", return_value="body"),
             mock.patch.object(translate.llm, "translate_md", return_value=""),
@@ -221,6 +320,7 @@ class LegacyAgentContractTests(unittest.TestCase):
         with (
             mock.patch.object(translate.db, "connect", return_value=ordered),
             mock.patch.object(translate, "_find_pdf", return_value=Path("paper.pdf")),
+            mock.patch.object(translate.config, "PDF_TEXT_PROVIDER", "default"),
             mock.patch.object(translate.extract, "page_count", return_value=1),
             mock.patch.object(translate.extract, "full_text", return_value="body"),
             mock.patch.object(translate, "_chunk", return_value=["first", "second", "third"]),

@@ -257,6 +257,7 @@ async def serve(
         settings,
         required_schema_revision=SCHEMA_REVISION,
         environment_snapshot=environment,
+        allow_legacy_credential_fallback=True,
         translation_provider_factory=translation_factory,
         structured_provider_factory=structured_factory,
         embedding_profile=profile,
@@ -282,6 +283,7 @@ async def serve(
             embedding_provider_factory=embedding_factory,
             obsidian_enabled=rollout.obsidian_enabled,
             environment_snapshot=environment,
+            allow_legacy_credential_fallback=True,
         )
         background.append(
             asyncio.create_task(
