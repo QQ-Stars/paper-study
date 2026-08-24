@@ -1,19 +1,29 @@
 """多供应商大模型封装。DeepSeek/Qwen/OpenAI 走 OpenAI 兼容协议；结构化 JSON 输出 + 校验重试。"""
 import json
+import re
+import sys
 from openai import OpenAI
 from pydantic import ValidationError
 from . import config
 from .models import PaperAttributes
 
 _client = None
+_client_signature = None
 
 
 def client():
-    global _client
-    if _client is None:
+    global _client, _client_signature
+    signature = (
+        config.API_KEY,
+        config.BASE_URL,
+        config.MODEL,
+        config.LLM_TIMEOUT,
+    )
+    if _client is None or _client_signature != signature:
         # LLM_TIMEOUT（毫秒，设置页「大模型与翻译管道」）>0 时作为请求超时；0/缺省用 SDK 默认。
         timeout = config.LLM_TIMEOUT / 1000 if config.LLM_TIMEOUT > 0 else None
         _client = OpenAI(api_key=config.API_KEY, base_url=config.BASE_URL, timeout=timeout)
+        _client_signature = signature
     return _client
 
 
@@ -140,9 +150,98 @@ def canonicalize_venues(venues: list) -> dict:
     return out
 
 
+_EXPANSION_TERMS = (
+    ("检索增强生成", "retrieval augmented generation"),
+    ("大语言模型", "large language model"),
+    ("多模态", "multimodal"),
+    ("视觉语言", "vision language"),
+    ("大模型", "large language model"),
+    ("幻觉", "hallucination"),
+    ("检测", "detection"),
+    ("缓解", "mitigation"),
+    ("评估", "evaluation"),
+    ("评价", "evaluation"),
+    ("事实性", "factuality"),
+    ("真实性", "factuality"),
+    ("安全", "safety"),
+    ("智能体", "agent"),
+    ("对齐", "alignment"),
+    ("生成", "generation"),
+    ("检索", "retrieval"),
+    ("图像", "image"),
+    ("视频", "video"),
+    ("语音", "speech"),
+    ("文本", "text"),
+)
+_ASCII_QUERY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 '&/().:+_-]*$")
+
+
+def _valid_expansion(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    query = " ".join(value.split()).strip(" \t\r\n.,;:、，。")
+    words = query.split()
+    if not query or not 2 <= len(words) <= 6 or not _ASCII_QUERY.fullmatch(query):
+        return None
+    return query
+
+
+def _local_expand_queries(direction: str, n: int) -> list[str]:
+    """无模型/网络时的确定性英文检索词降级，保持采集流程仍可用。
+
+    这是明确标记的本地降级，不把中文原词伪装成模型生成结果；已知中文术语
+    用固定词典翻译，未知方向仍使用通用学术检索词保证查询格式可用。
+    """
+    text = str(direction or "").lower()
+    translated = []
+    for source, target in _EXPANSION_TERMS:
+        if source in text or target in text:
+            translated.append(target)
+    ascii_words = re.findall(r"[a-z][a-z0-9-]*", text)
+    if "multimodal" in translated or "vision language" in translated:
+        bases = [
+            "multimodal large language model",
+            "vision language model",
+            "multimodal model",
+        ]
+    elif "large language model" in translated:
+        bases = ["large language model", "language model", "LLM"]
+    elif "agent" in translated:
+        bases = ["large language model agent", "AI agent", "agent system"]
+    else:
+        bases = ["academic research topic", "machine learning method", "AI research problem"]
+
+    problem = "hallucination" if "hallucination" in translated else "research"
+    if "safety" in translated:
+        problem = "AI safety"
+    candidates = [
+        f"{bases[0]} {problem} detection",
+        f"{bases[min(1, len(bases) - 1)]} {problem} mitigation",
+        f"{bases[min(2, len(bases) - 1)]} {problem} evaluation",
+        f"{bases[min(1, len(bases) - 1)]} factuality assessment",
+        f"{bases[0]} faithfulness benchmark",
+        f"{bases[min(2, len(bases) - 1)]} {problem} analysis",
+        f"{bases[0]} {problem} survey",
+    ]
+    if ascii_words:
+        topic = " ".join(dict.fromkeys(ascii_words[:3]))
+        candidates.append(f"{topic} literature review")
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        query = _valid_expansion(candidate)
+        if query is not None and query.lower() not in seen:
+            seen.add(query.lower())
+            out.append(query)
+        if len(out) >= n:
+            break
+    return out
+
+
 def expand_queries(direction: str, n: int = 8) -> list:
     """把（可能中文/模糊的）研究方向 → 一组多样化的精准英文检索词组合（目标：最大化召回）。"""
-    sys = (
+    system_prompt = (
         "你是学术文献检索专家。把用户给的研究方向（可能中文或较模糊）转成一组用于 "
         "arXiv / Semantic Scholar / DBLP 的英文检索关键词组合，目标是**最大化召回**——"
         "尽量从不同角度切入，把换个说法就搜不到的论文也捞回来。\n"
@@ -153,21 +252,48 @@ def expand_queries(direction: str, n: int = 8) -> list:
         "**条目之间措辞与角度尽量不同、避免雷同**；宁可多覆盖一个角度也别漏。"
         f"只输出 JSON 对象，形如 {{\"queries\": [\"...\", \"...\"]}}，包含约 {n} 条。"
     )
+    target = max(1, min(int(n or 8), 8))
+    model_queries: list[str] = []
+    fallback_reason = ""
     try:
         resp = client().chat.completions.create(
             model=config.MODEL,
-            messages=[{"role": "system", "content": sys},
+            messages=[{"role": "system", "content": system_prompt},
                       {"role": "user", "content": f"研究方向: {direction}"}],
             response_format={"type": "json_object"}, temperature=0.6,
         )
-        qs = json.loads(resp.choices[0].message.content).get("queries", [])
-        seen, out = set(), []
-        for q in qs:                                  # 去雷同（忽略大小写）
-            if isinstance(q, str) and q.strip() and q.strip().lower() not in seen:
-                seen.add(q.strip().lower()); out.append(q.strip())
-        return out[:n] or [direction]
-    except Exception:
-        return [direction]
+        decoded = json.loads(resp.choices[0].message.content)
+        qs = decoded.get("queries", []) if isinstance(decoded, dict) else []
+        seen: set[str] = set()
+        for value in qs:
+            query = _valid_expansion(value)
+            if query is not None and query.lower() not in seen:
+                seen.add(query.lower())
+                model_queries.append(query)
+    except Exception as error:
+        fallback_reason = str(error) or type(error).__name__
+
+    local_queries = _local_expand_queries(direction, target)
+    seen = {query.lower() for query in model_queries}
+    merged = model_queries[:target]
+    for query in local_queries:
+        if query.lower() not in seen:
+            seen.add(query.lower())
+            merged.append(query)
+        if len(merged) >= target:
+            break
+    if len(merged) < target:
+        # Keep the contract deterministic even for an unrecognised direction.
+        for query in _local_expand_queries("", target * 2):
+            if query.lower() not in seen:
+                seen.add(query.lower())
+                merged.append(query)
+            if len(merged) >= target:
+                break
+    if len(model_queries) < target:
+        reason = fallback_reason or "模型返回的检索词不足或不是英文"
+        print(f"EXPAND_FALLBACK::{reason}，已使用本地扩展词", file=sys.stderr, flush=True)
+    return merged[:target]
 
 
 EXPLAINER_SYSTEM = (

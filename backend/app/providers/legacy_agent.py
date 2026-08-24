@@ -496,6 +496,15 @@ def _friendly_error(
         if "WinError 10013" in line or "Connection error" in line:
             if command in {"ocr-md", "ocr-md-batch"}:
                 return "OCR/模型连接失败，请检查 OCR 地址、密钥或网络权限"
+            if command in {
+                "search",
+                "ingest",
+                "run-job",
+                "verify-venue",
+                "recommend",
+                "citegraph",
+            }:
+                return "检索数据源连接失败，请检查网络权限、数据源配置或 API 密钥"
             return "模型连接失败，请检查 API 地址、密钥或网络权限"
     for line in reversed(lines):
         if line.startswith("ERR::"):

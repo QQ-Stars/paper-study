@@ -165,8 +165,16 @@ def run(limit: int = 0) -> dict:
     connection = db.connect()
     try:
         _ensure_authors_table(connection)
+        paper_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(papers)").fetchall()
+        }
+        # Older seed/fixture databases predate the denormalized authors column;
+        # author enrichment is already persisted in paper_authors, so the
+        # absence of that legacy column must not make the whole command fail.
+        authors_expression = "p.authors" if "authors" in paper_columns else "NULL"
         rows = connection.execute(
-            """SELECT p.id, p.title, p.arxiv_id, p.doi, p.year, p.venue, p.authors,
+            f"""SELECT p.id, p.title, p.arxiv_id, p.doi, p.year, p.venue, {authors_expression} AS authors,
                       CASE WHEN pa.paper_id IS NULL THEN 1 ELSE 0 END AS needs_authors
                FROM papers p
                LEFT JOIN paper_authors pa ON pa.paper_id = p.id

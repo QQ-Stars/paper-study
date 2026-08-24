@@ -54,21 +54,44 @@ class SearchCoordinator:
         return {"ok": code == 0, "code": code, "output": output}
 
     async def expand(self, payload: Mapping[str, object]) -> dict[str, object]:
+        requested = _parse_integer(payload.get("expandN")) or 6
+        requested = max(1, min(requested, 8))
         args = (
             "--query",
             _js_string(payload.get("query") or ""),
             "--expand-n",
-            _js_string(payload.get("expandN") or 6),
+            str(requested),
         )
         result = await self._agent.run("expand", args)
+        code = int(getattr(result, "returncode", 1))
+        stderr = str(getattr(result, "stderr", "") or "")
+        if code != 0:
+            return {
+                "ok": False,
+                "queries": [],
+                "error": _last_agent_error(stderr),
+            }
         queries: list[object] = []
         try:
             decoded = json.loads(str(getattr(result, "stdout", "") or ""))
             if isinstance(decoded, list):
-                queries = decoded
+                queries = [
+                    value
+                    for value in decoded
+                    if isinstance(value, str) and value.strip()
+                ][:requested]
         except (TypeError, ValueError):
-            pass
-        return {"ok": True, "queries": queries}
+            return {"ok": False, "queries": [], "error": "扩展检索词返回格式无效"}
+        if not queries:
+            return {"ok": False, "queries": [], "error": "未生成有效扩展检索词"}
+        fallback = next(
+            (line.split("::", 1)[1].strip() for line in stderr.splitlines() if line.startswith("EXPAND_FALLBACK::")),
+            "",
+        )
+        response: dict[str, object] = {"ok": True, "queries": queries}
+        if fallback:
+            response.update({"fallback": True, "source": "local", "warning": fallback})
+        return response
 
     async def translate_text(self, text: str) -> dict[str, object]:
         if self._translate_text_direct is not None:
@@ -146,6 +169,15 @@ def _js_string(value: object) -> str:
     if value is False:
         return "false"
     return str(value)
+
+
+def _last_agent_error(stderr: str) -> str:
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    for line in reversed(lines):
+        for prefix in ("ERROR::", "ERR::"):
+            if line.startswith(prefix):
+                return line.split("::", 1)[1].strip() or "扩展检索词生成失败"
+    return lines[-1] if lines else "扩展检索词生成失败"
 
 
 __all__ = ["SearchCoordinator", "valid_sources"]

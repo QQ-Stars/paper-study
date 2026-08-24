@@ -83,11 +83,25 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
   const runExpand = async () => {
     if (!query.trim()) return;
     try {
-      const result = await acquireApi.expand(query.trim(), 4);
-      const words = (result.queries as string[] | undefined) ?? [];
+      const result = await acquireApi.expand(query.trim(), 6);
+      if (result.ok === false) {
+        setExpandWords([]);
+        setSelectedQueries(new Set());
+        notify(`扩展失败：${String(result.error ?? '未生成有效扩展检索词')}`);
+        return;
+      }
+      const words = Array.isArray(result.queries)
+        ? result.queries.filter((word): word is string => typeof word === 'string' && word.trim() !== '')
+        : [];
       setExpandWords(words);
       setSelectedQueries(new Set(words));
-      notify(words.length > 0 ? `已生成 ${words.length} 个扩展检索词（已默认全选，可点击取舍）` : '未返回扩展检索词');
+      if (words.length === 0) {
+        notify('未返回扩展检索词');
+      } else if (result.fallback) {
+        notify(`模型暂不可用，已使用本地生成 ${words.length} 个英文扩展检索词（已默认全选，可点击取舍）`);
+      } else {
+        notify(`已生成 ${words.length} 个扩展检索词（已默认全选，可点击取舍）`);
+      }
     } catch (error) {
       notify(`扩展失败：${error instanceof Error ? error.message : error}`);
     }
@@ -117,7 +131,7 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
         },
         (event: StreamEvent) => {
           searchStream.accept(anchor, event);
-          if (event.type === 'done' || event.type === 'result') {
+          if ((event.type === 'done' || event.type === 'result') && event.ok !== false) {
             const list = ((event.candidates as Candidate[]) ?? []).filter(
               (item) => item && typeof item.title === 'string',
             );

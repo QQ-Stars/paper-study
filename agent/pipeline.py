@@ -21,19 +21,27 @@ def ingest(direction, sources, years, limit, min_rel=0.0, explain=False, deep=Fa
 
     # 2) 多源 × 多词 收集候选，跨词去重
     seen = {}
+    source_errors = []
+    successful_sources = 0
     per = max(5, math.ceil(limit * 2.5 / max(1, len(queries))))
     for sname in sources:
         if sname not in SOURCES:
             print(f"  ! 未知数据源: {sname}"); continue
         src = SOURCES[sname]()
+        source_ok = False
         for q in queries:
             try:
                 for stub in src.search(q, years, per):
                     key = stub.arxiv_id or db.title_norm(stub.title)
                     if key and key not in seen:
                         seen[key] = stub
+                source_ok = True
             except Exception as e:
+                source_errors.append((sname, str(e)))
                 print(f"  ! {sname} / '{q}' 检索失败: {e}")
+        if source_ok:
+            successful_sources += 1
+    _raise_if_all_sources_failed(sources, successful_sources, source_errors)
     print(f"\n候选去重后 {len(seen)} 篇，开始按方向「{direction}」分类入库…\n")
 
     # 3) 分类 + 相关性过滤 + 入库（用原始方向打分，最多采到 limit 篇）
@@ -144,6 +152,8 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
     _p("STAGE::expand")
     _p("QUERIES::" + json.dumps(queries, ensure_ascii=False))
     seen = {}
+    source_errors = []
+    successful_sources = 0
     per = max(5, math.ceil(limit * 2.5 / max(1, len(queries))))
     _p("STAGE::search")
     for sname in sources:
@@ -151,15 +161,21 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
             continue
         src = SOURCES[sname]()
         before = len(seen)
+        source_ok = False
         for q in queries:
             try:
                 for stub in src.search(q, years, per):
                     key = stub.arxiv_id or db.title_norm(stub.title)
                     if key and key not in seen:
                         seen[key] = stub
+                source_ok = True
             except Exception as e:
+                source_errors.append((sname, str(e)))
                 _p(f"SRCERR::{sname}::{e}")
+        if source_ok:
+            successful_sources += 1
         _p(f"SRC::{sname}::{len(seen) - before}")     # 该源新增的去重后篇数
+    _raise_if_all_sources_failed(sources, successful_sources, source_errors)
     _p(f"FOUND::{len(seen)}")
     _p("STAGE::classify")
     con = db.connect()
@@ -202,6 +218,24 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
     con.close()
     _p(f"DONE::{len(cands)}")
     return cands
+
+
+def _raise_if_all_sources_failed(
+    sources,
+    successful_sources: int,
+    source_errors: list[tuple[str, str]],
+) -> None:
+    """不要把全量网络失败伪装成一次成功但没有结果的检索。"""
+    requested = [str(source) for source in sources if str(source) in SOURCES]
+    if not requested:
+        raise ValueError("没有有效检索数据源")
+    if successful_sources > 0:
+        return
+    detail = ""
+    if source_errors:
+        name, message = source_errors[0]
+        detail = f"：{name}：{message[:160]}"
+    raise RuntimeError(f"所有检索数据源均不可用，请检查网络权限或 API 配置{detail}")
 
 
 def ingest_candidates(cands, deep=False, download_pdf=True):

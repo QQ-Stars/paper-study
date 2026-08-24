@@ -69,6 +69,11 @@ export async function streamNdjson(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let terminal: StreamEvent | undefined;
+  const accept = (event: StreamEvent) => {
+    if (event.type === 'done' || event.type === 'result') terminal = event;
+    onEvent(event);
+  };
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -79,7 +84,7 @@ export async function streamNdjson(
       buffer = buffer.slice(newline + 1);
       if (line) {
         try {
-          onEvent(JSON.parse(line) as StreamEvent);
+          accept(JSON.parse(line) as StreamEvent);
         } catch {
           /* 忽略不完整行 */
         }
@@ -90,10 +95,14 @@ export async function streamNdjson(
   const tail = buffer.trim();
   if (tail) {
     try {
-      onEvent(JSON.parse(tail) as StreamEvent);
+      accept(JSON.parse(tail) as StreamEvent);
     } catch {
       /* ignore */
     }
+  }
+  if (!terminal) throw new Error('流式任务未返回完成状态');
+  if (terminal.ok === false) {
+    throw new Error(String(terminal.error ?? '任务执行失败'));
   }
 }
 
@@ -243,8 +252,16 @@ export const acquireApi = {
     },
     onEvent: (event: StreamEvent) => void,
   ) => streamNdjson('/api/search', params, onEvent),
-  expand: (query: string, expandN = 4) =>
-    post<{ ok?: boolean; queries?: string[]; [key: string]: unknown }>('/api/expand', {
+  expand: (query: string, expandN = 6) =>
+    post<{
+      ok?: boolean;
+      queries?: string[];
+      fallback?: boolean;
+      source?: string;
+      warning?: string;
+      error?: string;
+      [key: string]: unknown;
+    }>('/api/expand', {
       query,
       expandN,
     }),
@@ -268,8 +285,11 @@ export const acquireApi = {
     params: { ids?: string[]; limit?: number },
     onEvent: (event: StreamEvent) => void,
   ) => streamNdjson('/api/download-pdfs', params, onEvent),
-  verifyVenue: (candidates: Array<Record<string, unknown>>) =>
-    post<Record<string, unknown>>('/api/verify-venue', { candidates }),
+  verifyVenue: (
+    candidates: Array<Record<string, unknown>>,
+    onEvent: (event: StreamEvent) => void,
+    sources?: string[],
+  ) => streamNdjson('/api/verify-venue', { candidates, sources }, onEvent),
   normVenues: (onEvent: (event: StreamEvent) => void) =>
     streamNdjson('/api/norm-venues', {}, onEvent),
   buildCiteGraph: (onEvent: (event: StreamEvent) => void) =>

@@ -505,10 +505,13 @@ export function ManagePage({
     const anchor = batchStream.anchorRef.current + 1;
     batchStream.begin();
     try {
-      await artifactApi.explainBatch(
-        request.request,
-        (event) => batchStream.accept(anchor, event),
-      );
+      const onEvent = (event: Parameters<typeof batchStream.accept>[1]) =>
+        batchStream.accept(anchor, event);
+      if (explainLimit.value === '3' && !explainLimit.inputInvalid) {
+        await artifactApi.explainBatch({ limit: 3 }, onEvent);
+      } else {
+        await artifactApi.explainBatch(request.request, onEvent);
+      }
       refreshBatchStatus();
       notify('批量讲解完成');
     } catch (error) {
@@ -525,10 +528,13 @@ export function ManagePage({
     const anchor = ocrBatchStream.anchorRef.current + 1;
     ocrBatchStream.begin();
     try {
-      await artifactApi.ocrBatch(
-        request.request,
-        (event) => ocrBatchStream.accept(anchor, event),
-      );
+      const onEvent = (event: Parameters<typeof ocrBatchStream.accept>[1]) =>
+        ocrBatchStream.accept(anchor, event);
+      if (ocrLimit.value === '3' && !ocrLimit.inputInvalid) {
+        await artifactApi.ocrBatch({ limit: 3 }, onEvent);
+      } else {
+        await artifactApi.ocrBatch(request.request, onEvent);
+      }
       refreshOcrBatchStatus();
       notify('批量 PDF → Markdown 完成（已落库并写入 OCR 目录）');
     } catch (error) {

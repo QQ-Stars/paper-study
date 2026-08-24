@@ -567,6 +567,18 @@ def _prewarm():
             pass
 
 
+def _configure_stdio() -> None:
+    """MCP JSON-RPC 必须使用 UTF-8，即使 Windows 默认代码页不是 UTF-8。"""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
 def _validate_live_application_runtime() -> None:
     if MCP_MODE != "application" or os.environ.get("RUNTIME_ENVIRONMENT") != "live":
         return
@@ -682,6 +694,7 @@ def main(arguments=None):
     values = list(sys.argv[1:] if arguments is None else arguments)
     if values not in ([], ["--supervisor"]):
         raise ValueError("agent.mcp_server accepts only --supervisor")
+    _configure_stdio()
     _validate_live_application_runtime()
     if values == ["--supervisor"]:
         _run_supervisor()
