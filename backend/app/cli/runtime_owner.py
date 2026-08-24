@@ -9,7 +9,6 @@ import ipaddress
 import json
 import os
 from pathlib import Path
-import shutil
 import socket
 import subprocess
 import sys
@@ -372,7 +371,7 @@ class _FrozenNodeHandle:
 
 
 class FrozenNodeRollbackRunner:
-    """Start only the frozen legacy Node profile on an isolated database."""
+    """Compatibility placeholder for the removed Node rollback profile."""
 
     def __init__(
         self,
@@ -394,67 +393,12 @@ class FrozenNodeRollbackRunner:
         if profile != "frozen-node":
             raise RuntimeOwnerError(
                 "CANDIDATE_ROLLBACK_PROFILE_INVALID",
-                "The frozen Node runner received an invalid profile.",
+                "The removed Node rollback runner received an invalid profile.",
             )
-        database_path = _absolute_existing_file(database, "candidate database")
-        entrypoint = self._application_root / "server.js"
-        node = shutil.which("node")
-        if node is None or not entrypoint.is_file():
-            raise RuntimeOwnerError(
-                "FROZEN_NODE_RUNTIME_UNAVAILABLE",
-                "The local Node runtime or frozen server entrypoint is unavailable.",
-            )
-        host = "127.0.0.1"
-        port = _assigned_loopback_port(host)
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "HOST": host,
-                "PORT": str(port),
-                "DB_PATH": str(database_path),
-                "API_BACKEND_MODE": "legacy",
-                "DOCUMENT_PIPELINE_MODE": "legacy",
-                "GENERATION_PIPELINE_MODE": "legacy",
-                "ARTIFACT_READ_MODE": "legacy",
-                "ARTIFACT_WRITE_MODE": "legacy",
-                "OCR_ENABLED": "0",
-                "OBSIDIAN_ENABLED": "0",
-                "NODE_ENV": "test",
-            }
+        raise RuntimeOwnerError(
+            "FROZEN_NODE_RUNTIME_REMOVED",
+            "The Node backend has been removed; use backend.app.cli.local_runtime.",
         )
-        creation_flags = (
-            int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
-        )
-        process = subprocess.Popen(
-            [node, str(entrypoint)],
-            cwd=self._application_root,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=creation_flags,
-        )
-        handle = _FrozenNodeHandle(process=process, host=host, port=port)
-        deadline = time.monotonic() + self._startup_timeout_seconds
-        try:
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    raise RuntimeOwnerError(
-                        "FROZEN_NODE_START_FAILED",
-                        "The frozen Node candidate exited before binding loopback.",
-                    )
-                try:
-                    with socket.create_connection((host, port), timeout=0.2):
-                        return handle
-                except OSError:
-                    time.sleep(0.05)
-            raise RuntimeOwnerError(
-                "FROZEN_NODE_START_TIMEOUT",
-                "The frozen Node candidate did not bind loopback before the deadline.",
-            )
-        except Exception:
-            self.stop(handle)
-            raise
 
     def smoke(self, handle: object) -> dict[str, object]:
         if not isinstance(handle, _FrozenNodeHandle):

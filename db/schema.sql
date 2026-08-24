@@ -1,5 +1,5 @@
 -- Paper-Study 数据库结构（SQLite）。详见 docs/DATABASE.md
--- 连接级 PRAGMA（journal_mode/foreign_keys/busy_timeout）在 db.js 里设置。
+-- 连接级 PRAGMA（journal_mode/foreign_keys/busy_timeout）由 Python 数据库层设置。
 
 -- ========== 论文主表 ==========
 CREATE TABLE IF NOT EXISTS papers (
@@ -114,6 +114,9 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
   added         INTEGER DEFAULT 0,
   skipped       INTEGER DEFAULT 0,
   log           TEXT,
+  only_a        INTEGER DEFAULT 0,
+  queries       TEXT,
+  schedule_id   INTEGER,
   created_at    TEXT DEFAULT (datetime('now')),
   finished_at   TEXT
 );
@@ -143,6 +146,27 @@ CREATE TABLE IF NOT EXISTS job_schedules (
   last_run      TEXT,
   next_run      TEXT,
   created_at    TEXT DEFAULT (datetime('now'))
+);
+
+-- ========== 批处理结果（管理页展示最近一次运行） ==========
+CREATE TABLE IF NOT EXISTS batch_runs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind        TEXT NOT NULL,
+  finished_at TEXT NOT NULL DEFAULT (datetime('now')),
+  total       INTEGER NOT NULL DEFAULT 0,
+  done        INTEGER NOT NULL DEFAULT 0,
+  failed      INTEGER NOT NULL DEFAULT 0,
+  skipped     INTEGER NOT NULL DEFAULT 0,
+  detail      TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS ix_batch_runs_kind ON batch_runs(kind, id DESC);
+
+-- ========== PDF 转换得到的规范 Markdown ==========
+CREATE TABLE IF NOT EXISTS ocr_markdown (
+  paper_id   TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+  content    TEXT NOT NULL DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 -- ========== 迁移版本 ==========

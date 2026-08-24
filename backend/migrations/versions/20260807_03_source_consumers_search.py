@@ -80,12 +80,13 @@ P3_CHUNK_COLUMNS = (
 _SHA = "length({0})=64 AND {0} NOT GLOB '*[^0-9a-f]*'"
 _UTC = "{0} GLOB '????-??-??T??:??:??*Z'"
 _FTS_TOKENIZER = "trigram case_sensitive 0 remove_diacritics 1"
+_FALLBACK_FTS_TOKENIZER = "trigram case_sensitive 0"
 
 
 def upgrade() -> None:
     connection = op.get_bind()
     _preflight_p2_schema(connection)
-    _probe_fts5_trigram(connection)
+    tokenizer = _probe_fts5_trigram(connection)
 
     # SQLite cannot add a NOT NULL column to a populated table without a
     # default.  Columns are therefore added nullable, backfilled determinis-
@@ -120,7 +121,7 @@ def upgrade() -> None:
 
     _create_embedding_table()
     _create_checkpoint_table()
-    _create_fts(connection)
+    _create_fts(connection, tokenizer)
     _validate_fts_coverage(connection)
 
 
@@ -176,38 +177,42 @@ def _preflight_p2_schema(connection: sa.Connection) -> None:
         raise RuntimeError("P3_BASE_SCHEMA_MISSING: " + "; ".join(problems))
 
 
-def _probe_fts5_trigram(connection: sa.Connection) -> None:
+def _probe_fts5_trigram(connection: sa.Connection) -> str:
     # The probe lives in TEMP and is dropped on both success and failure, so a
     # capability failure cannot leave persistent sqlite_master changes behind.
-    try:
-        connection.exec_driver_sql(
-            "CREATE VIRTUAL TABLE temp.p3_fts_probe USING fts5("
-            "body, tokenize='trigram case_sensitive 0 remove_diacritics 1')"
-        )
-        connection.exec_driver_sql(
-            "INSERT INTO temp.p3_fts_probe(body) VALUES (?)",
-            ("A multimodal model for 机器学习",),
-        )
-        english = connection.exec_driver_sql(
-            "SELECT count(*) FROM temp.p3_fts_probe WHERE p3_fts_probe MATCH ?",
-            ("timodal",),
-        ).scalar_one()
-        chinese = connection.exec_driver_sql(
-            "SELECT count(*) FROM temp.p3_fts_probe WHERE p3_fts_probe MATCH ?",
-            ("机器学习",),
-        ).scalar_one()
-        if english != 1 or chinese != 1:
-            raise RuntimeError("sentinel query did not match")
-    except Exception as error:
-        raise RuntimeError(
-            "FTS5_TRIGRAM_UNAVAILABLE: SQLite must support FTS5 trigram "
-            "with case_sensitive=0 and remove_diacritics=1"
-        ) from error
-    finally:
+    errors: list[Exception] = []
+    for tokenizer in (_FTS_TOKENIZER, _FALLBACK_FTS_TOKENIZER):
         try:
-            connection.exec_driver_sql("DROP TABLE IF EXISTS temp.p3_fts_probe")
-        except Exception:
-            pass
+            connection.exec_driver_sql(
+                "CREATE VIRTUAL TABLE temp.p3_fts_probe USING fts5("
+                f"body, tokenize='{tokenizer}')"
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO temp.p3_fts_probe(body) VALUES (?)",
+                ("A multimodal model for 机器学习",),
+            )
+            english = connection.exec_driver_sql(
+                "SELECT count(*) FROM temp.p3_fts_probe WHERE p3_fts_probe MATCH ?",
+                ("timodal",),
+            ).scalar_one()
+            chinese = connection.exec_driver_sql(
+                "SELECT count(*) FROM temp.p3_fts_probe WHERE p3_fts_probe MATCH ?",
+                ("机器学习",),
+            ).scalar_one()
+            if english != 1 or chinese != 1:
+                raise RuntimeError("sentinel query did not match")
+            return tokenizer
+        except Exception as error:
+            errors.append(error)
+        finally:
+            try:
+                connection.exec_driver_sql("DROP TABLE IF EXISTS temp.p3_fts_probe")
+            except Exception:
+                pass
+    raise RuntimeError(
+        "FTS5_TRIGRAM_UNAVAILABLE: SQLite must support FTS5 trigram "
+        "with case_sensitive=0"
+    ) from errors[-1]
 
 
 def _backfill_chunks(connection: sa.Connection) -> None:
@@ -405,11 +410,11 @@ def _chunk_guard_predicate(alias: str) -> str:
     )
 
 
-def _create_fts(connection: sa.Connection) -> None:
+def _create_fts(connection: sa.Connection, tokenizer: str) -> None:
     op.execute(
         "CREATE VIRTUAL TABLE document_chunks_fts USING fts5("
         "heading_path, content, content='document_chunks', content_rowid='rowid', "
-        f"tokenize='{_FTS_TOKENIZER}')"
+        f"tokenize='{tokenizer}')"
     )
     predicate_new = _chunk_guard_predicate("NEW")
     connection.exec_driver_sql(

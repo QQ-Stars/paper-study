@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import dataclasses
 import asyncio
-import json
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,9 +25,6 @@ LEGACY_ENVIRONMENT = {
     "ARTIFACT_WRITE_MODE": "legacy",
     "OCR_ENABLED": "0",
 }
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-
-
 class RolloutDefaultsTests(unittest.TestCase):
     def test_candidate_settings_composition_uses_frozen_obsidian_rollout(self) -> None:
         from backend.app.application.settings import SettingsService
@@ -111,39 +106,6 @@ class RolloutDefaultsTests(unittest.TestCase):
             assert_shadow_request_allowed(shadow, "POST")
         self.assertEqual("SHADOW_MUTATION_FORBIDDEN", raised.exception.code)
 
-    def test_node_and_python_effective_values_match(self) -> None:
-        cases = (
-            {},
-            {
-                "API_BACKEND_MODE": "shadow",
-                "DOCUMENT_PIPELINE_MODE": "p1",
-                "GENERATION_PIPELINE_MODE": "p1",
-                "ARTIFACT_READ_MODE": "prefer_new",
-                "ARTIFACT_WRITE_MODE": "dual",
-                "OCR_ENABLED": "1",
-            },
-        )
-        script = (
-            "const r=require('./lib/backend-rollout');"
-            "const e=JSON.parse(process.argv[1]);"
-            "process.stdout.write(JSON.stringify(r.rolloutToEnvironment(r.parseBackendRollout(e))));"
-        )
-        for environment in cases:
-            with self.subTest(environment=environment):
-                node = subprocess.run(
-                    ["node", "-e", script, json.dumps(environment)],
-                    cwd=REPOSITORY_ROOT,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    check=False,
-                )
-                self.assertEqual(0, node.returncode, node.stderr)
-                python_effective = rollout_to_environment(
-                    parse_rollout_settings(environment)
-                )
-                self.assertEqual(python_effective, json.loads(node.stdout))
-
     def test_P5_rollout_extends_the_frozen_P0_1_inventory_only_with_obsidian_enabled(
         self,
     ) -> None:
@@ -182,22 +144,6 @@ class RolloutDefaultsTests(unittest.TestCase):
                     )
                 self.assertEqual("INVALID_ROLLOUT_VALUE", raised.exception.code)
                 self.assertEqual("OBSIDIAN_ENABLED", raised.exception.variable)
-
-        script = (
-            "const r=require('./lib/backend-rollout');"
-            "const s=r.parseBackendRollout({OBSIDIAN_ENABLED:'1'},'p5');"
-            "process.stdout.write(JSON.stringify(r.rolloutToEnvironment(s,'p5')));"
-        )
-        node = subprocess.run(
-            ["node", "-e", script],
-            cwd=REPOSITORY_ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        )
-        self.assertEqual(0, node.returncode, node.stderr)
-        self.assertEqual(expected, json.loads(node.stdout))
 
 
 if __name__ == "__main__":

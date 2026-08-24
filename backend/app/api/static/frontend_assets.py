@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-"""Safe React/legacy asset adapter matching the Node routing contract."""
+"""Safe static adapter for the single ``ui-redesign`` frontend."""
 
 from pathlib import Path
 import json
-import os
 import re
 from typing import Awaitable, Callable
 from urllib.parse import unquote
@@ -53,15 +52,11 @@ _STATIC_METHODS = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "
 def create_frontend_assets_router(
     *,
     react_root: Path | str | None = None,
-    legacy_root: Path | str | None = None,
     root: Path | str | None = None,
-    ui_entry: str | None = None,
 ) -> APIRouter:
     handler = create_frontend_assets_handler(
         react_root=react_root,
-        legacy_root=legacy_root,
         root=root,
-        ui_entry=ui_entry,
     )
     router = APIRouter()
 
@@ -75,35 +70,28 @@ def create_frontend_assets_router(
 def create_frontend_assets_handler(
     *,
     react_root: Path | str | None = None,
-    legacy_root: Path | str | None = None,
     root: Path | str | None = None,
-    ui_entry: str | None = None,
 ) -> Callable[[Request, str], Awaitable[Response]]:
     repository_root = Path(root or Path(__file__).resolve().parents[4]).resolve()
-    if react_root is not None:
-        react = Path(react_root).resolve()
-    else:
-        # 默认前端：新前端 ui-redesign（纸墨风 React+Vite，构建时 base=/workspace/）；
-        # 无构建产物时回退旧 frontend/dist，保证升级过渡期不白屏。
-        candidate = repository_root / "ui-redesign" / "dist"
-        if (candidate / "index.html").is_file():
-            react = candidate.resolve()
-        else:
-            react = (repository_root / "frontend" / "dist").resolve()
-    legacy = Path(legacy_root or repository_root / "public").resolve()
+    react = (
+        Path(react_root).resolve()
+        if react_root is not None
+        else (repository_root / "ui-redesign" / "dist").resolve()
+    )
     react_index = react / "index.html"
-    legacy_index = legacy / "index.html"
-    configured_entry = os.environ.get("UI_ENTRY") if ui_entry is None else ui_entry
-    requested = configured_entry if configured_entry in {"react", "legacy"} else "react"
     react_available = react_index.is_file()
-    root_entry = requested if requested == "legacy" or react_available else "legacy"
     immutable_assets = _read_immutable_assets(react) if react_available else frozenset()
 
     async def frontend_asset(request: Request, path: str) -> Response:
         raw = _raw_path(request, path)
         if request.method not in {"GET", "HEAD"}:
             return _plain("method not allowed", 405, {"Allow": "GET, HEAD"})
-        result = _resolve(raw, react, react_index, legacy, legacy_index, root_entry, react_available)
+        result = _resolve(
+            raw,
+            react,
+            react_index,
+            react_available,
+        )
         if result[0] == "redirect":
             return RedirectResponse(result[1], status_code=302, headers={"Cache-Control": "no-store"})
         kind, target = result
@@ -117,20 +105,19 @@ def create_frontend_assets_handler(
             )
         if kind == "not-found" or target is None:
             return _plain("not found", 404)
-        flavor = "react" if target.is_relative_to(react) else "legacy"
         html = target.suffix.lower() == ".html"
-        relative = target.relative_to(react).as_posix() if flavor == "react" else ""
+        relative = target.relative_to(react).as_posix()
         headers = {
             "Cache-Control": (
                 "public,max-age=31536000,immutable"
-                if flavor == "react" and not html and relative in immutable_assets
+                if not html and relative in immutable_assets
                 else "no-cache"
             ),
             "Content-Type": _MIME.get(
                 target.suffix.lower(), "application/octet-stream"
             ),
         }
-        if flavor == "react" and html:
+        if html:
             headers["Content-Security-Policy"] = _CSP
         return FileResponse(
             target,
@@ -144,9 +131,6 @@ def _resolve(
     raw: str,
     react: Path,
     react_index: Path,
-    legacy: Path,
-    legacy_index: Path,
-    root_entry: str,
     react_available: bool,
 ) -> tuple[str, Path | str | None]:
     if not raw.startswith("/") or "\x00" in raw or "\\" in raw:
@@ -170,16 +154,12 @@ def _resolve(
     if any(segment in {".", ".."} for segment in raw.split("/") + decoded.split("/")):
         return "forbidden", None
     if decoded == "/":
-        return ("redirect", "/workspace/") if root_entry == "react" else _file_or_missing(legacy_index, legacy)
+        return "redirect", "/workspace/"
     if decoded == "/workspace":
         return "redirect", "/workspace/"
-    if decoded == "/legacy":
-        return "redirect", "/legacy/"
     if decoded == "/api" or decoded.startswith("/api/") or decoded == "/pdfbytes" or decoded.startswith("/papers"):
         return "not-found", None
     if decoded.startswith("/workspace") and decoded != "/workspace" and not decoded.startswith("/workspace/"):
-        return "forbidden", None
-    if decoded.startswith("/legacy") and decoded != "/legacy" and not decoded.startswith("/legacy/"):
         return "forbidden", None
     if decoded.startswith("/workspace/"):
         if not react_available:
@@ -195,27 +175,18 @@ def _resolve(
         if relative == "assets" or relative.startswith("assets/"):
             return "not-found", None
         return _file_or_missing(react_index, react)
-    if decoded.startswith("/legacy/"):
-        relative = decoded[len("/legacy/") :]
-        if relative == "":
-            return _file_or_missing(legacy_index, legacy)
-        target = _safe_target(legacy, relative)
-        if target is None:
-            return "forbidden", None
-        return _file_or_missing(target, legacy)
-    target = _safe_target(legacy, decoded[1:])
-    if target is None:
-        return "forbidden", None
-    return _file_or_missing(target, legacy)
+    return "not-found", None
 
 
-def _file_or_missing(target: Path, root: Path) -> tuple[str, Path | None]:
+def _file_or_missing(target: Path | None, root: Path | None) -> tuple[str, Path | None]:
+    if target is None or root is None:
+        return "not-found", None
     try:
         resolved = target.resolve(strict=False)
         resolved.relative_to(root.resolve())
     except (ValueError, OSError, RuntimeError):
         return "forbidden", None
-    return ("legacy-file", resolved) if resolved.is_file() else ("not-found", None)
+    return ("static-file", resolved) if resolved.is_file() else ("not-found", None)
 
 
 def _safe_target(root: Path, relative: str) -> Path | None:

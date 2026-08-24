@@ -1,117 +1,53 @@
-﻿# Paper-Study 一键关闭脚本（Windows PowerShell）
-# 用法：双击 stop.cmd，或 powershell -NoProfile -ExecutionPolicy Bypass -File stop.ps1
-#
-# 逻辑：
-#   1. 5173 在监听 -> 先优雅执行 native_runtime stop（最多等 20 秒）
-#   2. 兜底：强制结束仍残留的本项目 .venv Python 进程（后端四角色）
-#   3. 5180 在监听 -> 结束 ui-redesign 开发服务器（node）
-#   4. 汇报两个端口的最终状态
-
 $ErrorActionPreference = 'Continue'
 $repo = $PSScriptRoot
-Set-Location $repo
+Set-Location -LiteralPath $repo
 
-function Test-PortListen([int]$port) {
-    return [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
-}
-
-$py = Join-Path $repo '.venv\Scripts\python.exe'
-$ownerMarker = Join-Path $repo 'data\compatibility\runtime\production-owner.json'
-$nativeSpec  = Join-Path $repo 'data\compatibility\runtime\native-runtime-v1.json'
-$stateDir    = Join-Path $repo 'data\compatibility\runtime\native-state'
-$localStateDir = Join-Path $repo 'data\local-runtime'
-$localPidPath = Join-Path $localStateDir 'server.pid'
-$localStopped = $false
-
-# ── 0) 停止首次运行的隔离 Node 进程（只接受本地状态文件中的 PID + Node 可执行文件） ──
-if (Test-Path -LiteralPath $localPidPath) {
-    $localRecord = $null
-    try { $localRecord = Get-Content -Raw -LiteralPath $localPidPath | ConvertFrom-Json } catch { $localRecord = $null }
-    $localPid = 0
-    if ($localRecord -and $localRecord.pid) {
-        try { $localPid = [int]$localRecord.pid } catch { $localPid = 0 }
-    } else {
-        try { $localPid = [int](Get-Content -Raw -LiteralPath $localPidPath) } catch { $localPid = 0 }
-    }
-    $localProcess = if ($localPid -gt 0) { Get-Process -Id $localPid -ErrorAction SilentlyContinue } else { $null }
-    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
-    $expectedExecutable = if ($localRecord -and $localRecord.executable) { [string]$localRecord.executable } else { [string]$nodeCommand.Source }
-    $sameNode = $localProcess -and $localProcess.Path -and $expectedExecutable -and
-        [string]::Equals($localProcess.Path, $expectedExecutable, [System.StringComparison]::OrdinalIgnoreCase)
-    $sameStart = $true
-    if ($localProcess -and $localRecord -and $localRecord.startedAt) {
-        try {
-            $actualStart = ([DateTimeOffset]$localProcess.StartTime).ToUnixTimeMilliseconds()
-            $sameStart = [Math]::Abs($actualStart - [int64]$localRecord.startedAt) -le 30000
-        } catch { $sameStart = $false }
-    }
-    if ($localProcess -and $sameNode -and $sameStart) {
-        Write-Host ('正在停止本地隔离运行时（PID ' + $localPid + '）…')
-        Stop-Process -Id $localPid -Force -ErrorAction SilentlyContinue
-        $localStopped = $true
-        Start-Sleep -Seconds 1
-    } elseif ($localProcess) {
-        Write-Host ('警告：本地 PID 文件未匹配当前 Node 进程（PID ' + $localPid + '），未结束该进程。')
-    }
-    if (-not (Get-Process -Id $localPid -ErrorAction SilentlyContinue)) {
-        Remove-Item -LiteralPath $localPidPath -Force -ErrorAction SilentlyContinue
-    }
-}
-
-# ── 1) 优雅停止后端 ──
-if ((Test-PortListen 5173) -and -not $localStopped) {
-    Write-Host '正在优雅停止后端（native_runtime stop）…'
+$runtimeDir = Join-Path $repo 'data\local-runtime'
+$pidPath = Join-Path $runtimeDir 'server.pid'
+$serverPid = 0
+$record = $null
+if (Test-Path -LiteralPath $pidPath) {
     try {
-        $owner = Get-Content -Raw -Encoding UTF8 -LiteralPath $ownerMarker | ConvertFrom-Json
-        & $py -B -m backend.app.cli.native_runtime stop `
-            --native-runtime-spec $nativeSpec `
-            --build-identity-manifest ([string]$owner.buildIdentityManifestPath) `
-            --state-directory $stateDir `
-            --owner-marker $ownerMarker 2>&1 | Out-Null
+        $rawRecord = Get-Content -Raw -LiteralPath $pidPath
+        $record = $rawRecord | ConvertFrom-Json
+        $serverPid = [int]$record.pid
     } catch {
-        Write-Host ('优雅停止失败：' + $_.Exception.Message + '，将使用强制结束。')
+        Write-Host 'Warning: unsupported service state format; no process was stopped.'
     }
-    for ($i = 0; $i -lt 10; $i++) {
-        if (-not (Test-PortListen 5173)) { break }
-        Start-Sleep -Seconds 2
+}
+
+if ($serverPid -gt 0) {
+    $process = Get-Process -Id $serverPid -ErrorAction SilentlyContinue
+    if ($process) {
+        $expectedExecutable = [IO.Path]::GetFullPath((Join-Path $repo '.venv\Scripts\python.exe'))
+        $sameExecutable = $process.Path -and
+            [string]::Equals($process.Path, $expectedExecutable, [StringComparison]::OrdinalIgnoreCase)
+        $sameStart = $false
+        if ($sameExecutable -and $record.startedAt) {
+            try {
+                $actualStart = ([DateTimeOffset]$process.StartTime).ToUniversalTime()
+                $expectedStart = [DateTimeOffset]::Parse($record.startedAt).ToUniversalTime()
+                $sameStart = [Math]::Abs(($actualStart - $expectedStart).TotalSeconds) -le 30
+            } catch {
+                $sameStart = $false
+            }
+        }
+        if ($sameExecutable -and $sameStart) {
+            Write-Host "Stopping FastAPI (PID $serverPid)..."
+            Stop-Process -Id $serverPid -Force -ErrorAction SilentlyContinue
+            $process.WaitForExit(5000)
+            Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Host "Warning: state file does not match the FastAPI process (PID $serverPid); process was not stopped."
+        }
+    } else {
+        Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
     }
-} else {
-    Write-Host '后端（5173）未在运行。'
 }
 
-# ── 2) 兜底：强制结束仍残留的本项目 .venv Python 进程 ──
-$venvPrefix = (Join-Path $repo '.venv') + '\'
-$leftover = Get-Process python, pythonw -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -and $_.Path.StartsWith($venvPrefix, [System.StringComparison]::OrdinalIgnoreCase) }
-if ($leftover) {
-    Write-Host ('强制结束残留后端进程 ' + $leftover.Count + ' 个…')
-    $leftover | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
-}
-
-# ── 3) 结束 ui-redesign 开发服务器（5180） ──
-$devConns = Get-NetTCPConnection -LocalPort 5180 -State Listen -ErrorAction SilentlyContinue
-if ($devConns) {
-    $devPids = $devConns | Select-Object -ExpandProperty OwningProcess -Unique
-    foreach ($p in $devPids) {
-        Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
-    }
-    Write-Host '已停止 ui-redesign 开发服务器（5180）。'
+$listener = Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue
+if ($listener) {
+    Write-Host 'Warning: port 5173 is still in use; inspect the owning process.'
 } else {
-    Write-Host 'ui-redesign 开发服务器（5180）未在运行。'
+    Write-Host 'FastAPI stopped; port 5173 is available.'
 }
-
-# ── 4) 结果汇报 ──
-Start-Sleep -Seconds 1
-if (Test-PortListen 5173) {
-    Write-Host '警告：5173 仍被占用，请手动检查（任务管理器结束相关 python 进程）。'
-} else {
-    Write-Host '5173（FastAPI 后端）已释放。'
-}
-if (Test-PortListen 5180) {
-    Write-Host '警告：5180 仍被占用，请手动检查（任务管理器结束相关 node 进程）。'
-} else {
-    Write-Host '5180（ui-redesign 开发服务器）已释放。'
-}
-Write-Host '完成。'
-

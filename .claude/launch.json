@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "study-app",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["server.js"],
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "backend.app.cli.local_runtime", "--root", "."],
       "port": 5173
     }
   ]

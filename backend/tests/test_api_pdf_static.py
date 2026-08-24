@@ -169,7 +169,7 @@ class PdfStaticApiTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_workspace_and_legacy_entry_contract(self) -> None:
+    def test_workspace_entry_contract(self) -> None:
         async def scenario() -> None:
             async with p3_database_fixture(prefix="study-app-p4-static-integration-") as fixture:
                 services = _services(
@@ -192,15 +192,12 @@ class PdfStaticApiTests(unittest.TestCase):
 
                 fixture_root = fixture.database_path.parents[1] / "frontend-fixture"
                 react_root = fixture_root / "frontend" / "dist"
-                legacy_root = fixture_root / "public"
                 asset_root = react_root / "assets"
                 manifest_root = react_root / ".vite"
                 asset_root.mkdir(parents=True)
                 manifest_root.mkdir(parents=True)
-                legacy_root.mkdir(parents=True)
 
                 react_index = b'<div id="root"></div>'
-                legacy_index = b"<main>legacy</main>"
                 hashed_name = "index-AbC_d123.js"
                 hashed_body = b"hashed"
                 source_map_body = b'{"version":3}'
@@ -216,22 +213,17 @@ class PdfStaticApiTests(unittest.TestCase):
                 }
                 manifest_bytes = json.dumps(manifest, separators=(",", ":")).encode("utf-8")
                 (manifest_root / "manifest.json").write_bytes(manifest_bytes)
-                (legacy_root / "index.html").write_bytes(legacy_index)
-                (legacy_root / "style.css").write_bytes(b"legacy style")
 
                 static_app = FastAPI()
                 static_app.include_router(
                     create_frontend_assets_router(
                         react_root=react_root,
-                        legacy_root=legacy_root,
-                        ui_entry="react",
                     )
                 )
                 with TestClient(static_app) as client:
                     for path, location in (
                         ("/", "/workspace/"),
                         ("/workspace", "/workspace/"),
-                        ("/legacy", "/legacy/"),
                     ):
                         response = client.get(path, follow_redirects=False)
                         self.assertEqual(302, response.status_code, path)
@@ -276,14 +268,8 @@ class PdfStaticApiTests(unittest.TestCase):
                     self.assertEqual("no-store", unsupported.headers["cache-control"])
                     self.assertEqual("method not allowed", unsupported.text)
 
-                    legacy = client.get("/legacy/")
-                    self.assertEqual(legacy_index, legacy.content)
-                    self.assertEqual("text/html; charset=utf-8", legacy.headers["content-type"])
-                    self.assertEqual("no-cache", legacy.headers["cache-control"])
-                    self.assertNotIn("content-security-policy", legacy.headers)
-                    unprefixed = client.get("/style.css")
-                    self.assertEqual(b"legacy style", unprefixed.content)
-                    self.assertEqual("text/css; charset=utf-8", unprefixed.headers["content-type"])
+                    self.assertEqual(404, client.get("/legacy/").status_code)
+                    self.assertEqual(404, client.get("/style.css").status_code)
 
                     missing_asset = client.get("/workspace/assets/missing.js")
                     self.assertEqual(404, missing_asset.status_code)
@@ -295,15 +281,13 @@ class PdfStaticApiTests(unittest.TestCase):
                         "/workspace/%",
                         "/workspace/%C0%AF",
                         "/workspace/evil%00.js",
-                        "/workspace/%2e%2e/server.js",
+                        "/workspace/%2e%2e/app.py",
                         "/workspace/%2E/library",
                         "/workspace/a%2fb.js",
                         "/workspace/a%5Cb.js",
                         "/workspace/C:/Windows/system.ini",
-                        "/legacy/%2e%2e/server.js",
-                        "/%2e%2e/server.js",
+                        "/%2e%2e/app.py",
                         "/workspace-old/index.html",
-                        "/legacy-backup/style.css",
                     )
                     for path in unsafe_paths:
                         response = client.get(path)

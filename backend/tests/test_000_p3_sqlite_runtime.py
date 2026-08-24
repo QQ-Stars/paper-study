@@ -28,22 +28,33 @@ from backend.tests.support.p1_database import (
 
 
 class P3SqliteRuntimeTests(unittest.TestCase):
-    def test_frozen_trigram_tokenizer_is_available_before_full_suite(self) -> None:
+    def test_supported_trigram_tokenizer_is_available_before_full_suite(self) -> None:
         with closing(sqlite3.connect(":memory:")) as connection:
-            connection.execute(
-                "CREATE VIRTUAL TABLE p3_tokenizer_probe USING fts5("
-                "content, tokenize='trigram case_sensitive 0 remove_diacritics 1')"
-            )
-            connection.execute(
-                "INSERT INTO p3_tokenizer_probe(content) VALUES(?)",
-                ("这是一个机器学习模型",),
-            )
-            count = connection.execute(
-                "SELECT count(*) FROM p3_tokenizer_probe "
-                "WHERE p3_tokenizer_probe MATCH ?",
-                ("机器学习",),
-            ).fetchone()[0]
-        self.assertEqual(1, count)
+            for tokenizer in (
+                "trigram case_sensitive 0 remove_diacritics 1",
+                "trigram case_sensitive 0",
+            ):
+                try:
+                    connection.execute(
+                        "CREATE VIRTUAL TABLE p3_tokenizer_probe USING fts5("
+                        f"content, tokenize='{tokenizer}')"
+                    )
+                    connection.execute(
+                        "INSERT INTO p3_tokenizer_probe(content) VALUES(?)",
+                        ("这是一个机器学习模型",),
+                    )
+                    count = connection.execute(
+                        "SELECT count(*) FROM p3_tokenizer_probe "
+                        "WHERE p3_tokenizer_probe MATCH ?",
+                        ("机器学习",),
+                    ).fetchone()[0]
+                    if count == 1:
+                        return
+                except sqlite3.OperationalError:
+                    pass
+                finally:
+                    connection.execute("DROP TABLE IF EXISTS p3_tokenizer_probe")
+        self.fail("SQLite does not provide a working FTS5 trigram tokenizer")
 
     def test_alembic_cli_loads_the_frozen_sqlite_runtime_before_migration(self) -> None:
         with tempfile.TemporaryDirectory(prefix="study-app-p3-alembic-runtime-") as temp_dir:

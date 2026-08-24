@@ -3729,13 +3729,23 @@ def _p3_fts_content_inventory(
         "using fts5",
         "content='document_chunks'",
         "content_rowid='rowid'",
-        "trigram case_sensitive 0 remove_diacritics 1",
     ):
         if fragment not in normalized_virtual_sql:
             raise DatabaseBackupError(
                 "BACKUP_FTS_SCHEMA_INVALID",
                 "P3 FTS is not the required external-content trigram index.",
             )
+    if not any(
+        fragment in normalized_virtual_sql
+        for fragment in (
+            "trigram case_sensitive 0 remove_diacritics 1",
+            "trigram case_sensitive 0",
+        )
+    ):
+        raise DatabaseBackupError(
+            "BACKUP_FTS_SCHEMA_INVALID",
+            "P3 FTS is not the required external-content trigram index.",
+        )
 
     observed_triggers = {
         str(row[1])

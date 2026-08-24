@@ -1,105 +1,113 @@
-﻿# Paper-Study 一键启动脚本（Windows PowerShell）
-# 用法：powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1 [-SkipBrowser]
-# 或双击 start.cmd。
-#
-# 架构：
-#   已完成 P6 接管时：后端 = FastAPI（native_runtime 四角色，端口 5173）。
-#   新克隆/未接管时：使用隔离的 Node 本地运行时（data/local-runtime），不接触 Live 数据库。
-#   前端 = ui-redesign（纸墨风 React+Vite）构建产物由后端 /workspace/ 路由托管；
-#          构建产物缺失时自动执行 ui-redesign npm run build。
-#
-# 逻辑：
-#   1. 缺少 owner marker -> 启动隔离的 scripts/start-local.js（首次克隆可直接运行）
-#   2. 有 owner marker -> 严格验证 P6 身份，再启动 native_runtime
-
 param([switch]$SkipBrowser)
 
 $ErrorActionPreference = 'Stop'
 $repo = $PSScriptRoot
-Set-Location $repo
+Set-Location -LiteralPath $repo
 
 $env:PYTHONDONTWRITEBYTECODE = '1'
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
-$sqliteDll = 'D:\Programming\Environment\Anaconda\pkgs\sqlite-3.51.2-hee5a0db_0\Library\bin'
-if (Test-Path $sqliteDll) { $env:P3_SQLITE_DLL_DIR = $sqliteDll }
 
-$ownerMarker = Join-Path $repo 'data\compatibility\runtime\production-owner.json'
-$nativeSpec  = Join-Path $repo 'data\compatibility\runtime\native-runtime-v1.json'
-$stateDir    = Join-Path $repo 'data\compatibility\runtime\native-state'
-
-if (-not (Test-Path -LiteralPath $ownerMarker)) {
-    $node = Get-Command node -ErrorAction SilentlyContinue
-    if (-not $node) {
-        Write-Host 'ERROR: 未找到 Node.js。请先安装 Node.js 20+，再重新运行 start.cmd。'
-        exit 1
-    }
-    Write-Host '未检测到 P6 production owner，启动隔离的本地运行时（data/local-runtime）…'
-    & $node.Source (Join-Path $repo 'scripts\start-local.js') --detach --install-missing --build-missing --port 5173
+function Invoke-Python([string[]]$Arguments) {
+    & $script:pythonPath @Arguments
     if ($LASTEXITCODE -ne 0) {
-        Write-Host ('ERROR: 本地运行时启动失败（退出码 ' + $LASTEXITCODE + '）。')
-        exit $LASTEXITCODE
+        throw "Python command failed with exit code $LASTEXITCODE"
     }
-    Write-Host '启动成功：打开 http://localhost:5173/workspace/（本地隔离模式）'
+}
+
+function Ensure-PythonEnvironment {
+    $script:pythonPath = Join-Path $repo '.venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $script:pythonPath)) {
+        $python = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $python) {
+            throw 'Python 3.10+ was not found on PATH.'
+        }
+        Write-Host 'Creating .venv ...'
+        & $python.Source -m venv (Join-Path $repo '.venv')
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to create .venv.' }
+    }
+
+    & $script:pythonPath -c 'import alembic, fastapi, uvicorn' 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Installing Python dependencies ...'
+        Invoke-Python @('-m', 'pip', 'install', '-r', (Join-Path $repo 'requirements.txt'))
+    }
+}
+
+function Ensure-FrontendBuild {
+    $entry = Join-Path $repo 'ui-redesign\dist\index.html'
+    if (Test-Path -LiteralPath $entry) { return }
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npm) { throw 'ui-redesign/dist is missing and npm was not found. Install Node.js 20+ and retry.' }
+    Push-Location (Join-Path $repo 'ui-redesign')
+    try {
+        if (-not (Test-Path -LiteralPath 'node_modules')) {
+            & $npm.Source ci
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to install frontend dependencies.' }
+        }
+        & $npm.Source run build
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to build ui-redesign.' }
+    } finally {
+        Pop-Location
+    }
+}
+
+function Test-Alive {
+    try {
+        $response = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/health/live' -UseBasicParsing -TimeoutSec 3
+        return $response.StatusCode -eq 200
+    } catch {
+        return $false
+    }
+}
+
+Ensure-PythonEnvironment
+Ensure-FrontendBuild
+
+if (Test-Alive) {
+    Write-Host 'Paper-Study is already running: http://localhost:5173/workspace/'
     if (-not $SkipBrowser) { Start-Process 'http://localhost:5173/workspace/' }
     exit 0
 }
 
-$py = Join-Path $repo '.venv\Scripts\python.exe'
-if (-not (Test-Path $py)) { Write-Host 'ERROR: .venv 不存在，请先执行 python -m venv .venv 并安装 requirements.txt'; exit 1 }
+$runtimeDir = Join-Path $repo 'data\local-runtime'
+$null = New-Item -ItemType Directory -Force -Path $runtimeDir
+$stdout = Join-Path $runtimeDir 'server.log'
+$stderr = Join-Path $runtimeDir 'server.err.log'
+$pidPath = Join-Path $runtimeDir 'server.pid'
+Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
 
-function Test-Alive {
-    try {
-        $r = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/health/live' -UseBasicParsing -TimeoutSec 5
-        return ($r.StatusCode -eq 200)
-    } catch { return $false }
+$arguments = @(
+    '-B', '-m', 'backend.app.cli.local_runtime',
+    '--root', $repo,
+    '--host', '127.0.0.1',
+    '--port', '5173'
+)
+$process = Start-Process -FilePath $script:pythonPath -ArgumentList $arguments -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+$startedAt = try {
+    ([DateTimeOffset]$process.StartTime).ToUniversalTime()
+} catch {
+    [DateTimeOffset]::UtcNow
+}
+$record = [ordered]@{
+    schemaVersion = 1
+    pid = $process.Id
+    executable = [IO.Path]::GetFullPath($script:pythonPath)
+    startedAt = $startedAt.ToString('o')
+}
+$record | ConvertTo-Json -Compress | Set-Content -LiteralPath $pidPath -Encoding utf8
+
+$ready = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    Start-Sleep -Seconds 2
+    if ($process.HasExited) { break }
+    if (Test-Alive) { $ready = $true; break }
+}
+if (-not $ready) {
+    $details = if (Test-Path -LiteralPath $stderr) { Get-Content -Raw -LiteralPath $stderr } else { '' }
+    if ($process.HasExited) { $details += "`nprocess exited with code $($process.ExitCode)" }
+    throw "FastAPI failed to start. Log: $stderr`n$details"
 }
 
-$owner = Get-Content -Raw -Encoding UTF8 -LiteralPath $ownerMarker | ConvertFrom-Json
-if ($owner.ownerState -ne 'python_active') {
-    Write-Host ('ERROR: ownerState=' + $owner.ownerState + '（非 python_active）。请先完成受控 P6 接管，勿绕过门禁。')
-    exit 1
-}
-$biPath = [string]$owner.buildIdentityManifestPath
-if (-not (Test-Path $biPath)) { Write-Host ('ERROR: owner marker 引用的 BuildIdentity 不存在: ' + $biPath); exit 1 }
-
-# 新前端构建产物检查：ui-redesign/dist 缺失时自动构建（后端 /workspace/ 托管它）
-$uiDist = Join-Path $repo 'ui-redesign\dist\index.html'
-if (-not (Test-Path $uiDist)) {
-    Write-Host 'ui-redesign 构建产物缺失，尝试 npm run build …'
-    Push-Location (Join-Path $repo 'ui-redesign')
-    try {
-        npm run build
-        if ($LASTEXITCODE -ne 0) { Write-Host 'WARN: ui-redesign 构建失败，后端将回退旧前端产物（如有）。' }
-    } catch {
-        Write-Host 'WARN: npm 不可用或构建异常，后端将回退旧前端产物（如有）。'
-    } finally { Pop-Location }
-}
-
-if (Test-Alive) {
-    $listener = @(Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue)
-    Write-Host ('Paper-Study 已在运行（python_active, listener pid=' + $listener[0].OwningProcess + '）。')
-} else {
-    # After a reboot/crash the durable state file can outlive the processes;
-    # clear it (only when every recorded role pid is dead) so start can proceed.
-    # 该辅助脚本随本地 operator 目录分发，其他克隆可能没有，缺失时跳过。
-    $staleCleaner = Join-Path $PSScriptRoot 'data\compatibility\p6-operator-scripts\clean-stale-state.ps1'
-    if (Test-Path -LiteralPath $staleCleaner) { & $staleCleaner }
-    Write-Host 'Paper-Study 未运行，使用 frozen identity 启动四角色（api/worker/scheduler/mcp）...'
-    & $py -B -m backend.app.cli.native_runtime start `
-        --native-runtime-spec $nativeSpec `
-        --build-identity-manifest $biPath `
-        --state-directory $stateDir `
-        --owner-marker $ownerMarker
-    if ($LASTEXITCODE -ne 0) { Write-Host ('ERROR: native_runtime start 退出码 ' + $LASTEXITCODE); exit $LASTEXITCODE }
-    $ok = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        Start-Sleep -Seconds 2
-        if (Test-Alive) { $ok = $true; break }
-    }
-    if (-not $ok) { Write-Host 'ERROR: 启动后 60 秒内 /health/live 未就绪，请查看 ' + (Join-Path $stateDir 'logs\api.log'); exit 1 }
-    Write-Host '启动成功：/health/live -> 200'
-}
-
-Write-Host '打开 http://localhost:5173/workspace/ （ui-redesign 新前端；/legacy/ = 旧版入口）'
+Write-Host 'Started: http://localhost:5173/workspace/'
 if (-not $SkipBrowser) { Start-Process 'http://localhost:5173/workspace/' }
