@@ -2,7 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { v2Api } from '../src/api/client.ts';
-import { appendJobEvents, canCancelJob, canRetryJob } from '../src/components/jobHistory.ts';
+import {
+  appendJobEvents,
+  buildJobListParams,
+  canCancelJob,
+  canRetryJob,
+  createJobHistoryPage,
+  moveToNextJobPage,
+  moveToPreviousJobPage,
+} from '../src/components/jobHistory.ts';
 
 const originalFetch = globalThis.fetch;
 
@@ -81,6 +89,29 @@ test('durable job actions follow the public status contract', () => {
   assert.equal(canRetryJob('failed'), true);
   assert.equal(canRetryJob('cancelled'), true);
   assert.equal(canRetryJob('running'), false);
+});
+
+test('job history filters omit the all options and reset their cursor on filter changes', () => {
+  assert.deepEqual(buildJobListParams({ status: 'all', jobType: 'all', paperId: '  ' }, null), {});
+  assert.deepEqual(
+    buildJobListParams({ status: 'failed', jobType: 'ocr', paperId: ' paper-1 ' }, 'cursor-2'),
+    { status: 'failed', jobType: 'ocr', paperId: 'paper-1', cursor: 'cursor-2' },
+  );
+  assert.deepEqual(buildJobListParams({ status: 'queued', jobType: 'all', paperId: '' }, null), {
+    status: 'queued',
+  });
+});
+
+test('job history pagination follows next cursors and returns to the prior cursor', () => {
+  const initial = createJobHistoryPage();
+  const second = moveToNextJobPage(initial, 'cursor-2');
+  const third = moveToNextJobPage(second, 'cursor-3');
+
+  assert.deepEqual(initial, { index: 0, cursors: [null] });
+  assert.deepEqual(second, { index: 1, cursors: [null, 'cursor-2'] });
+  assert.deepEqual(third, { index: 2, cursors: [null, 'cursor-2', 'cursor-3'] });
+  assert.deepEqual(moveToPreviousJobPage(third), { index: 1, cursors: [null, 'cursor-2', 'cursor-3'] });
+  assert.deepEqual(moveToPreviousJobPage(initial), initial);
 });
 
 test('event pages append only newer sequences when a detail is refreshed', () => {

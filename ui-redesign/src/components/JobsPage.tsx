@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { jobApi, scheduleApi, v2Api } from '../api/client';
 import type {
@@ -10,7 +10,17 @@ import type {
   V2JobEvent,
 } from '../api/types';
 import { PlusIcon } from './Icons';
-import { appendJobEvents, canCancelJob, canRetryJob } from './jobHistory';
+import {
+  appendJobEvents,
+  buildJobListParams,
+  canCancelJob,
+  canRetryJob,
+  createJobHistoryPage,
+  moveToNextJobPage,
+  moveToPreviousJobPage,
+  type JobHistoryFilters,
+  type JobHistoryPage,
+} from './jobHistory';
 import { StreamConsole, useStream } from './StreamConsole';
 
 interface JobsPageProps {
@@ -30,6 +40,26 @@ function toJobErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const JOB_STATUS_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'queued', label: '排队中' },
+  { value: 'running', label: '处理中' },
+  { value: 'succeeded', label: '已完成' },
+  { value: 'failed', label: '失败' },
+  { value: 'cancelled', label: '已取消' },
+];
+
+const JOB_TYPE_OPTIONS = [
+  { value: 'all', label: '全部类型' },
+  { value: 'source_materialize', label: '源文档' },
+  { value: 'ocr', label: 'OCR' },
+  { value: 'explain', label: '讲解' },
+  { value: 'translate', label: '翻译' },
+  { value: 'embed', label: '语义索引' },
+  { value: 'obsidian_export', label: 'Obsidian 导出' },
+  { value: 'obsidian_sync', label: 'Obsidian 同步' },
+];
+
 export function JobsPage({ notify }: JobsPageProps) {
   /* ── legacy 采集任务 ── */
   const [jobs, setJobs] = useState<LegacyJob[]>([]);
@@ -40,6 +70,11 @@ export function JobsPage({ notify }: JobsPageProps) {
   const [v2Jobs, setV2Jobs] = useState<V2JobDetail[]>([]);
   const [v2JobsLoading, setV2JobsLoading] = useState(true);
   const [v2JobsError, setV2JobsError] = useState<string | null>(null);
+  const [v2Filters, setV2Filters] = useState<JobHistoryFilters>({ status: 'all', jobType: 'all', paperId: '' });
+  const [v2Page, setV2Page] = useState<JobHistoryPage>(() => createJobHistoryPage());
+  const [v2NextCursor, setV2NextCursor] = useState<string | null>(null);
+  const [v2AutoRefresh, setV2AutoRefresh] = useState(true);
+  const v2ListRequest = useRef(0);
   const [selectedV2JobId, setSelectedV2JobId] = useState<string | null>(null);
   const [v2Detail, setV2Detail] = useState<V2JobDetail | null>(null);
   const [v2DetailLoading, setV2DetailLoading] = useState(false);
@@ -56,7 +91,6 @@ export function JobsPage({ notify }: JobsPageProps) {
 
   useEffect(() => {
     loadJobs();
-    void loadV2Jobs();
     scheduleApi.list().then(setSchedules).catch(() => setSchedules([]));
   }, [loadJobs]);
 
@@ -88,21 +122,56 @@ export function JobsPage({ notify }: JobsPageProps) {
     }
   };
 
-  const loadV2Jobs = async () => {
+  const loadV2Jobs = useCallback(async () => {
+    const requestId = ++v2ListRequest.current;
+    const cursor = v2Page.cursors[v2Page.index] ?? null;
     setV2JobsLoading(true);
     setV2JobsError(null);
+    setV2NextCursor(null);
     try {
-      const result = await v2Api.listJobs();
+      const result = await v2Api.listJobs(buildJobListParams(v2Filters, cursor));
+      if (requestId !== v2ListRequest.current) return;
       setV2Jobs(result.items);
+      setV2NextCursor(result.nextCursor);
       setSelectedV2JobId((current) => {
         if (current && !result.items.some((job) => job.id === current)) return null;
         return current;
       });
     } catch (error) {
+      if (requestId !== v2ListRequest.current) return;
       setV2JobsError(error instanceof Error ? error.message : String(error));
     } finally {
-      setV2JobsLoading(false);
+      if (requestId === v2ListRequest.current) setV2JobsLoading(false);
     }
+  }, [v2Filters, v2Page]);
+
+  useEffect(() => {
+    void loadV2Jobs();
+  }, [loadV2Jobs]);
+
+  useEffect(() => {
+    if (!v2AutoRefresh) return undefined;
+    const timer = window.setInterval(() => void loadV2Jobs(), 15000);
+    return () => window.clearInterval(timer);
+  }, [loadV2Jobs, v2AutoRefresh]);
+
+  const updateV2Filter = (key: keyof JobHistoryFilters, value: string) => {
+    setV2Filters((previous) => ({ ...previous, [key]: value }));
+    setV2Page(createJobHistoryPage());
+    setV2NextCursor(null);
+    setSelectedV2JobId(null);
+  };
+
+  const goToNextV2Page = () => {
+    if (v2JobsLoading || !v2NextCursor) return;
+    setV2Page((previous) => moveToNextJobPage(previous, v2NextCursor));
+    setSelectedV2JobId(null);
+  };
+
+  const goToPreviousV2Page = () => {
+    if (v2JobsLoading || v2Page.index === 0) return;
+    setV2Page((previous) => moveToPreviousJobPage(previous));
+    setSelectedV2JobId(null);
   };
 
   useEffect(() => {
@@ -278,7 +347,7 @@ export function JobsPage({ notify }: JobsPageProps) {
         </section>
 
         {/* ── v2 durable 任务 ── */}
-        <section className="card jobs__panel" aria-labelledby="jobs-v2">
+        <section className="card jobs__panel" aria-labelledby="jobs-v2" aria-busy={v2JobsLoading}>
           <header className="insights__panel-head">
             <h3 className="section-title" id="jobs-v2">
               durable 处理任务
@@ -287,6 +356,64 @@ export function JobsPage({ notify }: JobsPageProps) {
               {v2JobsLoading ? '加载中…' : '刷新'}
             </button>
           </header>
+          <div className="reviews__start-row" role="group" aria-label="durable 任务筛选">
+            <select
+              className="input"
+              aria-label="任务状态筛选"
+              value={v2Filters.status}
+              onChange={(event) => updateV2Filter('status', event.target.value)}
+            >
+              {JOB_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <select
+              className="input"
+              aria-label="任务类型筛选"
+              value={v2Filters.jobType}
+              onChange={(event) => updateV2Filter('jobType', event.target.value)}
+            >
+              {JOB_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <input
+              className="input"
+              aria-label="Paper ID 筛选"
+              placeholder="Paper ID"
+              value={v2Filters.paperId}
+              onChange={(event) => updateV2Filter('paperId', event.target.value)}
+            />
+          </div>
+          <div className="deep__actions">
+            <span className="deep__fact" role="status">
+              第 {v2Page.index + 1} 页 · 本页 {v2Jobs.length} 条
+            </span>
+            <label className="acquire__check acquire__check--inline">
+              <input
+                type="checkbox"
+                checked={v2AutoRefresh}
+                onChange={(event) => setV2AutoRefresh(event.target.checked)}
+              />
+              自动刷新
+            </label>
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={goToPreviousV2Page}
+              disabled={v2JobsLoading || v2Page.index === 0}
+            >
+              上一页
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={goToNextV2Page}
+              disabled={v2JobsLoading || !v2NextCursor}
+            >
+              下一页
+            </button>
+          </div>
           {v2JobsError ? (
             <div className="jobs__detail" role="alert">
               <p className="deep__fact">任务列表加载失败：{v2JobsError}</p>
