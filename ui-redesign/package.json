@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test:batch-limits": "node --experimental-strip-types --test test/batch-limits.test.mjs"
+    "test:batch-limits": "node --experimental-strip-types --test test/batch-limits.test.mjs",
+    "test:library-query": "node --experimental-strip-types --test test/library-query.test.mjs",
+    "test:batch-tasks": "node --experimental-strip-types --test test/batch-tasks.test.mjs",
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
   },
   "dependencies": {
     "katex": "^0.16.47",

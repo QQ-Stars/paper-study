@@ -5,6 +5,12 @@ import type { Paper, StudyStatus } from '../api/types';
 import { CloseIcon, NoteIcon, PdfIcon, SearchIcon, StarIcon } from './Icons';
 import { PaperDetail } from './PaperDetail';
 import { StreamConsole, useStream } from './StreamConsole';
+import {
+  filterLibraryPapers,
+  paginateLibraryPapers,
+  type LibrarySearchMode,
+  type LibraryView,
+} from './libraryQuery';
 
 interface LibraryPageProps {
   papers: Paper[];
@@ -18,9 +24,7 @@ interface LibraryPageProps {
   openReader: (id: string) => void;
 }
 
-type SearchMode = 'keyword' | 'semantic' | 'chunks';
-type SortKey = 'recent' | 'year' | 'citations' | 'relevance';
-type LibraryView = SortKey | 'favorites';
+type SearchMode = LibrarySearchMode;
 
 const STATUS_FILTERS: Array<{ id: 'all' | StudyStatus; label: string }> = [
   { id: 'all', label: '全部' },
@@ -67,36 +71,16 @@ export function LibraryPage({
   const semStream = useStream();
   const chunkBusy = useState({ busy: false })[0];
   const favoritesOnly = libraryView === 'favorites';
-  const effectiveSort: SortKey = favoritesOnly ? 'recent' : libraryView;
 
   const topics = useMemo(
     () => Array.from(new Set(papers.map((paper) => paper.topic).filter(Boolean))),
     [papers],
   );
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = papers.filter(
-      (paper) =>
-        (mode !== 'keyword' ||
-          !q ||
-          (paper.title ?? '').toLowerCase().includes(q) ||
-          (paper.title_zh ?? '').includes(query.trim()) ||
-          (paper.venue ?? '').toLowerCase().includes(q) ||
-          (paper.topic ?? '').includes(query.trim()) ||
-          (paper.id ?? '').toLowerCase().includes(q)) &&
-        (status === 'all' || paper.status === status) &&
-        (topic === 'all' || paper.topic === topic) &&
-        (!favoritesOnly || paper.favorite === 1),
-    );
-    const byKey = (key: SortKey) => (a: Paper, b: Paper) => {
-      if (key === 'year') return Number(b.year || 0) - Number(a.year || 0);
-      if (key === 'citations') return (b.citations ?? 0) - (a.citations ?? 0);
-      if (key === 'relevance') return (b.relevance ?? 0) - (a.relevance ?? 0);
-      return b.created_at.localeCompare(a.created_at);
-    };
-    return [...list].sort(byKey(effectiveSort));
-  }, [papers, query, status, topic, favoritesOnly, effectiveSort, mode]);
+  const filtered = useMemo(
+    () => filterLibraryPapers(papers, { mode, query, status, topic, view: libraryView }),
+    [papers, mode, query, status, topic, libraryView],
+  );
 
   const selected = papers.find((paper) => paper.id === selectedId) ?? null;
 
@@ -109,11 +93,11 @@ export function LibraryPage({
       onSelect(null);
     }
   }, [favoritesOnly, filtered, onSelect, selectedId]);
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const safePage = Math.min(page, pageCount);
-  const paged = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const pageStart = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const pageEnd = Math.min(safePage * pageSize, filtered.length);
+  const pageResult = useMemo(
+    () => paginateLibraryPapers(filtered, page, pageSize),
+    [filtered, page, pageSize],
+  );
+  const { papers: paged, page: safePage, pageCount, pageStart, pageEnd } = pageResult;
   const countText = `${String(filtered.length).padStart(String(papers.length).length, '\u2007')} 篇`;
 
   const runSemantic = async () => {
