@@ -39,3 +39,26 @@ _Avoid_: ProviderProfile, key tail
 **LegacyProvenance**:
 An explicit statement that an existing artifact predates traceable SourceDocument lineage. It preserves uncertainty instead of inventing a source relationship.
 _Avoid_: Inferred source, migrated source
+
+**ReproductionProject**:
+A user-owned attempt to reproduce one Paper. A Paper may have multiple independent reproduction projects; the project is not a replacement for the Paper or its SourceDocument.
+_Avoid_: experiment, ProcessingJob, paper copy
+
+**ReproductionDocument**:
+The Markdown record belonging to a ReproductionProject, including its revision and save state. It describes the reproduction plan, method, environment, execution record, results, deviations, and next steps.
+_Avoid_: SourceDocument, GeneratedArtifact, ordinary paper note
+
+**ExperimentRun**:
+An intentionally recorded, human-described execution of a reproduction experiment. It includes environment, command, parameters, data version, code revision, seed, status, metrics, and result summary. It is not a ProcessingJob and does not execute arbitrary shell commands in the first release.
+_Avoid_: background job, task row, ProcessingJob
+
+**ReproductionArtifact**:
+An attachment produced or referenced by a ReproductionProject, such as a log, image, table, or model output. It remains distinct from GeneratedArtifact unless a later decision proves the semantics are identical.
+_Avoid_: generated artifact, PDF path, SourceDocument
+
+**ReproductionNote**:
+An optional short-form note kept inside a ReproductionProject when a separate quick capture is genuinely useful. It must not silently reuse the ordinary paper-note store.
+_Avoid_: paper note, ReproductionDocument section
+
+**Reproduction retention**:
+Deleting a Paper must never silently cascade-delete its reproduction materials. The production design must preserve the project, document, runs, artifacts, and notes while making the missing Paper relationship explicit (for example through a retained identity snapshot and a nullable association). This is an implementation decision to verify in the migration plan.

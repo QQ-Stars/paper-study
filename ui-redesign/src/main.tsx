@@ -17,8 +17,23 @@ if (!rootElement) {
   throw new Error('Missing #root application mount point.');
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+const root = createRoot(rootElement);
+const prototypeVariant = import.meta.env.DEV
+  ? new URLSearchParams(window.location.search).get('repro-prototype')
+  : null;
+
+if (prototypeVariant === 'a' || prototypeVariant === 'b' || prototypeVariant === 'c') {
+  void import('./prototype/ReproductionPrototype').then(({ ReproductionPrototype }) => {
+    root.render(
+      <StrictMode>
+        <ReproductionPrototype initialVariant={prototypeVariant} />
+      </StrictMode>,
+    );
+  });
+} else {
+  root.render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+}
