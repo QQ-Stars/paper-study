@@ -2,7 +2,7 @@
 
 Paper-Study uses one local SQLite database. The Python runtime creates a new
 database when a clone has no `data/app.db`, then applies the Alembic migrations
-through revision `20260807_03` before starting FastAPI.
+through revision `20260825_04` before starting FastAPI.
 
 ## Files
 
@@ -28,6 +28,17 @@ Alembic finishes the migration. The main groups are:
   migrated document pipeline;
 - `processing_jobs` and related event tables for background work;
 - source-consumer, full-text-search, embedding, and Obsidian export tables.
+- `reproduction_projects`, `reproduction_documents`, `experiment_runs`,
+  `reproduction_artifacts`, and `reproduction_notes` for the paper reproduction
+  workspace. These tables are separate from ordinary paper notes, generated
+  artifacts, and processing jobs. The paper relationship is nullable and uses
+  `SET NULL`, retaining the project title snapshot when a paper is removed.
+
+Reproduction attachments are stored below
+`data/reproduction-artifacts/projects/<opaque-project-id>/`. The API accepts only
+server-owned opaque keys and enforces project-directory containment before
+registration or download. The first release records experiment commands and
+parameters but never executes arbitrary shell commands.
 
 The database layer enables WAL mode, foreign keys, and a busy timeout for local
 concurrent API, worker, and scheduler access.

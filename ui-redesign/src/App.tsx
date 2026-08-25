@@ -14,6 +14,7 @@ import { McpPage } from './components/McpPage';
 import { OverviewPage } from './components/OverviewPage';
 import { ReaderPage } from './components/ReaderPage';
 import { ReviewsPage } from './components/ReviewsPage';
+import { ReproductionPage } from './components/ReproductionPage';
 import {
   readReadingQueue,
   removeReadingQueueIds,
@@ -35,6 +36,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState('');
   const [readerPaperId, setReaderPaperId] = useState<string | null>(null);
+  const [reproductionPaperId, setReproductionPaperId] = useState<string | null>(null);
   const [pdfViewer, setPdfViewer] = useState<{ id: string; title: string } | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState('');
@@ -123,11 +125,17 @@ export default function App() {
   const navigate = useCallback((next: PageId) => {
     setPage(next);
     if (next !== 'library') setSelectedPaperId(null);
+    if (next !== 'reproduction') setReproductionPaperId(null);
   }, []);
 
   const openPaper = useCallback((id: string) => {
     setSelectedPaperId(id);
     setPage('library');
+  }, []);
+
+  const openReproduction = useCallback((id: string) => {
+    setReproductionPaperId(id);
+    setPage('reproduction');
   }, []);
 
   const current = NAV_ITEMS.find((item) => item.id === page) ?? NAV_ITEMS[0];
@@ -192,14 +200,16 @@ export default function App() {
               selectedId={selectedPaperId}
               onSelect={setSelectedPaperId}
               {...shared}
+              openReproduction={openReproduction}
             />
           )}
+          {page === 'reproduction' && <ReproductionPage papers={papersReady} notify={notify} openPaper={openPaper} initialPaperId={reproductionPaperId} />}
           {page === 'manage' && <ManagePage papers={papersReady} {...shared} />}
           {page === 'reviews' && (
             <ReviewsPage reviews={reviews} {...shared} />
           )}
           {page === 'acquire' && <AcquirePage papers={papersReady} {...shared} />}
-          {page === 'jobs' && <JobsPage notify={notify} />}
+          {page === 'jobs' && <JobsPage notify={notify} reloadPapers={reloadPapers} />}
           {page === 'insights' && <InsightsPage papers={papersReady} {...shared} />}
           {page === 'mcp' && <McpPage />}
           {page === 'settings' && <SettingsPage notify={notify} />}

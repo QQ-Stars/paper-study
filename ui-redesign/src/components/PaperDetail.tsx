@@ -14,6 +14,7 @@ interface PaperDetailProps {
   readingQueueIds: string[];
   updateReadingQueue: (id: string, queued: boolean) => void;
   openReader: () => void;
+  openReproduction: () => void;
   onDeleted: () => void;
 }
 
@@ -52,6 +53,7 @@ export function PaperDetail({
   readingQueueIds,
   updateReadingQueue,
   openReader,
+  openReproduction,
   onDeleted,
 }: PaperDetailProps) {
   const [pdfInfo, setPdfInfo] = useState<{ hasPdf: boolean; canDownload: boolean; size: number } | null>(null);
@@ -180,6 +182,9 @@ export function PaperDetail({
       <div className="library__detail-actions">
         <button type="button" className="btn btn--primary" onClick={openReader}>
           进入阅读页
+        </button>
+        <button type="button" className="btn" onClick={openReproduction}>
+          创建 / 打开复现
         </button>
         <button type="button" className="btn" onClick={() => void advanceStatus()}>
           状态流转 → {STATUS_CYCLE[(STATUS_CYCLE.indexOf(paper.status) + 1) % 3]}

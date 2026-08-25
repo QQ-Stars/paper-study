@@ -10,6 +10,7 @@ import './styles/pages2.css';
 import './styles/pages3.css';
 import './styles/pages4.css';
 import './styles/reader.css';
+import './styles/reproduction.css';
 
 const rootElement = document.getElementById('root');
 
@@ -18,22 +19,8 @@ if (!rootElement) {
 }
 
 const root = createRoot(rootElement);
-const prototypeVariant = import.meta.env.DEV
-  ? new URLSearchParams(window.location.search).get('repro-prototype')
-  : null;
-
-if (prototypeVariant === 'a' || prototypeVariant === 'b' || prototypeVariant === 'c') {
-  void import('./prototype/ReproductionPrototype').then(({ ReproductionPrototype }) => {
-    root.render(
-      <StrictMode>
-        <ReproductionPrototype initialVariant={prototypeVariant} />
-      </StrictMode>,
-    );
-  });
-} else {
-  root.render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
-  );
-}
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);

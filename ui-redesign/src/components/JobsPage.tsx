@@ -25,6 +25,7 @@ import { StreamConsole, useStream } from './StreamConsole';
 
 interface JobsPageProps {
   notify: (message: string) => void;
+  reloadPapers: () => Promise<void>;
 }
 
 function formatJobProgress(progress: Record<string, unknown>): string {
@@ -60,7 +61,7 @@ const JOB_TYPE_OPTIONS = [
   { value: 'obsidian_sync', label: 'Obsidian 同步' },
 ];
 
-export function JobsPage({ notify }: JobsPageProps) {
+export function JobsPage({ notify, reloadPapers }: JobsPageProps) {
   /* ── legacy 采集任务 ── */
   const [jobs, setJobs] = useState<LegacyJob[]>([]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
@@ -115,6 +116,7 @@ export function JobsPage({ notify }: JobsPageProps) {
       await jobApi.confirm({ jobId, candidates }, (event: StreamEvent) =>
         confirmStream.accept(anchor, event),
       );
+      await reloadPapers();
       loadJobs();
       notify('候选已确认导入');
     } catch (error) {

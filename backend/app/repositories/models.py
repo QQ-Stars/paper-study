@@ -230,3 +230,67 @@ class VaultProjectionModel(Base):
     status: Mapped[str] = mapped_column(Text)
     exported_at: Mapped[str | None] = mapped_column(Text)
     error_message: Mapped[str | None] = mapped_column(Text)
+
+
+class ReproductionProjectModel(Base):
+    __tablename__ = "reproduction_projects"
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    paper_id: Mapped[str | None] = mapped_column(Text)
+    paper_title: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    tags_json: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)
+
+
+class ReproductionDocumentModel(Base):
+    __tablename__ = "reproduction_documents"
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer)
+    save_status: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)
+
+
+class ExperimentRunModel(Base):
+    __tablename__ = "experiment_runs"
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text)
+    environment: Mapped[str | None] = mapped_column(Text)
+    command: Mapped[str | None] = mapped_column(Text)
+    parameters_json: Mapped[str] = mapped_column(Text)
+    data_version: Mapped[str | None] = mapped_column(Text)
+    code_revision: Mapped[str | None] = mapped_column(Text)
+    seed: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(Text)
+    metrics_json: Mapped[str] = mapped_column(Text)
+    result_summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)
+
+
+class ReproductionArtifactModel(Base):
+    __tablename__ = "reproduction_artifacts"
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text)
+    run_id: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str] = mapped_column(Text)
+    storage_key: Mapped[str] = mapped_column(Text)
+    mime_type: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[str] = mapped_column(Text)
+
+
+class ReproductionNoteModel(Base):
+    __tablename__ = "reproduction_notes"
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)

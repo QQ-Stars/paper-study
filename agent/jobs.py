@@ -39,17 +39,20 @@ def run_job(job_id: int):
         parsed = None
     if isinstance(parsed, list):
         cleaned = [str(q).strip() for q in parsed if str(q or "").strip()]
-        if cleaned and cleaned != [direction]:
+        if not cleaned:
+            # Newer Acquire clients persist [] when automatic expansion is off.
+            custom_queries = []
+        elif cleaned != [direction]:
             custom_queries = cleaned
     if custom_queries:
         _p("QUERIES::" + json.dumps(custom_queries, ensure_ascii=False))
 
     try:
         cands = pipeline.search(direction, sources, years, limit, min_rel,
-                                expand=not custom_queries, expand_n=12,
+                                expand=custom_queries is None, expand_n=12,
                                 queries=custom_queries, only_a=only_a)
-    except Exception as e:
-        _p(f"JOBERR::{e}")
+    except Exception:
+        _p("JOBERR::后台采集任务失败，请重试")
         con.execute("UPDATE ingest_jobs SET status='failed', finished_at=datetime('now') WHERE id=?", (job_id,))
         con.commit(); con.close(); return
 

@@ -4,6 +4,7 @@ import {
   BooksIcon,
   CompassIcon,
   CycleIcon,
+  DocumentIcon,
   GearIcon,
   ListChecksIcon,
   PlugIcon,
@@ -15,6 +16,7 @@ import {
 export type PageId =
   | 'overview'
   | 'library'
+  | 'reproduction'
   | 'manage'
   | 'reviews'
   | 'acquire'
@@ -34,6 +36,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { id: 'overview', label: '今日', hint: '研究概览与待办', Icon: SunriseIcon },
   { id: 'library', label: '文献库', hint: '全部论文与深度阅读', Icon: BooksIcon },
+  { id: 'reproduction', label: '论文复现', hint: '记录实验、结果与复现笔记', Icon: DocumentIcon },
   { id: 'manage', label: '管理', hint: '文献库增删改与批量工具', Icon: WrenchIcon },
   { id: 'reviews', label: '复习', hint: '艾宾浩斯七轮计划', Icon: CycleIcon },
   { id: 'acquire', label: '采集', hint: '多源检索与导入', Icon: CompassIcon },

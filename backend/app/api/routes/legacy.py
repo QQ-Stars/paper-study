@@ -653,13 +653,25 @@ def create_legacy_router() -> APIRouter:
                     "error": "provider unavailable",
                 }
                 return
+            terminal_seen = False
             try:
                 async for event in stream(
                     [item for item in candidates if isinstance(item, dict)],
                     deep=bool(body.get("deep")),
                     download_pdf=body.get("downloadPdf") is not False,
                 ):
+                    if isinstance(event, dict) and event.get("type") in {"done", "result"}:
+                        terminal_seen = True
+                        yield event
+                        return
                     yield event
+                if not terminal_seen:
+                    yield {
+                        "type": "done",
+                        "ok": False,
+                        "added": 0,
+                        "error": "导入流未返回完成状态",
+                    }
             except Exception as error:
                 yield {
                     "type": "done",
@@ -1301,8 +1313,33 @@ async def _agent_events(
                 terminal_fields=fields,
                 stdin=stdin,
             )
-        async for event in result:
-            yield event
+        terminal_seen = False
+        try:
+            async for event in result:
+                if isinstance(event, dict) and event.get("type") in {
+                    terminal_type,
+                    "done",
+                    "result",
+                }:
+                    terminal_seen = True
+                    yield event
+                    return
+                yield event
+        except Exception as error:
+            yield {
+                "type": terminal_type,
+                "ok": False,
+                **fields,
+                "error": _safe_error(error),
+            }
+            return
+        if not terminal_seen:
+            yield {
+                "type": terminal_type,
+                "ok": False,
+                **fields,
+                "error": "legacy agent stream ended without terminal event",
+            }
         return
     runner = getattr(provider, "run", None)
     if not callable(runner):
@@ -1336,8 +1373,11 @@ async def _agent_events(
         returncode = int(getattr(result, "returncode", 1))
         if returncode != 0:
             decoded["ok"] = False
-            error_lines = str(getattr(result, "stderr", "") or "").strip().splitlines()
-            decoded["error"] = error_lines[-1] if error_lines else "legacy agent failed"
+            decoded["error"] = (
+                "legacy agent timed out"
+                if returncode == 124
+                else "legacy agent failed"
+            )
         else:
             decoded.setdefault("ok", True)
             decoded.setdefault("error", "")

@@ -183,6 +183,8 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
     kt, kp = list(kt), list(kp)
     theme = config.RESEARCH_THEME or direction
     cands, i = [], 0
+    classification_attempts = 0
+    classification_failures = 0
     cap = min(len(seen), max(limit * 6, 50))
     for stub in seen.values():
         if len(cands) >= limit or i >= cap:
@@ -192,12 +194,14 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
             continue
         i += 1
         _p(f"DOING::{i}::{stub.title[:60]}")           # 正在分类（LLM 调用前推送，最及时）
+        classification_attempts += 1
         tn = db.title_norm(stub.title)
         in_lib = db.exists(con, arxiv_id=stub.arxiv_id, title_norm_v=tn)
         try:
             attrs = llm.classify(stub, direction, known_types=kt, known_topics=kp, theme=theme)
         except Exception as e:
-            _p(f"CLSERR::{e}")
+            classification_failures += 1
+            _p(f"CLSERR::{type(e).__name__}")
             continue
         if attrs.type and attrs.type not in kt:
             kt.append(attrs.type)
@@ -216,6 +220,8 @@ def search(direction, sources, years, limit, min_rel=0.0, expand=False, expand_n
         })
         _p(f"KEPT::{len(cands)}")                       # 已保留（通过相关度阈值）篇数
     con.close()
+    if classification_attempts > 0 and classification_failures == classification_attempts:
+        raise RuntimeError("所有候选论文分类失败，请检查模型连接或配置")
     _p(f"DONE::{len(cands)}")
     return cands
 
@@ -231,11 +237,7 @@ def _raise_if_all_sources_failed(
         raise ValueError("没有有效检索数据源")
     if successful_sources > 0:
         return
-    detail = ""
-    if source_errors:
-        name, message = source_errors[0]
-        detail = f"：{name}：{message[:160]}"
-    raise RuntimeError(f"所有检索数据源均不可用，请检查网络权限或 API 配置{detail}")
+    raise RuntimeError("所有检索数据源均不可用，请检查网络权限或 API 配置")
 
 
 def ingest_candidates(cands, deep=False, download_pdf=True):
@@ -246,6 +248,7 @@ def ingest_candidates(cands, deep=False, download_pdf=True):
     kt, kp = list(kt), list(kp)
     theme = config.RESEARCH_THEME or ""
     added = 0
+    failures = 0
     for c in cands:
         tn = db.title_norm(c.get("title", ""))
         if db.exists(con, arxiv_id=c.get("arxiv_id"), title_norm_v=tn):
@@ -270,7 +273,9 @@ def ingest_candidates(cands, deep=False, download_pdf=True):
                         kp.append(a.topic)
                     _p(f"CLASSIFIED::{stub.title[:46]}")
                 except Exception as e:
-                    _p(f"CLSERR::{e}")
+                    failures += 1
+                    _p(f"CLSERR::{type(e).__name__}")
+                    continue
             slug = util.make_slug(stub)
             if download_pdf:
                 pdf_path, pdf_url = _download_pdf_for_stub(stub, slug)
@@ -299,7 +304,10 @@ def ingest_candidates(cands, deep=False, download_pdf=True):
             added += 1
             _p(f"ADDED::{stub.title[:48]}")
         except Exception as e:
-            _p(f"SKIP::{e}")
+            failures += 1
+            _p(f"SKIP::{type(e).__name__}")
     con.close()
     _p(f"INGESTED::{added}")
+    if failures and added == 0:
+        raise RuntimeError(f"{failures} 篇候选导入失败")
     return added

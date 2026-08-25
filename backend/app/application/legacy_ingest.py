@@ -16,6 +16,8 @@ from typing import Any, Callable
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from backend.app.application.safe_text import redact_sensitive_text
+
 
 _SOURCES = frozenset({"semanticscholar", "arxiv", "openalex", "dblp"})
 
@@ -66,9 +68,7 @@ class LegacyIngestService:
         min_relevance = _bounded_float(payload.get("minRelevance"), default=0.5)
         only_a = 1 if bool(payload.get("onlyA")) else 0
         schedule_id = _optional_int(payload.get("scheduleId"))
-        queries = payload.get("queries")
-        if not isinstance(queries, str):
-            queries = json.dumps([query], ensure_ascii=False, separators=(",", ":"))
+        queries = _queries_json(payload.get("queries"), fallback=query)
         async with self._session_factory() as session:
             try:
                 result = await session.execute(
@@ -195,10 +195,21 @@ class LegacyIngestService:
                 result = await result
             payload = dict(result) if isinstance(result, Mapping) else {}
             payload.pop("jobId", None)
-            payload.setdefault("ok", False)
-            payload.setdefault("added", 0)
-            payload.setdefault("error", "" if payload["ok"] else "legacy agent failed")
-            if payload["ok"] and _bounded_int(payload.get("added"), default=0, upper=100000) > 0:
+            succeeded = payload.get("ok") is True
+            payload["ok"] = succeeded
+            payload["added"] = (
+                _bounded_int(payload.get("added"), default=0, upper=100000)
+                if succeeded
+                else 0
+            )
+            payload["error"] = (
+                ""
+                if succeeded
+                else redact_sensitive_text(
+                    payload.get("error") or "legacy agent failed", limit=300
+                )
+            )
+            if succeeded and payload["added"] > 0:
                 self._start_embed_backfill()
             yield {"type": "done", **payload}
             return
@@ -209,6 +220,7 @@ class LegacyIngestService:
         if not download_pdf:
             args.append("--no-pdf")
         added: int | None = None
+        terminal_seen = False
         async for event in stream(
             "ingest-selected",
             args,
@@ -216,6 +228,8 @@ class LegacyIngestService:
             terminal_fields={"added": 0},
             stdin=json.dumps(normalized, ensure_ascii=False),
         ):
+            if not isinstance(event, Mapping):
+                continue
             rendered = dict(event)
             if rendered.get("type") == "progress":
                 line = str(rendered.get("line") or "")
@@ -224,7 +238,11 @@ class LegacyIngestService:
                         added = max(0, int(line.split("::", 1)[1]))
                     except ValueError:
                         pass
-            elif rendered.get("type") == "done":
+            elif rendered.get("type") in {"done", "result"}:
+                terminal_seen = True
+                # The application seam exposes the historical `done` terminal
+                # to callers even when an injected provider uses `result`.
+                rendered["type"] = "done"
                 if added is not None:
                     rendered["added"] = added
                 # 新论文入库成功后后台补建语义索引（对齐旧版「新采集自动补索引」）；
@@ -233,7 +251,16 @@ class LegacyIngestService:
                     rendered.get("added"), default=0, upper=100000
                 ) > 0:
                     self._start_embed_backfill()
+                yield rendered
+                return
             yield rendered
+        if not terminal_seen:
+            yield {
+                "type": "done",
+                "ok": False,
+                "added": 0,
+                "error": "legacy agent stream ended without terminal event",
+            }
 
     async def confirm(
         self,
@@ -262,7 +289,40 @@ class LegacyIngestService:
                 if asyncio.iscoroutine(result):
                     result = await result
                 if isinstance(result, Mapping):
-                    added = _bounded_int(result.get("added"), default=0, upper=100000)
+                    if result.get("ok") is True:
+                        added = _bounded_int(
+                            result.get("added"), default=0, upper=100000
+                        )
+                    else:
+                        return {
+                            "type": "done",
+                            "ok": False,
+                            "added": 0,
+                            "error": redact_sensitive_text(
+                                result.get("error") or "legacy agent failed", limit=300
+                            ),
+                        }
+                else:
+                    return {
+                        "type": "done",
+                        "ok": False,
+                        "added": 0,
+                        "error": "legacy agent failed",
+                    }
+            else:
+                return {
+                    "type": "done",
+                    "ok": False,
+                    "added": 0,
+                    "error": "provider unavailable",
+                }
+        else:
+            return {
+                "type": "done",
+                "ok": False,
+                "added": 0,
+                "error": "provider unavailable",
+            }
         await self._record_confirmation(identifier, candidate_ids, added)
         return {"type": "done", "ok": True, "added": added}
 
@@ -284,10 +344,13 @@ class LegacyIngestService:
             deep=deep,
             download_pdf=download_pdf,
         ):
+            if not isinstance(event, Mapping):
+                continue
             rendered = dict(event)
-            if rendered.get("type") != "done":
+            if rendered.get("type") not in {"done", "result"}:
                 yield rendered
                 continue
+            rendered["type"] = "done"
             if rendered.get("ok"):
                 added = _bounded_int(
                     rendered.get("added"),
@@ -484,13 +547,16 @@ class LegacyIngestService:
         except asyncio.CancelledError:
             raise
         except Exception:
-            # The provider owns detailed failure persistence.  A route response
-            # must never expose child-process or credential text.
+            await self._persist_background_result(
+                identifier,
+                "JOBERR::后台采集任务失败，请重试",
+                1,
+            )
             return
         # 对齐旧 Node runJobBackground：子进程的 stderr 进度写回
         # ingest_jobs.log，用户回到任务页时能看到服务端真实进度；
         # 子进程异常退出而 agent 未及写状态时，兼容置 failed。
-        stderr_text = str(getattr(result, "stderr", "") or "")
+        stderr_text = _redact_log_text(getattr(result, "stderr", "") or "")
         returncode = getattr(result, "returncode", None)
         if stderr_text.strip() or (returncode is not None and int(returncode) != 0):
             await self._persist_background_result(identifier, stderr_text, returncode)
@@ -527,6 +593,34 @@ def _validate_search_payload(payload: Mapping[str, object]) -> tuple[str, tuple[
     if not query or not sources:
         raise LegacyIngestValidationError()
     return query, sources
+
+
+def _redact_log_text(value: object) -> str:
+    """Keep useful line-oriented progress while removing credential values."""
+    return "\n".join(
+        redact_sensitive_text(line, limit=300)
+        for line in str(value).splitlines()
+        if line.strip()
+    )
+
+
+def _queries_json(value: object, *, fallback: str) -> str:
+    """Normalize frontend query arrays and the historical JSON-string form."""
+    parsed: object = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            parsed = None
+    if isinstance(parsed, Sequence) and not isinstance(parsed, (str, bytes, bytearray)):
+        cleaned = [str(item).strip() for item in parsed if str(item or "").strip()]
+        if cleaned:
+            return json.dumps(cleaned, ensure_ascii=False, separators=(",", ":"))
+        # An explicitly empty array means the user disabled automatic expansion.
+        # Keep the historical fallback only when the field was omitted/invalid.
+        if isinstance(parsed, list):
+            return "[]"
+    return json.dumps([fallback], ensure_ascii=False, separators=(",", ":"))
 
 
 def _parse_sources(value: object) -> tuple[str, ...]:

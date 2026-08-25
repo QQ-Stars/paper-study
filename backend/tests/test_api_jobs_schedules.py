@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
+import json
 from types import SimpleNamespace
 import sqlite3
 import unittest
@@ -187,6 +188,128 @@ class JobApiTests(unittest.TestCase):
                     ).fetchone()
                     self.assertIsNotNone(row[0])
                     self.assertNotEqual("2000-01-01 00:00:00", row[1])
+
+        asyncio.run(scenario())
+
+    def test_create_job_persists_search_filters_and_frontend_query_array(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(prefix="study-app-p4-job-options-") as fixture:
+                from backend.app.application.legacy_ingest import LegacyIngestService
+
+                ingest = LegacyIngestService(fixture.session_factory)
+                job_id = await ingest.create_job(
+                    {
+                        "query": "retrieval augmented generation",
+                        "sources": ["arxiv"],
+                        "years": "2022-2025",
+                        "max": 7,
+                        "minRelevance": 0.8,
+                        "onlyA": True,
+                        "queries": ["retrieval augmented generation", "RAG evaluation"],
+                    }
+                )
+                row = await ingest.get_job(job_id)
+                self.assertIsNotNone(row)
+                assert row is not None
+                self.assertEqual(7, row["max_papers"])
+                self.assertEqual(0.8, row["min_relevance"])
+                self.assertEqual(1, row["only_a"])
+                self.assertEqual(
+                    ["retrieval augmented generation", "RAG evaluation"],
+                    json.loads(row["queries"]),
+                )
+
+        asyncio.run(scenario())
+
+    def test_create_job_preserves_explicitly_disabled_query_expansion(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(prefix="study-app-p4-job-no-expand-") as fixture:
+                from backend.app.application.legacy_ingest import LegacyIngestService
+
+                ingest = LegacyIngestService(fixture.session_factory)
+                job_id = await ingest.create_job(
+                    {
+                        "query": "explicit query",
+                        "sources": ["arxiv"],
+                        "queries": [],
+                    }
+                )
+                row = await ingest.get_job(job_id)
+                self.assertIsNotNone(row)
+                assert row is not None
+                self.assertEqual([], json.loads(str(row["queries"])))
+
+        asyncio.run(scenario())
+
+    def test_background_provider_exception_persists_sanitized_failure(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(prefix="study-app-p4-job-failure-") as fixture:
+                from backend.app.application.legacy_ingest import LegacyIngestService
+
+                class FailingProvider:
+                    async def run_job(self, _identifier: int) -> object:
+                        raise RuntimeError("api_key=fixture-secret provider exploded")
+
+                ingest = LegacyIngestService(
+                    fixture.session_factory,
+                    provider=FailingProvider(),
+                )
+                job_id = await ingest.create_job(
+                    {
+                        "query": "background failure tracer",
+                        "sources": ["arxiv"],
+                    }
+                )
+
+                job: dict[str, object] | None = None
+                for _ in range(20):
+                    job = await ingest.get_job(job_id)
+                    if job is not None and job["status"] == "failed":
+                        break
+                    await asyncio.sleep(0)
+
+                self.assertIsNotNone(job)
+                assert job is not None
+                self.assertEqual("failed", job["status"])
+                self.assertIsNotNone(job["finished_at"])
+                self.assertEqual("JOBERR::后台采集任务失败，请重试\n", job["log"])
+                self.assertNotIn("fixture-secret", str(job["log"]))
+                self.assertNotIn("RuntimeError", str(job["log"]))
+
+        asyncio.run(scenario())
+
+    def test_background_provider_stderr_is_redacted_before_persistence(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(prefix="study-app-p4-job-stderr-secret-") as fixture:
+                from backend.app.application.legacy_ingest import LegacyIngestService
+
+                class NoisyProvider:
+                    async def run_job(self, _identifier: int) -> object:
+                        return type(
+                            "Result",
+                            (),
+                            {
+                                "returncode": 1,
+                                "stderr": 'ERR::Authorization: Bearer secret-token api_key="another-secret"',
+                            },
+                        )()
+
+                ingest = LegacyIngestService(fixture.session_factory, provider=NoisyProvider())
+                job_id = await ingest.create_job(
+                    {"query": "background stderr tracer", "sources": ["arxiv"]}
+                )
+                job = None
+                for _ in range(20):
+                    job = await ingest.get_job(job_id)
+                    if job is not None and job["status"] == "failed":
+                        break
+                    await asyncio.sleep(0)
+                self.assertIsNotNone(job)
+                assert job is not None
+                self.assertEqual("failed", job["status"])
+                self.assertNotIn("secret-token", str(job["log"]))
+                self.assertNotIn("another-secret", str(job["log"]))
+                self.assertIn("[redacted]", str(job["log"]))
 
         asyncio.run(scenario())
 

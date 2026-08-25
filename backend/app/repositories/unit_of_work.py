@@ -13,6 +13,7 @@ from backend.app.repositories.document_sources import SqlAlchemySourceDocumentRe
 from backend.app.repositories.document_chunks import SqlAlchemyDocumentChunkRepository
 from backend.app.repositories.generated_artifacts import SqlAlchemyGeneratedArtifactRepository
 from backend.app.repositories.processing_jobs import SqlAlchemyProcessingJobRepository
+from backend.app.repositories.reproductions import SqlAlchemyReproductionRepository
 
 
 class SqlAlchemyUnitOfWork:
@@ -30,6 +31,7 @@ class SqlAlchemyUnitOfWork:
         self.artifacts = SqlAlchemyGeneratedArtifactRepository(self._session)
         self.jobs = SqlAlchemyProcessingJobRepository(self._session)
         self.projections = SqlAlchemyVaultProjectionRepository(self._session)
+        self.reproductions = SqlAlchemyReproductionRepository(self._session)
         return self
 
     async def __aexit__(

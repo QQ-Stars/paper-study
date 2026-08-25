@@ -269,3 +269,91 @@ export interface StreamEvent {
   message?: string;
   [key: string]: unknown;
 }
+
+/* ── 论文复现工作区 ──────────────────────────────── */
+
+export type ReproductionStatus =
+  | 'planned'
+  | 'preparing'
+  | 'running'
+  | 'completed'
+  | 'blocked'
+  | 'archived';
+
+export type ReproductionDocumentStatus = 'unsaved' | 'saving' | 'saved' | 'failed';
+
+export interface ReproductionDocument {
+  id: string;
+  projectId?: string;
+  content: string;
+  revision: number;
+  projectRevision?: number;
+  saveStatus?: ReproductionDocumentStatus;
+  status?: ReproductionDocumentStatus;
+  updatedAt: string;
+  createdAt?: string | null;
+}
+
+export interface ReproductionProject {
+  id: string;
+  paperId: string | null;
+  paperTitle: string;
+  name: string;
+  status: ReproductionStatus;
+  tags: string[];
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  document?: ReproductionDocument;
+  runs?: ExperimentRun[];
+  artifacts?: ReproductionArtifact[];
+  notes?: ReproductionNote[];
+}
+
+export interface ReproductionListResponse {
+  items: ReproductionProject[];
+  total: number;
+  offset?: number;
+  page?: number;
+  limit: number;
+}
+
+export type ExperimentRunStatus = 'planned' | 'running' | 'completed' | 'failed' | 'blocked';
+
+export interface ExperimentRun {
+  id: string;
+  projectId: string;
+  environment: string;
+  command: string;
+  parameters: Record<string, unknown>;
+  dataVersion: string;
+  codeRevision: string;
+  seed: number | null;
+  status: ExperimentRunStatus;
+  metrics: Record<string, unknown>;
+  resultSummary: string;
+  createdAt: string;
+  finishedAt: string | null;
+  updatedAt?: string;
+}
+
+export interface ReproductionArtifact {
+  id: string;
+  projectId: string;
+  runId: string | null;
+  kind: string;
+  filename: string;
+  storageKey: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  createdAt: string;
+}
+
+export interface ReproductionNote {
+  id: string;
+  projectId: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}

@@ -30,6 +30,7 @@ from backend.app.application.legacy_processing_streams import LegacyProcessingSt
 from backend.app.application.review_scheduler import ReviewScheduler
 from backend.app.application.artifact_store import ArtifactStore
 from backend.app.application.search_coordinator import SearchCoordinator
+from backend.app.application.reproductions import ReproductionWorkspace
 from backend.app.application.source_documents import (
     DocumentSourcePipeline,
     SourceDocumentProcessor,
@@ -75,7 +76,8 @@ from backend.app.workers.obsidian import ObsidianJobHandler, ObsidianJobService
 from backend.app.workers.runtime import ObsidianStartupReconciler
 
 
-_REVISION = re.compile(r"20260807_0[123]\Z")
+_REVISION = re.compile(r"(?:20260807_0[123]|20260825_04)\Z")
+_P3_REVISIONS = frozenset({"20260807_03", "20260825_04"})
 _PROCESSING_CURSOR_SECRET_VARIABLE = "PROCESSING_CURSOR_SECRET"
 
 
@@ -128,6 +130,7 @@ class ApplicationContainer:
     obsidian_startup_reconciler: Any = None
     legacy: Any = None
     pdf_files: Any = None
+    reproduction_workspace: Any = None
     _disposed: bool = field(default=False, init=False, repr=False)
 
     async def dispose(self) -> None:
@@ -195,7 +198,7 @@ def bootstrap(
         if required_schema_revision != "20260807_01"
         else None
     )
-    if required_schema_revision == "20260807_03":
+    if required_schema_revision in _P3_REVISIONS:
         _validate_p3_api_configuration(
             translation_provider_factory=translation_provider_factory,
             structured_provider_factory=structured_provider_factory,
@@ -274,6 +277,7 @@ def bootstrap(
     # socket policy and surfaces as the misleading "legacy agent failed".
     legacy_agent = LegacyAgentProvider(
         cwd=repository_root,
+        environment=effective_environment,
         in_process=True,
         timeout_seconds=120.0,
     )
@@ -350,7 +354,7 @@ def bootstrap(
             artifact_generator,
             cursor_secret=cursor_secret,
         )
-    if required_schema_revision == "20260807_03":
+    if required_schema_revision in _P3_REVISIONS:
         (
             document_artifacts,
             document_search,
@@ -391,7 +395,7 @@ def bootstrap(
             settings_service=settings_service,
             library_queries=library_queries,
         )
-        if required_schema_revision == "20260807_03"
+        if required_schema_revision in _P3_REVISIONS
         else None
     )
     return ApplicationContainer(
@@ -414,6 +418,10 @@ def bootstrap(
         obsidian_jobs=obsidian_jobs,
         legacy=legacy_services,
         pdf_files=pdf_files,
+        reproduction_workspace=ReproductionWorkspace(
+            unit_of_work_factory,
+            artifact_root=repository_root / "data" / "reproduction-artifacts",
+        ),
     )
 
 
@@ -495,7 +503,7 @@ def bootstrap_processing_worker(
 ) -> ApplicationContainer:
     """Compose, but never start, the single stage-specific processing worker."""
     verify_schema_revision(database_settings, required_schema_revision)
-    if required_schema_revision == "20260807_03":
+    if required_schema_revision in _P3_REVISIONS:
         _validate_p3_worker_configuration(
             translation_provider_factory=translation_provider_factory,
             structured_provider_factory=structured_provider_factory,
@@ -512,7 +520,7 @@ def bootstrap_processing_worker(
     native_provider = native_provider_factory()
     generation_provider = (
         generation_provider_factory()
-        if required_schema_revision != "20260807_03"
+        if required_schema_revision not in _P3_REVISIONS
         else None
     )
     production_ocr_registry = create_production_ocr_registry()
@@ -534,7 +542,7 @@ def bootstrap_processing_worker(
     p3_context_builder = None
     obsidian_auto_export = None
     obsidian_startup_reconciler = None
-    if required_schema_revision != "20260807_03":
+    if required_schema_revision not in _P3_REVISIONS:
         artifact_generator = ArtifactGenerator(
             work_factory,
             generation_provider,
@@ -682,7 +690,7 @@ def bootstrap_processing_worker(
         "source_materialize": process_source,
         "ocr": process_source,
     }
-    if required_schema_revision == "20260807_03":
+    if required_schema_revision in _P3_REVISIONS:
         if p3_embedding_handler is None:
             raise RuntimeError("P3 embedding handler is not configured")
         handlers.update(
@@ -718,7 +726,7 @@ def bootstrap_processing_worker(
         logger=logger,
         claim_job_types=(
             frozenset(handlers)
-            if required_schema_revision == "20260807_03" and not obsidian_enabled
+            if required_schema_revision in _P3_REVISIONS and not obsidian_enabled
             else None
         ),
     )

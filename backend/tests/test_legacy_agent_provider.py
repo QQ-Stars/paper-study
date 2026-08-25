@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import redirect_stdout
 import ctypes
+import io
 import json
 import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from unittest import mock
 
 
 _AGENT_MAIN = r'''
@@ -50,10 +54,240 @@ elif command == "fail":
 
 
 class LegacyAgentProviderTests(unittest.TestCase):
+    def test_in_process_mode_streams_progress_before_command_finishes(self) -> None:
+        """Compatibility mode must preserve the public incremental stream seam."""
+        from agent import pipeline
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        def slow_command(*_args, **_kwargs):
+            print("STAGE::first", file=sys.stderr, flush=True)
+            time.sleep(0.35)
+            return []
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+            with mock.patch.object(pipeline, "search", side_effect=slow_command):
+                stream = provider.stream_events(
+                    "search",
+                    ("--query", "fixture", "--sources", "arxiv"),
+                    terminal_fields={"candidates": []},
+                    stdout_array_field="candidates",
+                )
+                first = await asyncio.wait_for(anext(stream), timeout=0.15)
+                self.assertEqual(
+                    {"type": "progress", "line": "STAGE::first"},
+                    first,
+                )
+                remaining = [event async for event in stream]
+                self.assertEqual("result", remaining[-1]["type"])
+                self.assertTrue(remaining[-1]["ok"])
+
+        asyncio.run(scenario())
+
     def test_stream_events_is_incremental_preserves_payload_and_reaps_interruptions(
         self,
     ) -> None:
         asyncio.run(self._assert_stream_contract())
+
+    def test_in_process_mode_applies_provider_environment_snapshot(self) -> None:
+        from agent import __main__ as agent_main
+        from agent import config as agent_config
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(
+                in_process=True,
+                environment={**os.environ, "DB_PATH": "from-provider.db"},
+                timeout_seconds=2.0,
+            )
+            def fake_main() -> None:
+                print(agent_config.DB_PATH, flush=True)
+
+            with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                result = await provider.run("env")
+            self.assertEqual(0, result.returncode)
+            self.assertEqual("from-provider.db", result.stdout.strip())
+
+        asyncio.run(scenario())
+
+    def test_in_process_capture_does_not_swallow_other_thread_output(self) -> None:
+        from agent import __main__ as agent_main
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        external = io.StringIO()
+        emit = threading.Event()
+
+        def unrelated_output() -> None:
+            emit.wait()
+            print("outside", flush=True)
+
+        unrelated = threading.Thread(target=unrelated_output)
+        unrelated.start()
+
+        def fake_main() -> None:
+            emit.set()
+            unrelated.join()
+            print("inside", flush=True)
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+            with (
+                redirect_stdout(external),
+                mock.patch.object(agent_main, "main", side_effect=fake_main),
+            ):
+                result = await provider.run("capture")
+            self.assertEqual("inside", result.stdout.strip())
+            self.assertEqual("outside", external.getvalue().strip())
+
+        asyncio.run(scenario())
+
+    def test_in_process_stream_keeps_child_thread_progress_visible(self) -> None:
+        from agent import pipeline
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        def child_progress(*_args, **_kwargs):
+            child = threading.Thread(
+                target=lambda: print("CHILD::progress", file=sys.stderr, flush=True)
+            )
+            child.start()
+            child.join()
+            return []
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+            with mock.patch.object(pipeline, "search", side_effect=child_progress):
+                events = [
+                    event
+                    async for event in provider.stream_events(
+                        "search",
+                        ("--query", "fixture", "--sources", "arxiv"),
+                        terminal_fields={"candidates": []},
+                        stdout_array_field="candidates",
+                    )
+                ]
+            self.assertTrue(
+                any(event.get("line") == "CHILD::progress" for event in events)
+            )
+
+        asyncio.run(scenario())
+
+    def test_in_process_import_failure_is_not_reported_as_success(self) -> None:
+        from agent import pipeline
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+            with mock.patch.object(
+                pipeline,
+                "ingest_candidates",
+                side_effect=RuntimeError("fixture import failed"),
+            ):
+                events = [
+                    event
+                    async for event in provider.stream_events(
+                        "ingest-selected",
+                        stdin="[]",
+                        terminal_fields={"added": 0},
+                    )
+                ]
+            self.assertEqual("result", events[-1]["type"])
+            self.assertFalse(events[-1]["ok"])
+            self.assertEqual("RuntimeError: fixture import failed", events[-1]["error"])
+
+        asyncio.run(scenario())
+
+    def test_in_process_structured_stream_without_terminal_is_failed_once(self) -> None:
+        from agent import __main__ as agent_main
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+
+            def fake_main() -> None:
+                print(json.dumps({"type": "progress", "line": "TITLE::one"}))
+
+            with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                events = [
+                    event
+                    async for event in provider.stream_events(
+                        "title-translations",
+                        terminal_fields={"items": []},
+                    )
+                ]
+
+            self.assertEqual(
+                [
+                    {"type": "progress", "line": "TITLE::one"},
+                    {
+                        "type": "result",
+                        "ok": False,
+                        "items": [],
+                        "error": "legacy agent stream ended without terminal event",
+                    },
+                ],
+                events,
+            )
+
+        asyncio.run(scenario())
+
+    def test_in_process_progress_redacts_header_and_json_secrets(self) -> None:
+        from agent import __main__ as agent_main
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+
+            def fake_main() -> None:
+                print("Authorization: Bearer header-secret", file=sys.stderr, flush=True)
+                print('{"apiKey":"json-secret","password":"pass-secret"}', file=sys.stderr)
+                print("[]", flush=True)
+
+            with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                events = [
+                    event
+                    async for event in provider.stream_events(
+                        "search",
+                        terminal_fields={"candidates": []},
+                        stdout_array_field="candidates",
+                    )
+                ]
+
+            rendered = "\n".join(str(event) for event in events)
+            self.assertNotIn("header-secret", rendered)
+            self.assertNotIn("json-secret", rendered)
+            self.assertNotIn("pass-secret", rendered)
+            self.assertIn("[redacted]", rendered)
+
+        asyncio.run(scenario())
+
+    def test_in_process_timeout_never_returns_before_the_worker_finishes(self) -> None:
+        from agent import pipeline
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        finished = threading.Event()
+
+        def slow_command(*_args, **_kwargs):
+            time.sleep(0.12)
+            finished.set()
+            return []
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=0.02)
+            with mock.patch.object(pipeline, "search", side_effect=slow_command):
+                events = [
+                    event
+                    async for event in provider.stream_events(
+                        "search",
+                        ("--query", "fixture", "--sources", "arxiv"),
+                        terminal_fields={"candidates": []},
+                        stdout_array_field="candidates",
+                    )
+                ]
+            self.assertTrue(finished.is_set())
+            self.assertEqual("result", events[-1]["type"])
+            self.assertTrue(events[-1]["ok"])
+
+        asyncio.run(scenario())
 
     async def _assert_stream_contract(self) -> None:
         from backend.app.providers.legacy_agent import LegacyAgentProvider

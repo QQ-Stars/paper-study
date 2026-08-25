@@ -11,6 +11,8 @@ _SAFE_DETAIL_KEYS = frozenset(
         "expected_revision",
         "operation",
         "paper_id",
+        "project_id",
+        "revision",
         "source_mode",
     }
 )
@@ -341,6 +343,30 @@ class SourcePdfChangedError(DomainError):
 class PersistenceReadError(DomainError):
     code = "PERSISTENCE_READ_FAILED"
     public_message = "The requested data could not be read safely."
+
+
+class ReproductionNotFoundError(DomainError):
+    code = "REPRODUCTION_NOT_FOUND"
+    public_message = "The reproduction project does not exist."
+    http_status = 404
+
+
+class ReproductionConflictError(DomainError):
+    code = "REPRODUCTION_CONFLICT"
+    public_message = "The reproduction project changed before your save completed."
+    http_status = 409
+
+
+class ReproductionArchivedError(DomainError):
+    code = "REPRODUCTION_ARCHIVED"
+    public_message = "The archived reproduction project is read-only."
+    http_status = 409
+
+
+class ReproductionValidationError(DomainError):
+    code = "REPRODUCTION_INVALID"
+    public_message = "The reproduction request is invalid."
+    http_status = 422
 
 
 class CredentialBackendError(DomainError):

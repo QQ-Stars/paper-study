@@ -16,6 +16,25 @@ class _FakeAgent:
         return SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
 
+class _StreamingSearchAgent:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[str, ...]]] = []
+
+    async def stream_events(self, command, args, **_kwargs):
+        self.calls.append((command, tuple(str(item) for item in args)))
+        yield {"type": "progress", "line": "STAGE::search"}
+        yield {
+            "type": "result",
+            "ok": True,
+            "candidates": [{"title": "fixture candidate"}],
+        }
+
+
+class _TruncatedAgent:
+    async def stream_events(self, *_args, **_kwargs):
+        yield {"type": "progress", "line": "STAGE::search"}
+
+
 class _RejectingArtifactAgent:
     async def run(self, command: str, *_args, **_kwargs):
         raise AssertionError(f"durable stream must not call legacy agent: {command}")
@@ -65,7 +84,112 @@ class _DirectIngest:
         yield {"type": "done", "ok": True, "added": 2}
 
 
+class _TruncatedIngest:
+    async def ingest_selected_events(self, *_args, **_kwargs):
+        yield {"type": "progress", "line": "INGEST::start"}
+
+
 class NdjsonApiTests(unittest.TestCase):
+    def test_search_route_synthesizes_terminal_when_agent_stream_ends(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(prefix="study-app-p4-search-truncated-") as fixture:
+                class Services:
+                    schema_revision = "20260807_03"
+                    legacy = SimpleNamespace(agent=_TruncatedAgent())
+
+                    async def dispose(self) -> None:
+                        return None
+
+                app = create_app(
+                    Services(),
+                    fixture.session_factory,
+                    required_schema_revision="20260807_03",
+                )
+                with TestClient(app) as client:
+                    response = client.post(
+                        "/api/search",
+                        json={"query": "truncated", "sources": ["arxiv"]},
+                    )
+                self.assertEqual(200, response.status_code, response.text)
+                events = [json.loads(line) for line in response.text.splitlines()]
+                self.assertEqual("progress", events[0]["type"])
+                self.assertEqual(
+                    {
+                        "type": "result",
+                        "ok": False,
+                        "candidates": [],
+                        "error": "legacy agent stream ended without terminal event",
+                    },
+                    events[-1],
+                )
+
+        asyncio.run(scenario())
+
+    def test_search_route_preserves_options_and_terminal_candidates(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(prefix="study-app-p4-search-route-") as fixture:
+                agent = _StreamingSearchAgent()
+
+                class Services:
+                    schema_revision = "20260807_03"
+                    legacy = SimpleNamespace(agent=agent)
+
+                    async def dispose(self) -> None:
+                        return None
+
+                app = create_app(
+                    Services(),
+                    fixture.session_factory,
+                    required_schema_revision="20260807_03",
+                )
+                with TestClient(app) as client:
+                    response = client.post(
+                        "/api/search",
+                        json={
+                            "query": "migration regression",
+                            "sources": ["arxiv"],
+                            "years": "2020-2025",
+                            "max": 4,
+                            "minRelevance": 0.7,
+                            "expand": True,
+                            "onlyA": True,
+                            "queries": ["migration regression", "compatibility"],
+                        },
+                    )
+                self.assertEqual(200, response.status_code, response.text)
+                self.assertEqual(
+                    "application/x-ndjson; charset=utf-8",
+                    response.headers.get("content-type"),
+                )
+                events = [json.loads(line) for line in response.text.splitlines()]
+                self.assertEqual("progress", events[0]["type"])
+                self.assertEqual("result", events[-1]["type"])
+                self.assertEqual([{"title": "fixture candidate"}], events[-1]["candidates"])
+                self.assertEqual(
+                    (
+                        "search",
+                        (
+                            "--query",
+                            "migration regression",
+                            "--sources",
+                            "arxiv",
+                            "--years",
+                            "2020-2025",
+                            "--max",
+                            "4",
+                            "--min-relevance",
+                            "0.7",
+                            "--expand",
+                            "--only-a",
+                            "--queries",
+                            '["migration regression", "compatibility"]',
+                        ),
+                    ),
+                    agent.calls[0],
+                )
+
+        asyncio.run(scenario())
+
     def test_p3_bootstrap_composes_durable_legacy_processing_streams(self) -> None:
         async def scenario() -> None:
             from backend.app.application.legacy_processing_streams import (
@@ -204,6 +328,40 @@ class NdjsonApiTests(unittest.TestCase):
                 self.assertEqual(
                     [([{"title": "one"}, {"title": "two"}], True, False)],
                     ingest.direct_calls,
+                )
+
+        asyncio.run(scenario())
+
+    def test_ingest_route_synthesizes_terminal_when_service_stream_ends(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(prefix="study-app-p4-ingest-truncated-") as fixture:
+                class Services:
+                    schema_revision = "20260807_03"
+                    legacy = SimpleNamespace(legacy_ingest=_TruncatedIngest())
+
+                    async def dispose(self) -> None:
+                        return None
+
+                app = create_app(
+                    Services(),
+                    fixture.session_factory,
+                    required_schema_revision="20260807_03",
+                )
+                with TestClient(app) as client:
+                    response = client.post(
+                        "/api/ingest-selected",
+                        json={"candidates": [{"title": "truncated"}]},
+                    )
+                events = [json.loads(line) for line in response.text.splitlines()]
+                self.assertEqual("progress", events[0]["type"])
+                self.assertEqual(
+                    {
+                        "type": "done",
+                        "ok": False,
+                        "added": 0,
+                        "error": "导入流未返回完成状态",
+                    },
+                    events[-1],
                 )
 
         asyncio.run(scenario())

@@ -18,6 +18,12 @@ import type {
   V2JobEventsPage,
   V2JobSummary,
   V2RetryJobResult,
+  ExperimentRun,
+  ReproductionArtifact,
+  ReproductionDocument,
+  ReproductionListResponse,
+  ReproductionNote,
+  ReproductionProject,
 } from './types';
 
 async function json<T>(response: Response): Promise<T> {
@@ -30,6 +36,7 @@ async function json<T>(response: Response): Promise<T> {
     }
     throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -42,6 +49,14 @@ function post<T>(url: string, body: unknown = {}): Promise<T> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  }).then((response) => json<T>(response));
+}
+
+function mutate<T>(method: 'PATCH' | 'PUT' | 'DELETE', url: string, body?: unknown): Promise<T> {
+  return fetch(url, {
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
   }).then((response) => json<T>(response));
 }
 
@@ -71,6 +86,12 @@ export async function streamNdjson(
   let buffer = '';
   let terminal: StreamEvent | undefined;
   const accept = (event: StreamEvent) => {
+    if (terminal) {
+      if (event.type === 'done' || event.type === 'result') {
+        throw new Error('流式任务返回多个完成状态');
+      }
+      throw new Error('流式任务完成后仍收到事件');
+    }
     if (event.type === 'done' || event.type === 'result') terminal = event;
     onEvent(event);
   };
@@ -83,10 +104,15 @@ export async function streamNdjson(
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
       if (line) {
+        let event: StreamEvent | undefined;
         try {
-          accept(JSON.parse(line) as StreamEvent);
+          event = JSON.parse(line) as StreamEvent;
         } catch {
           /* 忽略不完整行 */
+          event = undefined;
+        }
+        if (event !== undefined) {
+          accept(event);
         }
       }
       newline = buffer.indexOf('\n');
@@ -94,10 +120,15 @@ export async function streamNdjson(
   }
   const tail = buffer.trim();
   if (tail) {
+    let event: StreamEvent | undefined;
     try {
-      accept(JSON.parse(tail) as StreamEvent);
+      event = JSON.parse(tail) as StreamEvent;
     } catch {
       /* ignore */
+      event = undefined;
+    }
+    if (event !== undefined) {
+      accept(event);
     }
   }
   if (!terminal) throw new Error('流式任务未返回完成状态');
@@ -140,6 +171,51 @@ export const libraryApi = {
     get<{ ok: boolean; id: string; authors: string[]; error?: string }>(
       `/api/paper-authors?id=${encodeURIComponent(id)}`,
     ),
+};
+
+/* ── 论文复现工作区（v2） ────────────────────────── */
+
+export const reproductionApi = {
+  list: (params: { q?: string; status?: string; tag?: string; sort?: 'updated' | 'name'; page?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.q) query.set('q', params.q);
+    if (params.status) query.set('status', params.status);
+    if (params.tag) query.set('tag', params.tag);
+    if (params.sort) query.set('sort', params.sort);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.page !== undefined) {
+      const limit = params.limit ?? 25;
+      query.set('offset', String(Math.max(0, params.page - 1) * limit));
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return get<ReproductionListResponse>(`/api/v2/reproductions${suffix}`);
+  },
+  get: (id: string) => get<ReproductionProject>(`/api/v2/reproductions/${encodeURIComponent(id)}`),
+  create: (body: { paperId: string | null; name: string; tags?: string[] }) =>
+    post<ReproductionProject>('/api/v2/reproductions', body),
+  update: (id: string, body: { name?: string; status?: string; tags?: string[]; expectedRevision: number }) =>
+    mutate<ReproductionProject>('PATCH', `/api/v2/reproductions/${encodeURIComponent(id)}`, body),
+  archive: (id: string, expectedRevision: number) =>
+    post<ReproductionProject>(`/api/v2/reproductions/${encodeURIComponent(id)}/archive`, { expectedRevision }),
+  remove: (id: string, expectedRevision: number) =>
+    mutate<void>('DELETE', `/api/v2/reproductions/${encodeURIComponent(id)}`, { expectedRevision }),
+  saveDocument: (id: string, body: { content: string; expectedRevision: number }) =>
+    mutate<ReproductionDocument>('PUT', `/api/v2/reproductions/${encodeURIComponent(id)}/document`, body),
+  listRuns: (id: string) =>
+    get<ExperimentRun[] | { items: ExperimentRun[] }>(`/api/v2/reproductions/${encodeURIComponent(id)}/runs`),
+  createRun: (id: string, body: Omit<ExperimentRun, 'id' | 'projectId' | 'createdAt' | 'finishedAt'>) =>
+    post<ExperimentRun>(`/api/v2/reproductions/${encodeURIComponent(id)}/runs`, body),
+  listArtifacts: (id: string) =>
+    get<ReproductionArtifact[] | { items: ReproductionArtifact[] }>(`/api/v2/reproductions/${encodeURIComponent(id)}/artifacts`),
+  uploadArtifact: (id: string, body: FormData) =>
+    fetch(`/api/v2/reproductions/${encodeURIComponent(id)}/artifacts`, { method: 'POST', body })
+      .then((response) => json<ReproductionArtifact>(response)),
+  artifactUrl: (projectId: string, artifactId: string) =>
+    `/api/v2/reproductions/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+  listNotes: (id: string) =>
+    get<ReproductionNote[]>(`/api/v2/reproductions/${encodeURIComponent(id)}/notes`),
+  addNote: (id: string, content: string) =>
+    post<ReproductionNote>(`/api/v2/reproductions/${encodeURIComponent(id)}/notes`, { content }),
 };
 
 /* ── 笔记与 AI 工件（legacy） ────────────────────── */

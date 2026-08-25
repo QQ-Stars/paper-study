@@ -14,11 +14,21 @@ ui-redesign/dist  ── FastAPI (/workspace/)
                          └─ SQLite + 后台 worker / scheduler
 ```
 
+论文复现工作区是当前 `/api/v2/reproductions` 领域接口及其
+`ReproductionWorkspace` application seam。它把一个 `Paper` 关联到独立的
+`ReproductionProject`，并分别保存 `ReproductionDocument`、人工记录的
+`ExperimentRun`、`ReproductionArtifact` 和可选的 `ReproductionNote`。
+`ExperimentRun` 不等同于后台 `ProcessingJob`，首版不会执行浏览器或后端传入的
+任意命令。删除论文不会级联删除复现资料；项目保留论文标题快照并将关联置空。
+
 ## 目录职责
 
 - `ui-redesign/`：唯一前端源码。`dist/` 是随仓库提交的生产构建产物。
 - `backend/`：唯一 Web/API 后端、Alembic 迁移、后台处理队列和领域服务。
 - `agent/`：Python 采集、PDF/OCR、LLM 适配器和只读 MCP stdio 服务；不是第二个 Web 服务。
+- `backend/app/application/reproductions.py`：复现项目、文档、运行、附件和笔记的深模块实现。
+- `backend/app/api/routes/reproductions.py`：仅负责 `/api/v2/reproductions` 的 HTTP 校验和适配。
+- `data/reproduction-artifacts/`：复现附件的服务端托管目录，路径使用不透明项目/附件 ID。
 - `db/`：可重复执行的基础 SQLite schema。
 - `data/`：本地数据库、缓存、设置和 PDF 运行数据，默认不提交。
 - `notes/`、`data/papers.json`、`data/progress.json`：可迁移的用户资料种子，首次创建数据库时导入。

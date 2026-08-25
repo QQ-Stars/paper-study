@@ -24,6 +24,7 @@ interface LibraryPageProps {
   readingQueueIds: string[];
   openPaper: (id: string) => void;
   openReader: (id: string) => void;
+  openReproduction: (id: string) => void;
 }
 
 type SearchMode = LibrarySearchMode;
@@ -61,6 +62,7 @@ export function LibraryPage({
   readingQueueIds,
   openPaper,
   openReader,
+  openReproduction,
 }: LibraryPageProps) {
   const [mode, setMode] = useState<SearchMode>('keyword');
   const [query, setQuery] = useState('');
@@ -427,6 +429,7 @@ export function LibraryPage({
               readingQueueIds={readingQueueIds}
               updateReadingQueue={updateReadingQueue}
               openReader={() => openReader(selected.id)}
+              openReproduction={() => openReproduction(selected.id)}
               onDeleted={() => onSelect(null)}
             />
           )}

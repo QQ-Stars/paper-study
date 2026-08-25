@@ -7,7 +7,7 @@ small so tests can inject a fake provider without network or model access.
 """
 
 import asyncio
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager
 from dataclasses import dataclass
 import importlib
 import io
@@ -16,7 +16,9 @@ import os
 from pathlib import Path
 import sys
 import threading
-from typing import Awaitable, Mapping, Sequence, TypeVar
+from typing import Awaitable, Callable, Mapping, Sequence, TypeVar
+
+from backend.app.application.safe_text import redact_sensitive_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +165,7 @@ class LegacyAgentProvider:
                 line = line_bytes.decode("utf-8", errors="replace").rstrip("\r\n")
                 if line.strip():
                     stderr_lines.append(line)
-                    yield {"type": "progress", "line": line}
+                    yield {"type": "progress", "line": _redact_error(line)}
 
             await _wait_before_deadline(process.wait(), deadline)
             stdout = await _wait_before_deadline(
@@ -304,7 +306,7 @@ class LegacyAgentProvider:
                 **fields,
                 "error": "legacy agent timed out"
                 if timed_out
-                else ("" if returncode == 0 else "legacy agent failed"),
+                else "legacy agent stream ended without terminal event",
             }
 
     async def _run_in_process(
@@ -314,13 +316,30 @@ class LegacyAgentProvider:
         *,
         stdin: str | bytes | None,
     ) -> LegacyAgentResult:
-        task = asyncio.create_task(
-            asyncio.to_thread(_invoke_agent_main, command, args, stdin)
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[LegacyAgentResult] = loop.create_future()
+
+        def deliver(result: LegacyAgentResult) -> None:
+            if not result_future.done():
+                result_future.set_result(result)
+
+        worker = threading.Thread(
+            target=_invoke_agent_main,
+            args=(command, args, stdin, self.environment, loop, deliver),
+            name="legacy-agent-run",
+            daemon=True,
         )
+        worker.start()
         try:
-            return await asyncio.wait_for(asyncio.shield(task), self.timeout_seconds)
+            return await asyncio.wait_for(
+                asyncio.shield(result_future), self.timeout_seconds
+            )
         except asyncio.TimeoutError:
-            return LegacyAgentResult(124, "", "legacy agent timed out")
+            # A Python thread cannot be terminated safely. Returning a timeout
+            # here would let the command keep mutating data after callers were
+            # told it failed. Wait for the authoritative result instead; the
+            # agent's network/model adapters retain their own bounded timeouts.
+            return await asyncio.shield(result_future)
 
     async def _stream_in_process_events(
         self,
@@ -334,27 +353,78 @@ class LegacyAgentProvider:
         stdout_text_field: str | None,
         stdout_object_field: str | None,
     ):
-        result = await self._run_in_process(command, args, stdin=stdin)
-        for line in result.stderr.splitlines():
-            if line.strip():
-                yield {"type": "progress", "line": line}
+        """Run an in-process command while preserving incremental events.
 
-        fields = dict(terminal_fields or {})
-        if command in self._STRUCTURED_STDOUT_COMMANDS:
-            terminal_event: dict[str, object] | None = None
-            for line in result.stdout.splitlines():
-                if not line.strip():
+        ``_run_in_process`` intentionally returns a complete result for the
+        non-streaming compatibility calls.  Streaming routes need a different
+        boundary: agent progress is written to stderr (and title translation
+        events to stdout) before the command has finished.  The worker thread
+        therefore publishes complete lines to an asyncio queue as they are
+        written, while the final result is still normalized below in exactly
+        the same way as the subprocess path.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+        worker = threading.Thread(
+            target=_invoke_agent_main_stream,
+            args=(
+                command,
+                args,
+                stdin,
+                loop,
+                queue,
+                command in self._STRUCTURED_STDOUT_COMMANDS,
+                self.environment,
+            ),
+            name="legacy-agent-stream",
+            daemon=True,
+        )
+        worker.start()
+        terminal_event: dict[str, object] | None = None
+        result: LegacyAgentResult | None = None
+        deadline: float | None = loop.time() + self.timeout_seconds
+        while True:
+            if deadline is None:
+                kind, value = await queue.get()
+            else:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    deadline = None
                     continue
                 try:
-                    event = json.loads(line)
-                except (TypeError, ValueError):
+                    kind, value = await asyncio.wait_for(queue.get(), remaining)
+                except asyncio.TimeoutError:
+                    # See _run_in_process: do not publish a false terminal while
+                    # an unkillable worker can still write to the repository.
+                    deadline = None
                     continue
-                if not isinstance(event, dict):
+            if kind == "progress":
+                line = str(value).strip()
+                if line:
+                    yield {"type": "progress", "line": _redact_error(line)}
+            elif kind == "stdout":
+                event = _decode_json_line(str(value))
+                if event is None:
                     continue
                 if event.get("type") == terminal_type:
                     terminal_event = event
                 else:
                     yield event
+            elif kind == "complete":
+                result = value
+                break
+
+        if not isinstance(result, LegacyAgentResult):
+            yield {
+                "type": terminal_type,
+                "ok": False,
+                **dict(terminal_fields or {}),
+                "error": "legacy agent failed",
+            }
+            return
+
+        fields = dict(terminal_fields or {})
+        if command in self._STRUCTURED_STDOUT_COMMANDS:
             if terminal_event is not None:
                 if result.returncode != 0:
                     terminal_event = dict(terminal_event)
@@ -364,12 +434,16 @@ class LegacyAgentProvider:
                     )
                 yield terminal_event
                 return
-            fallback = {"type": terminal_type, **fields}
-            fallback["ok"] = result.returncode == 0
-            fallback["error"] = "" if result.returncode == 0 else _friendly_error(
-                result, command=command
-            )
-            yield fallback
+            yield {
+                "type": terminal_type,
+                **fields,
+                "ok": False,
+                "error": (
+                    _friendly_error(result, command=command)
+                    if result.returncode != 0
+                    else "legacy agent stream ended without terminal event"
+                ),
+            }
             return
 
         payload: dict[str, object] = {}
@@ -433,10 +507,165 @@ class LegacyAgentProvider:
 _IN_PROCESS_LOCK = threading.Lock()
 
 
+class _StreamingCapture:
+    """Small text stream used to forward complete lines from a worker thread."""
+
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        queue: asyncio.Queue[tuple[str, object]],
+        kind: str,
+        *,
+        emit_lines: bool,
+    ) -> None:
+        self._loop = loop
+        self._queue = queue
+        self._kind = kind
+        self._emit_lines = emit_lines
+        self._chunks: list[str] = []
+        self._pending = ""
+        self._write_lock = threading.Lock()
+
+    def write(self, value: object) -> int:
+        text = str(value)
+        with self._write_lock:
+            self._chunks.append(text)
+            if self._emit_lines and text:
+                self._pending += text
+                while "\n" in self._pending:
+                    line, self._pending = self._pending.split("\n", 1)
+                    self._publish(line.rstrip("\r"))
+        return len(text)
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return False
+
+    @property
+    def encoding(self) -> str:
+        return "utf-8"
+
+    def finish(self) -> None:
+        with self._write_lock:
+            if self._emit_lines and self._pending:
+                self._publish(self._pending.rstrip("\r"))
+                self._pending = ""
+
+    def getvalue(self) -> str:
+        with self._write_lock:
+            return "".join(self._chunks)
+
+    def _publish(self, line: str) -> None:
+        try:
+            self._loop.call_soon_threadsafe(
+                self._queue.put_nowait,
+                (self._kind, line),
+            )
+        except RuntimeError:
+            # The request loop may have closed after a cancelled client.  The
+            # worker still needs to release the process-wide stream lock.
+            return
+
+
+class _ThreadStreamRouter:
+    """Capture only the command thread and preserve unrelated process output."""
+
+    def __init__(
+        self,
+        capture: object,
+        fallback: object,
+        preexisting_threads: frozenset[int],
+    ) -> None:
+        self._capture = capture
+        self._fallback = fallback
+        self._owner = threading.get_ident()
+        self._preexisting_threads = preexisting_threads
+
+    def _target(self) -> object:
+        identifier = threading.get_ident()
+        command_owned = (
+            identifier == self._owner
+            or identifier not in self._preexisting_threads
+        )
+        return self._capture if command_owned else self._fallback
+
+    def write(self, value: object) -> int:
+        return int(getattr(self._target(), "write")(value))
+
+    def flush(self) -> None:
+        getattr(self._target(), "flush")()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._fallback, name)
+
+
+@contextmanager
+def _capture_agent_streams(output: object, errors: object):
+    previous_stdout = sys.stdout
+    previous_stderr = sys.stderr
+    preexisting_threads = frozenset(
+        thread.ident for thread in threading.enumerate() if thread.ident is not None
+    )
+    sys.stdout = _ThreadStreamRouter(  # type: ignore[assignment]
+        output, previous_stdout, preexisting_threads
+    )
+    sys.stderr = _ThreadStreamRouter(  # type: ignore[assignment]
+        errors, previous_stderr, preexisting_threads
+    )
+    try:
+        yield
+    finally:
+        sys.stdout = previous_stdout
+        sys.stderr = previous_stderr
+
+
+def _decode_json_line(line: str) -> dict[str, object] | None:
+    if not line.strip():
+        return None
+    try:
+        value = json.loads(line)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _invoke_agent_main_stream(
+    command: str,
+    args: Sequence[str],
+    stdin: str | bytes | None,
+    loop: asyncio.AbstractEventLoop,
+    queue: asyncio.Queue[tuple[str, object]],
+    emit_stdout_lines: bool,
+    environment: Mapping[str, str],
+) -> None:
+    output = _StreamingCapture(
+        loop,
+        queue,
+        "stdout",
+        emit_lines=emit_stdout_lines,
+    )
+    errors = _StreamingCapture(loop, queue, "progress", emit_lines=True)
+    returncode = 0
+    with _IN_PROCESS_LOCK, _capture_agent_streams(output, errors):
+        returncode = _run_agent_main(command, args, stdin, environment)
+        output.finish()
+        errors.finish()
+    result = LegacyAgentResult(returncode, output.getvalue(), errors.getvalue())
+    try:
+        loop.call_soon_threadsafe(queue.put_nowait, ("complete", result))
+    except RuntimeError:
+        return
+
+
 def _invoke_agent_main(
     command: str,
     args: Sequence[str],
     stdin: str | bytes | None,
+    environment: Mapping[str, str],
+    loop: asyncio.AbstractEventLoop,
+    deliver: Callable[[LegacyAgentResult], None],
 ) -> LegacyAgentResult:
     """Run the legacy command dispatcher without creating a child process.
 
@@ -447,6 +676,23 @@ def _invoke_agent_main(
     """
     output = io.StringIO()
     errors = io.StringIO()
+    with _IN_PROCESS_LOCK, _capture_agent_streams(output, errors):
+        returncode = _run_agent_main(command, args, stdin, environment)
+    result = LegacyAgentResult(returncode, output.getvalue(), errors.getvalue())
+    try:
+        loop.call_soon_threadsafe(deliver, result)
+    except RuntimeError:
+        pass
+    return result
+
+
+def _run_agent_main(
+    command: str,
+    args: Sequence[str],
+    stdin: str | bytes | None,
+    environment: Mapping[str, str],
+) -> int:
+    """Invoke the legacy dispatcher under the caller's redirected streams."""
     input_text = (
         stdin.decode("utf-8", errors="replace")
         if isinstance(stdin, bytes)
@@ -455,29 +701,36 @@ def _invoke_agent_main(
     previous_argv = sys.argv
     previous_stdin = sys.stdin
     returncode = 0
-    with _IN_PROCESS_LOCK, redirect_stdout(output), redirect_stderr(errors):
+    try:
+        # Refresh config under the supplied environment snapshot, then restore
+        # the process environment before the potentially long-running command.
+        # Agent modules read these config globals during execution.
+        previous_environment = dict(os.environ)
+        os.environ.clear()
+        os.environ.update(environment)
         try:
-            # Settings are written by the running FastAPI process. Refresh the
-            # legacy module's config before each command so toggling OCR/local
-            # extraction in the settings page takes effect without a restart.
             from agent import config as agent_config
 
             importlib.reload(agent_config)
-            from agent.__main__ import main
-
-            sys.argv = ["agent", command, *(str(item) for item in args)]
-            sys.stdin = io.StringIO(input_text)
-            main()
-        except SystemExit as error:
-            value = error.code
-            returncode = value if isinstance(value, int) else 1
-        except BaseException as error:
-            returncode = 1
-            print(f"ERROR::{type(error).__name__}: {error}", file=sys.stderr)
         finally:
-            sys.argv = previous_argv
-            sys.stdin = previous_stdin
-    return LegacyAgentResult(returncode, output.getvalue(), errors.getvalue())
+            os.environ.clear()
+            os.environ.update(previous_environment)
+
+        from agent.__main__ import main
+
+        sys.argv = ["agent", command, *(str(item) for item in args)]
+        sys.stdin = io.StringIO(input_text)
+        main()
+    except SystemExit as error:
+        value = error.code
+        returncode = value if isinstance(value, int) else 1
+    except BaseException as error:
+        returncode = 1
+        print(f"ERROR::{type(error).__name__}: {error}", file=sys.stderr)
+    finally:
+        sys.argv = previous_argv
+        sys.stdin = previous_stdin
+    return returncode
 
 
 def _friendly_error(
@@ -491,7 +744,7 @@ def _friendly_error(
     lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
     for line in lines:
         if line.startswith("OCRERR::"):
-            return line.split("::", 1)[1].strip()
+            return _redact_error(line.split("::", 1)[1].strip())
     for line in lines:
         if "WinError 10013" in line or "Connection error" in line:
             if command in {"ocr-md", "ocr-md-batch"}:
@@ -508,10 +761,14 @@ def _friendly_error(
             return "模型连接失败，请检查 API 地址、密钥或网络权限"
     for line in reversed(lines):
         if line.startswith("ERR::"):
-            return line.split("::", 1)[1].strip()
+            return _redact_error(line.split("::", 1)[1].strip())
         if line.startswith("ERROR::"):
-            return line.split("::", 1)[1].strip()
+            return _redact_error(line.split("::", 1)[1].strip())
     return "legacy agent timed out" if timed_out else "legacy agent failed"
+
+
+def _redact_error(value: str) -> str:
+    return redact_sensitive_text(value, limit=300)
 
 
 def _mark_partial_failure(payload: dict[str, object]) -> None:

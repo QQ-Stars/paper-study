@@ -18,6 +18,7 @@ class UnitOfWork(Protocol):
     artifacts: GeneratedArtifactRepository
     jobs: ProcessingJobRepository
     projections: VaultProjectionRepository
+    reproductions: object
 
     async def __aenter__(self) -> "UnitOfWork": ...
     async def __aexit__(

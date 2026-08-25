@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 
 import { acquireApi, jobApi } from '../api/client';
 import type { Candidate, Paper, StreamEvent } from '../api/types';
+import { decideIngestTerminal, decideSearchTerminal } from './acquisitionFlow';
 import { CheckIcon, CompassIcon, DocumentIcon, PlusIcon, SearchIcon, SparkIcon } from './Icons';
 import { StreamConsole, useStream } from './StreamConsole';
 
@@ -117,6 +118,7 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
     searchStream.begin();
     setCandidates([]);
     setChecked(new Set());
+    let terminalFailureNotification = '';
     try {
       await acquireApi.search(
         {
@@ -131,18 +133,26 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
         },
         (event: StreamEvent) => {
           searchStream.accept(anchor, event);
-          if ((event.type === 'done' || event.type === 'result') && event.ok !== false) {
-            const list = ((event.candidates as Candidate[]) ?? []).filter(
-              (item) => item && typeof item.title === 'string',
-            );
-            setCandidates(list);
-            notify(`检索完成，命中 ${list.length} 篇候选`);
+          const decision = decideSearchTerminal(
+            event,
+            anchor === searchStream.anchorRef.current,
+          );
+          if (decision.kind === 'succeeded') {
+            setCandidates(decision.candidates);
+            setPhase(decision.phase);
+            notify(decision.notification);
+          } else if (decision.kind === 'failed') {
+            terminalFailureNotification = decision.notification;
           }
         },
       );
-      setPhase('searched');
     } catch (error) {
-      searchStream.fail(anchor, error);
+      if (anchor !== searchStream.anchorRef.current) return;
+      if (!terminalFailureNotification) searchStream.fail(anchor, error);
+      notify(
+        terminalFailureNotification ||
+          `检索失败：${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   };
 
@@ -160,15 +170,34 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
     if (picked.length === 0) return;
     const anchor = ingestStream.anchorRef.current + 1;
     ingestStream.begin();
+    let terminalDecision: ReturnType<typeof decideIngestTerminal> | undefined;
     try {
       await acquireApi.ingestSelected(
         { candidates: picked, deep, downloadPdf },
-        (event) => ingestStream.accept(anchor, event),
+        (event) => {
+          ingestStream.accept(anchor, event);
+          const decision = decideIngestTerminal(event, picked.length);
+          if (decision.kind !== 'pending') terminalDecision = decision;
+        },
       );
+      if (anchor !== ingestStream.anchorRef.current) return;
+      if (!terminalDecision || terminalDecision.kind !== 'succeeded') {
+        throw new Error(
+          terminalDecision?.kind === 'failed'
+            ? terminalDecision.error
+            : '导入任务未返回完成状态',
+        );
+      }
       await reloadPapers();
-      notify(`已导入 ${picked.length} 篇到文献库`);
+      notify(terminalDecision.notification);
     } catch (error) {
-      ingestStream.fail(anchor, error);
+      if (anchor !== ingestStream.anchorRef.current) return;
+      if (terminalDecision?.kind !== 'failed') ingestStream.fail(anchor, error);
+      notify(
+        terminalDecision?.kind === 'failed'
+          ? terminalDecision.notification
+          : `导入失败：${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   };
 
@@ -177,18 +206,31 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
       notify('请输入研究方向并选择数据源');
       return;
     }
-    const result = await jobApi.create({
-      query: query.trim(),
-      sources,
-      years,
-      max,
-      queries: selectedQueries.size > 0 ? [...selectedQueries] : undefined,
-    });
-    notify(
-      result.ok
-        ? `后台采集任务已创建（#${result.id}），可在「任务」页跟踪与确认候选`
-        : `失败：${result.error}`,
-    );
+    try {
+      const result = await jobApi.create({
+        query: query.trim(),
+        sources,
+        years,
+        max,
+        minRelevance: minRelevance > 0 ? minRelevance : undefined,
+        onlyA,
+        // Preserve the checkbox state through the historical JSON query field:
+        // [query] keeps automatic expansion, [] explicitly disables it.
+        queries:
+          selectedQueries.size > 0
+            ? [...selectedQueries]
+            : expand
+              ? [query.trim()]
+              : [],
+      });
+      notify(
+        result.ok
+          ? `后台采集任务已创建（#${result.id}），可在「任务」页跟踪与确认候选`
+          : `失败：${result.error}`,
+      );
+    } catch (error) {
+      notify(`后台采集失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   return (
