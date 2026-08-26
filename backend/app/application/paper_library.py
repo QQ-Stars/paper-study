@@ -173,6 +173,8 @@ class PaperLibrary:
 
     async def delete(self, paper_id: str) -> None:
         async with self._work_factory() as work:
+            if not await work.papers.exists(paper_id):
+                raise MissingPaperError(paper_id=paper_id)
             await work.papers.delete_legacy(paper_id)
             await work.commit()
         try:

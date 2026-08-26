@@ -6,8 +6,8 @@
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: var(--space-6);
-  padding-bottom: var(--space-5);
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 
@@ -43,6 +43,16 @@
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-top: var(--space-5);
+}
+
+/* 列表态无页头，工具栏直接靠页面内边距起排，避免多余留白 */
+.reproduction-page--list .reproduction__toolbar {
+  margin-top: 0;
+}
+
+/* 「新建复现」与计数靠右成组，窄屏纵向堆叠时不拉伸 */
+.reproduction__toolbar-create {
+  flex: none;
 }
 
 .reproduction__search {
@@ -136,6 +146,11 @@
 .reproduction__project:hover,
 .reproduction__project--active {
   border-color: var(--line);
+  background: var(--paper-deep);
+}
+
+.reproduction__project:focus-visible {
+  border-color: var(--line-strong);
   background: var(--paper-deep);
 }
 
@@ -302,7 +317,7 @@
 
 .reproduction__editor-title h2 {
   overflow: hidden;
-  margin-top: var(--space-1);
+  margin: 0;
   color: var(--ink);
   font-family: var(--font-display);
   font-size: var(--text-xl);
@@ -475,15 +490,25 @@
   overflow: hidden;
 }
 
+/* 桌面端检查器粘性跟随，长文档下大纲/运行/结果仍可见 */
+@media (min-width: 1181px) {
+  .reproduction__inspector {
+    position: sticky;
+    top: calc(var(--topbar-height) + var(--space-4));
+    max-height: calc(100dvh - var(--topbar-height) - var(--space-8));
+    overflow-y: auto;
+  }
+}
+
 .reproduction__inspector-section {
   padding: var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 
 .reproduction__section-head h2 {
-  margin-top: var(--space-1);
+  margin: 0;
   color: var(--ink);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   font-weight: 650;
 }
 
@@ -547,7 +572,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  margin-top: var(--space-3);
+  margin-top: var(--space-2);
 }
 
 .input--sm {
@@ -984,7 +1009,6 @@
 }
 
 .reproduction-page--list .reproduction__project {
-  min-height: 10.5rem;
   align-items: flex-start;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);

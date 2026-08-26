@@ -28,6 +28,14 @@ export function SunriseIcon(props: IconProps) {
   );
 }
 
+export function MoonIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z" />
+    </svg>
+  );
+}
+
 export function BooksIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

@@ -5,8 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Paper Study — 本地运行的个人学术研究工作台" />
     <title>Paper Study · 研究工作区</title>
-    <script type="module" crossorigin src="/workspace/assets/index-CYA1hDMt.js"></script>
-    <link rel="stylesheet" crossorigin href="/workspace/assets/index-F8QhfHqR.css">
+    <script>
+      /* 首帧前应用已存主题，避免夜晚主题闪白；主题注册表见 src/themes.ts */
+      (function () {
+        try {
+          var theme = localStorage.getItem('paper-study-theme');
+          if (theme && theme !== 'light') {
+            document.documentElement.setAttribute('data-theme', theme);
+          }
+        } catch (error) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/workspace/assets/index-DSxZN2Tv.js"></script>
+    <link rel="stylesheet" crossorigin href="/workspace/assets/index-_RKJlcSG.css">
   </head>
   <body>
     <div id="root"></div>

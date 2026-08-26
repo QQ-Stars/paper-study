@@ -98,3 +98,52 @@
   --z-overlay: 40;
   --z-toast: 60;
 }
+
+/* ============================================================
+   主题：书斋 · 夜（themes.ts 注册表 id = night）
+   仅重定义同一组令牌，组件样式零改动；新增主题请仿照此块。
+   对比度：ink-soft/ink-faint 对 paper 均 ≥ 4.5:1。
+   ============================================================ */
+
+[data-theme='night'] {
+  color-scheme: dark;
+
+  /* 纸 → 夜墨 */
+  --paper: hsl(24 12% 9%);
+  --paper-deep: hsl(24 11% 12%);
+  --paper-sunken: hsl(24 10% 16%);
+  --card: hsl(24 10% 13%);
+
+  /* 墨 → 暖白 */
+  --ink: hsl(36 30% 92%);
+  --ink-soft: hsl(32 14% 80%);
+  --ink-muted: hsl(30 9% 68%);
+  --ink-faint: hsl(28 8% 60%);
+  --ink-ghost: hsl(28 6% 44%);
+
+  /* 线 */
+  --line: hsl(24 10% 22%);
+  --line-strong: hsl(24 9% 34%);
+
+  /* 朱砂 → 提亮以保证深底对比 */
+  --seal: hsl(9 62% 50%);
+  --seal-deep: hsl(9 70% 62%);
+  --seal-wash: hsl(9 62% 52% / 0.14);
+  --seal-line: hsl(9 62% 55% / 0.4);
+
+  /* 语义色提亮 */
+  --jade: hsl(158 42% 58%);
+  --jade-wash: hsl(158 42% 46% / 0.16);
+  --amber: hsl(32 88% 62%);
+  --amber-wash: hsl(32 88% 52% / 0.16);
+  --info: hsl(217 72% 70%);
+  --info-wash: hsl(217 72% 62% / 0.16);
+
+  /* 阴影 → 更深更收 */
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.4);
+  --shadow-md:
+    0 1px 2px hsl(0 0% 0% / 0.35), 0 10px 28px -14px hsl(0 0% 0% / 0.7);
+  --shadow-lg:
+    0 2px 6px hsl(0 0% 0% / 0.4), 0 28px 56px -18px hsl(0 0% 0% / 0.8);
+  --shadow-focus: 0 0 0 3px var(--seal-line);
+}

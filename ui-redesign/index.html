@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Paper Study — 本地运行的个人学术研究工作台" />
     <title>Paper Study · 研究工作区</title>
+    <script>
+      /* 首帧前应用已存主题，避免夜晚主题闪白；主题注册表见 src/themes.ts */
+      (function () {
+        try {
+          var theme = localStorage.getItem('paper-study-theme');
+          if (theme && theme !== 'light') {
+            document.documentElement.setAttribute('data-theme', theme);
+          }
+        } catch (error) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -90,6 +90,9 @@ const MANAGE_SECTIONS = [
   { id: 'manage-delete', label: '危险操作' },
 ] as const;
 
+/* 预览列表首屏上限；超出部分折叠显示，确认弹窗仍基于完整 deleteMatches */
+const DELETE_PREVIEW_LIMIT = 100;
+
 function batchErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -253,6 +256,25 @@ export function ManagePage({
   removeReadingQueue,
   openPaper,
 }: ManagePageProps) {
+  /* ── 右侧目录：滚动联动高亮（与设置页同一 IntersectionObserver 模式） ── */
+  const [activeSection, setActiveSection] = useState<string>(MANAGE_SECTIONS[0].id);
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible.length > 0) setActiveSection(visible[0].target.id);
+      },
+      { rootMargin: '-90px 0px -55% 0px', threshold: 0 },
+    );
+    for (const section of MANAGE_SECTIONS) {
+      const element = document.getElementById(section.id);
+      if (element) observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, []);
+
   /* ── 新增论文 ── */
   const [draft, setDraft] = useState<Partial<Record<EditField, string>>>({});
   const [adding, setAdding] = useState(false);
@@ -687,15 +709,8 @@ export function ManagePage({
 
   return (
     <div className="page page-enter manage">
-      <nav className="manage__section-nav" aria-label="管理页分区">
-        {MANAGE_SECTIONS.map((section) => (
-          <a key={section.id} href={`#${section.id}`}>
-            {section.label}
-          </a>
-        ))}
-      </nav>
-
-      <div className="manage__grid">
+      <div className="manage-layout">
+        <div className="manage__grid">
         {/* ── 新增论文 ── */}
         <section className="card manage__panel" id="manage-add" aria-labelledby="manage-add-title">
           <header className="insights__panel-head">
@@ -809,7 +824,7 @@ export function ManagePage({
             >
               <h3 id="manage-tool-title-translations">标题中文翻译补齐</h3>
               <p className="deep__fact">
-                待翻译 {titlePending ?? '—'} 篇 <code className="manage__endpoint">GET /api/title-translations</code>
+                待翻译 <strong className="manage__stat">{titlePending ?? '—'}</strong> 篇 <code className="manage__endpoint">GET /api/title-translations</code>
               </p>
               <BatchLimitControl
                 id={BATCH_TASKS.titleTranslations.inputId}
@@ -835,7 +850,7 @@ export function ManagePage({
                     ? '无需补齐'
                     : `补齐（${batchLimitLabel(titleLimit.value, titleLimit.inputInvalid)}）`}
               </button>
-              <StreamConsole state={titleStream.state} />
+              <StreamConsole state={titleStream.state} idleText="空闲 · 执行后显示实时进度" />
             </article>
 
             <article
@@ -856,7 +871,7 @@ export function ManagePage({
               >
                 执行规范
               </button>
-              <StreamConsole state={venueStream.state} />
+              <StreamConsole state={venueStream.state} idleText="空闲 · 执行后显示实时进度" />
             </article>
 
             <article
@@ -916,7 +931,7 @@ export function ManagePage({
               >
                 {scanStream.state.running ? '导入中…' : `导入所选（${scanPicked.size}）`}
               </button>
-              <StreamConsole state={scanStream.state} />
+              <StreamConsole state={scanStream.state} idleText="空闲 · 执行后显示实时进度" />
             </article>
 
             <article
@@ -952,7 +967,7 @@ export function ManagePage({
                     ? '无需补下载'
                     : `补下载（${batchLimitLabel(downloadLimit.value, downloadLimit.inputInvalid)}）`}
               </button>
-              <StreamConsole state={downloadStream.state} />
+              <StreamConsole state={downloadStream.state} idleText="空闲 · 执行后显示实时进度" />
             </article>
 
             <article
@@ -962,7 +977,8 @@ export function ManagePage({
             >
               <h3 id="manage-tool-explain-batch">批量生成讲解</h3>
               <p className="deep__fact">
-                待生成 {batchStatus?.pending ?? '—'} 篇 · 有 PDF {batchStatus?.withPdf ?? '—'} 篇{' '}
+                待生成 <strong className="manage__stat">{batchStatus?.pending ?? '—'}</strong> 篇 · 有 PDF{' '}
+                <strong className="manage__stat">{batchStatus?.withPdf ?? '—'}</strong> 篇{' '}
                 <code className="manage__endpoint">GET /api/explain-batch</code>
               </p>
               <p className="manage__last-run">{formatLastRun(batchStatus?.lastRun)}</p>
@@ -990,7 +1006,7 @@ export function ManagePage({
                     ? '无需讲解'
                     : `批量讲解（${batchLimitLabel(explainLimit.value, explainLimit.inputInvalid)}）`}
               </button>
-              <StreamConsole state={batchStream.state} />
+              <StreamConsole state={batchStream.state} idleText="空闲 · 执行后显示实时进度" />
             </article>
 
             <article
@@ -1000,8 +1016,9 @@ export function ManagePage({
             >
               <h3 id="manage-tool-ocr-batch">批量 PDF → Markdown</h3>
               <p className="deep__fact">
-                待转换 {ocrBatchStatus?.pending ?? '—'} 篇 · 已有 OCR {ocrBatchStatus?.hasOcr ?? '—'} 篇 · 缺少 PDF{' '}
-                {ocrBatchStatus?.noPdf ?? '—'} 篇 <code className="manage__endpoint">GET /api/ocr-md-batch</code>
+                待转换 <strong className="manage__stat">{ocrBatchStatus?.pending ?? '—'}</strong> 篇 · 已有 OCR{' '}
+                <strong className="manage__stat">{ocrBatchStatus?.hasOcr ?? '—'}</strong> 篇 · 缺少 PDF{' '}
+                <strong className="manage__stat">{ocrBatchStatus?.noPdf ?? '—'}</strong> 篇 <code className="manage__endpoint">GET /api/ocr-md-batch</code>
               </p>
               <p className="manage__last-run">{formatLastRun(ocrBatchStatus?.lastRun)}</p>
               <BatchLimitControl
@@ -1028,7 +1045,7 @@ export function ManagePage({
                     ? '无需转换（已全部有 OCR 或无 PDF）'
                     : `批量转换（${batchLimitLabel(ocrLimit.value, ocrLimit.inputInvalid)}）`}
               </button>
-              <StreamConsole state={ocrBatchStream.state} />
+              <StreamConsole state={ocrBatchStream.state} idleText="空闲 · 执行后显示实时进度" />
             </article>
 
             <article
@@ -1083,8 +1100,9 @@ export function ManagePage({
             >
               <h3 id="manage-tool-enrichment">元数据补全</h3>
               <p className="deep__fact">
-                缺 year/venue {enrichStatus?.missingMetadata ?? '—'} 篇 · 已录作者{' '}
-                {enrichStatus?.withAuthors ?? '—'} 篇 · 待补作者 {enrichStatus?.missingAuthors ?? '—'} 篇{' '}
+                缺 year/venue <strong className="manage__stat">{enrichStatus?.missingMetadata ?? '—'}</strong> 篇 · 已录作者{' '}
+                <strong className="manage__stat">{enrichStatus?.withAuthors ?? '—'}</strong> 篇 · 待补作者{' '}
+                <strong className="manage__stat">{enrichStatus?.missingAuthors ?? '—'}</strong> 篇{' '}
                 <code className="manage__endpoint">POST /api/enrich</code>
               </p>
               <BatchLimitControl
@@ -1111,7 +1129,7 @@ export function ManagePage({
                     ? '无需补全'
                     : `补全（${batchLimitLabel(enrichLimit.value, enrichLimit.inputInvalid)}）`}
               </button>
-              <StreamConsole state={enrichStream.state} />
+              <StreamConsole state={enrichStream.state} idleText="空闲 · 执行后显示实时进度" />
             </article>
 
             <article
@@ -1143,7 +1161,7 @@ export function ManagePage({
                   全量重建
                 </button>
               </div>
-              <StreamConsole state={embedStream.state} />
+              <StreamConsole state={embedStream.state} idleText="空闲 · 执行后显示实时进度" />
             </article>
           </div>
         </section>
@@ -1254,16 +1272,35 @@ export function ManagePage({
               </select>
             </label>
           </div>
-          <div className="manage__delete-preview" aria-live="polite">
-            <p>
+          <div className="manage__delete-preview">
+            <p aria-live="polite">
               当前条件命中 <strong className="manage__delete-count">{deleteMatches.length}</strong> 篇
-              {deleteMatches.length > 0 && (
-                <span className="manage__delete-sample">
-                  ：{(deleteMatches[0].title_zh || deleteMatches[0].title).slice(0, 30)}
-                  {deleteMatches.length > 1 ? ' 等' : ''}
-                </span>
-              )}
             </p>
+            {deleteMatches.length > 0 ? (
+              <ul className="manage__delete-list" aria-label="待删除论文预览">
+                {deleteMatches.slice(0, DELETE_PREVIEW_LIMIT).map((paper) => (
+                  <li key={paper.id}>
+                    <strong title={paper.title || paper.id}>
+                      {paper.title_zh || paper.title || paper.id}
+                    </strong>
+                    <small>{paper.id}</small>
+                    <small>
+                      {[paper.year, paper.source, paper.status].filter(Boolean).join(' · ') ||
+                        '元数据缺失'}
+                      {paper.favorite === 1 ? ' · 已收藏' : ''}
+                      {paper.hasPdf ? ' · 有 PDF' : ' · 无 PDF'}
+                    </small>
+                  </li>
+                ))}
+                {deleteMatches.length > DELETE_PREVIEW_LIMIT && (
+                  <li className="manage__delete-more">
+                    … 以及其余 {deleteMatches.length - DELETE_PREVIEW_LIMIT} 篇（确认后将一并删除）
+                  </li>
+                )}
+              </ul>
+            ) : (
+              <p className="manage__delete-empty">当前条件未命中任何论文。</p>
+            )}
             <button
               type="button"
               className="btn btn--danger"
@@ -1274,6 +1311,20 @@ export function ManagePage({
             </button>
           </div>
         </section>
+        </div>
+
+        <nav className="settings-nav manage__side-nav" aria-label="管理页分区">
+          {MANAGE_SECTIONS.map((section) => (
+            <a
+              key={section.id}
+              className={`settings-nav__item${activeSection === section.id ? ' settings-nav__item--active' : ''}`}
+              href={`#${section.id}`}
+              aria-current={activeSection === section.id ? 'true' : undefined}
+            >
+              {section.label}
+            </a>
+          ))}
+        </nav>
       </div>
 
       {deleteTargets && (

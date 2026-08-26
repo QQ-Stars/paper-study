@@ -2,7 +2,7 @@
 
 本地优先的 AI 文献研究工作台：管理论文、阅读 PDF、生成讲解与翻译、维护笔记，并提供检索、复习和 MCP 查询能力。
 
-项目现在只有一套运行链路：`ui-redesign` React/Vite 前端 + `backend` FastAPI 后端。数据保存在本机，不需要 Docker。
+项目现在只有一套运行链路：`ui-redesign` React/Vite 前端 + `backend` FastAPI 后端。数据保存在本机，不需要 Docker。内置「书斋 · 昼 / 夜」两套主题，可在侧边栏「主题」切换。
 
 ## 快速启动
 
@@ -77,7 +77,7 @@ npm test
 .venv/Scripts/python.exe -m unittest discover -s backend/tests -p 'test_*.py' -v
 ```
 
-Linux/macOS 将 `.venv/Scripts/python.exe` 换成 `.venv/bin/python`。数据库迁移入口为 `backend/migrations/`，当前 head 为 `20260825_04`。该 head 增加论文复现工作区的独立表；降级前必须确认这些表为空。
+Linux/macOS 将 `.venv/Scripts/python.exe` 换成 `.venv/bin/python`。数据库迁移入口为 `backend/migrations/`，当前 head 为 `20260826_01`。该 head 完善论文复现工作区（实验时间戳与结果对照表）；降级前必须确认这些表为空。
 
 ## API 健康检查
 

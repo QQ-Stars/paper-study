@@ -47,6 +47,18 @@
   list-style: none;
 }
 
+/* 空闲占位：填充工具卡片底部留白，状态变化时不引起布局跳动 */
+.stream-console--idle {
+  display: flex;
+  align-items: center;
+  min-height: 3.25rem;
+  padding: var(--space-2) var(--space-3);
+  border-style: dashed;
+  background: transparent;
+  color: var(--ink-ghost);
+  font-size: var(--text-2xs);
+}
+
 .doc-viewer {
   overflow-y: auto;
   max-height: 20rem;

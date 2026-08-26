@@ -181,7 +181,25 @@ export const libraryApi = {
     post<{ ok: boolean }>('/api/progress', { id, status }),
   setFavorite: (id: string, favorite: boolean) =>
     post<{ ok: boolean }>('/api/favorite', { id, favorite }),
-  deletePaper: (id: string) => post<{ ok: boolean; error?: string }>('/api/delete', { id }),
+  deletePaper: (id: string) =>
+    /* 删除契约：业务错误以 4xx/5xx + JSON 返回，前端需要 status 区分 404 与真实失败 */
+    fetch('/api/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }).then(async (response) => {
+      const body = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        code?: string;
+        error?: string;
+      } | null;
+      return {
+        ok: response.ok && body?.ok === true,
+        status: response.status,
+        code: body?.code,
+        error: body?.error,
+      };
+    }),
   pdfStatus: (id: string) =>
     get<{ ok: boolean; hasPdf: boolean; size: number; path: string; canDownload: boolean }>(
       `/api/pdf/status?id=${encodeURIComponent(id)}`,

@@ -27,6 +27,7 @@ from backend.app.bootstrap import (
 )
 from backend.app.config import DatabaseSettings
 from backend.app.domain.context import EmbeddingProfile
+from backend.app.infrastructure import fts_runtime
 from backend.app.providers.embeddings import Model2VecEmbeddingProvider
 from backend.app.providers.legacy_p3 import legacy_p3_provider_factories
 from backend.app.runtime import ApiSettings
@@ -71,6 +72,7 @@ def ensure_database(root: Path, database_path: Path) -> DatabaseSetupResult:
             for suffix in ("", "-wal", "-shm", "-journal"):
                 Path(f"{database}{suffix}").unlink(missing_ok=True)
         raise
+    _repair_fts_runtime(database)
     revision = _read_schema_revision(database)
     if revision != SCHEMA_REVISION:
         raise RuntimeError(
@@ -178,6 +180,17 @@ def _upgrade_database(root: Path, database: Path) -> None:
             os.environ.pop("DB_PATH", None)
         else:
             os.environ["DB_PATH"] = previous
+
+
+def _repair_fts_runtime(database: Path) -> None:
+    """Rebuild the P3 FTS index when the bundled SQLite cannot open it.
+
+    Databases migrated under a newer SQLite runtime may store a trigram
+    tokenizer the current runtime cannot construct; every FK-cascade delete
+    from ``papers`` would then abort with ``error in tokenizer constructor``.
+    """
+
+    fts_runtime.ensure_fts_runtime(database)
 
 
 def _read_schema_revision(database: Path) -> str:

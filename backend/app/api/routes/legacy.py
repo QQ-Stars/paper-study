@@ -1046,7 +1046,22 @@ def create_legacy_router() -> APIRouter:
     @router.post("/api/delete")
     async def delete_paper(request: Request) -> Response:
         body = await _body(request)
-        await _services(request).paper_library.delete(_safe_base(body.get("id")))
+        paper_id = _safe_base(body.get("id"))
+        if not paper_id:
+            return _json_response({"ok": False, "error": "缺少 id"}, 400)
+        try:
+            await _services(request).paper_library.delete(paper_id)
+        except MissingPaperError:
+            return _json_response(
+                {
+                    "ok": False,
+                    "code": "PAPER_NOT_FOUND",
+                    "error": "论文不存在或已被删除",
+                },
+                404,
+            )
+        except Exception as error:
+            return _json_response({"ok": False, "error": _safe_error(error)}, 500)
         return _json_response({"ok": True})
 
     @router.api_route(

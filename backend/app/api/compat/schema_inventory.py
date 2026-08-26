@@ -85,6 +85,20 @@ _P3_TABLES = (
 )
 _FINGERPRINT_TABLES = (*_LEGACY_TABLES, *_P1_TABLES, *_P2_TABLES, *_P3_TABLES, "alembic_version")
 _FTS_TABLE = "document_chunks_fts"
+# Migration 20260807_03 sanctions both trigram tokenizers: databases created
+# or repaired under older SQLite runtimes store the fallback without
+# remove_diacritics.  The inventory contract accepts exactly these two.
+_FTS_SANCTIONED_TOKENIZERS = (
+    "trigram case_sensitive 0 remove_diacritics 1",
+    "trigram case_sensitive 0",
+)
+# Normalized virtual-table SQL shas for the two sanctioned tokenizers.
+_FTS_VIRTUAL_SQL_SHA256 = frozenset(
+    {
+        "779f525345212c9347bfa74ee57638535e90b1a5fa9c1b36f7a97cebf4589474",
+        "c86da91bd00c6f62039fa14507653ed474746d4cd7b0dc3639c8422032fdcc36",
+    }
+)
 _FTS_SHADOW_TABLES = (
     "document_chunks_fts_config",
     "document_chunks_fts_data",
@@ -408,8 +422,15 @@ def _processing_job_fingerprints(
 
 def _capture_fts(connection: sqlite3.Connection, schema_sql: str) -> dict[str, Any]:
     normalized = _normalize_sql(schema_sql)
-    tokenizer = "trigram case_sensitive 0 remove_diacritics 1"
-    if tokenizer not in normalized:
+    tokenizer = next(
+        (
+            candidate
+            for candidate in _FTS_SANCTIONED_TOKENIZERS
+            if candidate in normalized
+        ),
+        None,
+    )
+    if tokenizer is None:
         raise SchemaInventoryError(
             "INVENTORY_FTS_TOKENIZER_INVALID",
             "The fixed trigram tokenizer contract changed.",
@@ -610,8 +631,8 @@ def _validate_fts(value: Any, tables: Mapping[str, Any]) -> None:
     logical_count = value["logicalCount"]
     shadow_tables = value["shadowTables"]
     if (
-        value["virtualTableSqlSha256"] != _EXPECTED_TABLE_SQL_SHA256[_FTS_TABLE]
-        or value["tokenizer"] != "trigram case_sensitive 0 remove_diacritics 1"
+        value["virtualTableSqlSha256"] not in _FTS_VIRTUAL_SQL_SHA256
+        or value["tokenizer"] not in _FTS_SANCTIONED_TOKENIZERS
         or not _is_nonnegative_int(logical_count)
         or logical_count != tables["document_chunks"]["count"]
         or not _is_sha256(value["logicalSha256"])

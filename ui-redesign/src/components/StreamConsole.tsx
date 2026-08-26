@@ -96,13 +96,28 @@ export function useStream() {
   return { state, reset, begin, accept, fail, anchorRef };
 }
 
-export function StreamConsole({ state, placeholder }: { state: StreamState; placeholder?: string }) {
+export function StreamConsole({
+  state,
+  placeholder,
+  idleText,
+}: {
+  state: StreamState;
+  placeholder?: string;
+  idleText?: string;
+}) {
   const endRef = useRef<HTMLLIElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' });
   }, [state.lines.length]);
 
-  if (state.lines.length === 0 && !state.running) return null;
+  if (state.lines.length === 0 && !state.running) {
+    if (!idleText) return null;
+    return (
+      <div className="stream-console stream-console--idle" role="status">
+        {idleText}
+      </div>
+    );
+  }
 
   return (
     <div

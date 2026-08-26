@@ -125,11 +125,23 @@ export function PaperDetail({
   const remove = async () => {
     if (!window.confirm(`确认删除「${paper.title_zh || paper.title}」？此操作不可撤销。`)) return;
     try {
-      await libraryApi.deletePaper(paper.id);
-      await reloadPapers();
-      updateReadingQueue(paper.id, false);
-      notify('论文已删除');
-      onDeleted();
+      const result = await libraryApi.deletePaper(paper.id);
+      if (result.ok) {
+        await reloadPapers();
+        updateReadingQueue(paper.id, false);
+        notify('论文已删除');
+        onDeleted();
+        return;
+      }
+      if (result.status === 404) {
+        /* 论文已不存在（例如刚被批量删除）：按成功收尾并刷新 */
+        await reloadPapers();
+        updateReadingQueue(paper.id, false);
+        notify('该论文已不存在，列表已刷新');
+        onDeleted();
+        return;
+      }
+      notify(`删除失败：${result.error ?? `HTTP ${result.status}`}`);
     } catch (error) {
       notify(`删除失败：${error instanceof Error ? error.message : error}`);
     }
