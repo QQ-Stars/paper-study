@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import inspect
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Query, Request, status
@@ -173,6 +174,17 @@ def create_document_consumer_router() -> APIRouter:
         service = _service(request.app.state.container, "document_search")
         profile = getattr(request.app.state.container, "embedding_profile", None)
         try:
+            if body.includeEmbeddings:
+                resolver = getattr(
+                    request.app.state.container,
+                    "embedding_profile_resolver",
+                    None,
+                )
+                if callable(resolver):
+                    resolved = resolver()
+                    profile = (
+                        await resolved if inspect.isawaitable(resolved) else resolved
+                    )
             result = await service.enqueue_index(
                 paper_id=paper_id,
                 source_mode=body.sourceMode,

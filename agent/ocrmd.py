@@ -24,6 +24,10 @@ def ocr_to_markdown(pid: str) -> str:
     r = dict(row)
     _p(f"STAGE::load::{(r.get('title') or '')[:48]}")
 
+    if not config.OCR_ENABLED:
+        _p("OCRERR::OCR 已禁用，请在设置中启用 OCR")
+        raise SystemExit(3)
+
     pdf = _find_pdf(r)
     if not pdf:
         _p("PDFMISS::未找到本地PDF，无法执行 OCR")
@@ -69,6 +73,19 @@ def ocr_batch(limit: int = 0) -> dict:
     每篇成功即落库（ocr_markdown 表 + ocrMarkdownDir 目录 .md，随 set_ocr_markdown 自动完成），
     可随时中断/重复执行（只补仍缺的）。进度 → stderr BATCH::/ITEM::；汇总 JSON → stdout
     （与 explain_batch 同契约：ok/total/done/failed/skipped_no_pdf）。"""
+    if not config.OCR_ENABLED:
+        _p("OCRERR::OCR 已禁用，请在设置中启用 OCR")
+        out = {
+            "ok": False,
+            "total": 0,
+            "done": 0,
+            "failed": [],
+            "skipped_no_pdf": [],
+            "error": "OCR 已禁用，请在设置中启用 OCR",
+        }
+        sys.stdout.write(json.dumps(out, ensure_ascii=False))
+        sys.stdout.flush()
+        return out
     con = db.connect()
     rows = con.execute("SELECT * FROM papers ORDER BY datetime(created_at) DESC").fetchall()
     targets, skipped = [], []

@@ -446,6 +446,24 @@ class ProviderProfile:
         _nonblank(self.model, "model")
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderRuntimeConfig:
+    """Request-time non-secret provider settings resolved by the application seam."""
+
+    provider: str
+    model: str
+    base_url: str | None = None
+    timeout_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        _nonblank(self.provider, "provider")
+        _nonblank(self.model, "model")
+        if self.base_url is not None:
+            _nonblank(self.base_url, "base_url")
+        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive when provided")
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class Credential:
     kind: CredentialKind | str

@@ -11,8 +11,20 @@ _client = None
 _client_signature = None
 
 
-def client():
+def client(*, api_key=None, base_url=None, model=None, timeout=None):
     global _client, _client_signature
+    # Request-scoped overrides are used by durable providers.  They avoid
+    # mutating the process-wide config (and are deliberately not cached), so
+    # concurrent jobs cannot observe one another's credentials.
+    if any(value is not None for value in (api_key, base_url, model, timeout)):
+        return OpenAI(
+            api_key=config.API_KEY if api_key is None else api_key,
+            base_url=config.BASE_URL if base_url is None else base_url,
+            timeout=(
+                config.LLM_TIMEOUT / 1000 if timeout is None and config.LLM_TIMEOUT > 0
+                else (None if timeout is None else timeout)
+            ),
+        )
     signature = (
         config.API_KEY,
         config.BASE_URL,

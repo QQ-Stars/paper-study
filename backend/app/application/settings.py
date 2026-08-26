@@ -13,7 +13,13 @@ import urllib.request
 from uuid import uuid4
 
 from backend.app.application.credentials import CredentialService
-from backend.app.domain import CredentialKind, CredentialStatus, ProviderProfile
+from backend.app.domain import (
+    CredentialKind,
+    CredentialStatus,
+    EmbeddingProfile,
+    ProviderProfile,
+    ProviderRuntimeConfig,
+)
 from backend.app.providers.credentials.probe import SafeCredentialProbe
 
 
@@ -74,6 +80,18 @@ _OBSIDIAN_BOOLEAN_FIELDS = frozenset(
 _STRING_FIELDS = _STRING_FIELDS | _OBSIDIAN_STRING_FIELDS
 _BOOLEAN_FIELDS = _BOOLEAN_FIELDS | _OBSIDIAN_BOOLEAN_FIELDS
 _KNOWN_NONSECRET_FIELDS = _STRING_FIELDS | _INTEGER_FIELDS | _BOOLEAN_FIELDS
+_DIRECTORY_ENV_FIELDS = {
+    "pdfDir": "PDF_DIR",
+    "explainerDir": "EXPLAINER_DIR",
+    "translationDir": "TRANSLATION_DIR",
+    "ocrMarkdownDir": "OCR_MARKDOWN_DIR",
+}
+_LLM_PRESETS = {
+    "deepseek": ("https://api.deepseek.com", "deepseek-v4-flash"),
+    "qwen": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+    "openai": ("https://api.openai.com/v1", "gpt-4o-mini"),
+    "anthropic": ("https://api.anthropic.com", "claude-3-5-sonnet-latest"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +237,7 @@ class SettingsService:
             current = self._read_document()
             current.update(normalized)
             self._obsidian_from_document(current)
+            self._prepare_directories(current)
             self._write_document(current)
             return await self._view_unlocked()
 
@@ -241,14 +260,16 @@ class SettingsService:
             return SafeCredentialProbe(llm_transport=self._llm_transport)
         # Native runtime does not inject a transport; derive one from the current
         # LLM profile so "测试模型连接" works the same as the legacy Node flow.
-        document = self._read_document()
-        profile = self._profile_from_document(CredentialKind.LLM, document)
-        base_url = str(profile.base_url or "").strip()
-        model = str(profile.model or "").strip()
-        if not base_url or not model:
+        runtime = self.llm_runtime_settings()
+        base_url = str(runtime.base_url or "").strip()
+        if not base_url:
             return None
         return SafeCredentialProbe(
-            llm_transport=_openai_compat_probe_transport(base_url, model)
+            llm_transport=_openai_compat_probe_transport(
+                base_url,
+                runtime.model,
+                timeout_seconds=runtime.timeout_seconds,
+            )
         )
 
     async def profile(self, kind: CredentialKind | str) -> ProviderProfile:
@@ -256,6 +277,132 @@ class SettingsService:
         async with self._lock:
             document = self._read_document()
             return self._profile_from_document(normalized, document)
+
+    def llm_runtime_settings(self) -> ProviderRuntimeConfig:
+        """Resolve the current non-secret LLM configuration for one request.
+
+        The atomically replaced settings document is read on every call so a
+        saved settings update applies to the next provider request without a
+        process restart.  Blank saved fields are treated as unset, preserving
+        the established saved -> environment -> provider-default precedence.
+        Credentials deliberately stay behind ``CredentialService``.
+        """
+
+        return self._llm_runtime_from_document(self._read_document())
+
+    def _llm_runtime_from_document(
+        self,
+        document: Mapping[str, object],
+    ) -> ProviderRuntimeConfig:
+        provider = _value(
+            document,
+            "provider",
+            self.environment,
+            "LLM_PROVIDER",
+            "deepseek",
+        ).lower()
+        default_base_url, default_model = _LLM_PRESETS.get(
+            provider,
+            _LLM_PRESETS["deepseek"],
+        )
+        model = _value(
+            document,
+            "model",
+            self.environment,
+            "LLM_MODEL",
+            default_model,
+        )
+        base_url = _value(
+            document,
+            "baseUrl",
+            self.environment,
+            "LLM_BASE_URL",
+            default_base_url,
+        )
+        timeout_ms = _aliased_integer_value(
+            document,
+            ("llmTimeout", "timeout"),
+            self.environment,
+            ("LLM_TIMEOUT",),
+            0,
+            allow_zero=True,
+        )
+        return ProviderRuntimeConfig(
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            timeout_seconds=timeout_ms / 1000.0 if timeout_ms > 0 else None,
+        )
+
+    async def embedding_profile(
+        self,
+        baseline: EmbeddingProfile | None = None,
+    ) -> EmbeddingProfile | None:
+        """Resolve the current durable embedding identity from saved settings.
+
+        Durable jobs persist their complete profile in the job spec, so this
+        resolver is only used when creating the next job.  The runtime currently
+        supports the local model2vec adapter; an ``api`` setting therefore
+        fails closed instead of silently reusing the startup profile.
+        """
+
+        configured = await self.profile(CredentialKind.EMBEDDING)
+        provider = configured.provider.strip().lower()
+        if provider == "local":
+            provider = "model2vec"
+        if provider != "model2vec":
+            return None
+
+        reference = baseline
+        model = configured.model.strip()
+        if not model or model == "default":
+            model = reference.model if reference is not None else "minishlab/potion-multilingual-128M"
+        embedding_version = (
+            reference.embedding_version if reference is not None else "model2vec-0.8.2"
+        )
+        dimensions = reference.dimensions if reference is not None else 256
+        options = dict(reference.options) if reference is not None else {}
+        try:
+            return EmbeddingProfile(
+                provider=provider,
+                model=model,
+                embedding_version=embedding_version,
+                dimensions=dimensions,
+                options=options,
+            )
+        except (TypeError, ValueError):
+            return None
+
+    def ocr_runtime_settings(
+        self,
+        *,
+        fallback_enabled: bool | None = None,
+    ) -> dict[str, object]:
+        """Return the current non-secret OCR settings for request-time gates.
+
+        The gate is synchronous because source enqueue validation runs before a
+        job is persisted.  This method reads the atomically replaced settings
+        document and never exposes credentials.
+        """
+        document = self._read_document()
+        profile = self._profile_view(document)
+        result = {
+            key: profile[key]
+            for key in (
+                "ocrEnabled",
+                "ocrProvider",
+                "ocrModel",
+                "ocrPageBatchSize",
+                "ocrMaxConcurrency",
+            )
+        }
+        if (
+            fallback_enabled is not None
+            and "ocrEnabled" not in document
+            and "OCR_ENABLED" not in self.environment
+        ):
+            result["ocrEnabled"] = bool(fallback_enabled)
+        return result
 
     async def credential_status(self, kind: CredentialKind | str) -> CredentialStatus:
         return await self.credential_service.status(CredentialKind(kind))
@@ -288,26 +435,30 @@ class SettingsService:
 
     def _profile_view(self, document: Mapping[str, object]) -> dict[str, object]:
         env = self.environment
+        llm_runtime = self._llm_runtime_from_document(document)
         return {
-            "provider": _value(document, "provider", env, "LLM_PROVIDER", "deepseek"),
-            "baseUrl": _value(document, "baseUrl", env, "LLM_BASE_URL", ""),
-            "model": _value(document, "model", env, "LLM_MODEL", ""),
+            "provider": llm_runtime.provider,
+            "baseUrl": llm_runtime.base_url or "",
+            "model": llm_runtime.model,
             "timeout": _integer_value(document, "timeout", env, "LLM_TIMEOUT", 60000),
-            "llmTimeout": _integer_value(
-                document, "llmTimeout", env, "LLM_TIMEOUT", _integer_value(document, "timeout", env, "LLM_TIMEOUT", 60000)
-            ),
             "ocrProvider": _value(document, "ocrProvider", env, "OCR_PROVIDER", ""),
-            "ocrBaseUrl": _value(document, "ocrBaseUrl", env, "OCR_BASE_URL", ""),
+            "ocrBaseUrl": _aliased_value(
+                document,
+                ("ocrBaseUrl", "ocrApiBase"),
+                env,
+                ("OCR_BASE_URL",),
+                "",
+            ),
             "ocrModel": _value(document, "ocrModel", env, "OCR_MODEL", ""),
             # PDF 文本提取方式：default=本地 pymupdf4llm（默认），ocr=OCR 模型 API。
             "pdfTextProvider": _value(document, "pdfTextProvider", env, "PDF_TEXT_PROVIDER", "default"),
             "ocrTimeout": _integer_value(document, "ocrTimeout", env, "OCR_TIMEOUT", 60000),
             "ocrEnabled": _boolean_value(document, "ocrEnabled", env, "OCR_ENABLED", False),
             "ocrPageBatchSize": _integer_value(
-                document, "ocrPageBatchSize", env, "OCR_PAGE_BATCH_SIZE", 1
+                document, "ocrPageBatchSize", env, "OCR_PAGE_BATCH_SIZE", 4
             ),
             "ocrMaxConcurrency": _integer_value(
-                document, "ocrMaxConcurrency", env, "OCR_MAX_CONCURRENCY", 1
+                document, "ocrMaxConcurrency", env, "OCR_MAX_CONCURRENCY", 2
             ),
             "embedProvider": _value(document, "embedProvider", env, "EMBED_PROVIDER", "local"),
             "embedApiBase": _value(document, "embedApiBase", env, "EMBED_API_BASE", ""),
@@ -316,8 +467,10 @@ class SettingsService:
             "explainMaxChars": _integer_value(
                 document, "explainMaxChars", env, "EXPLAIN_MAX_CHARS", 120000
             ),
-            "llmTimeout": _integer_value(
-                document, "llmTimeout", env, "LLM_TIMEOUT", 0
+            "llmTimeout": (
+                int(round(llm_runtime.timeout_seconds * 1000))
+                if llm_runtime.timeout_seconds is not None
+                else 0
             ),
             "translateMode": _value(document, "translateMode", env, "TRANSLATE_MODE", "chunked"),
             "translateChunkSize": _integer_value(
@@ -332,20 +485,25 @@ class SettingsService:
             "translateSkipReferences": _boolean_value(
                 document, "translateSkipReferences", env, "TRANSLATE_SKIP_REFERENCES", True
             ),
-            "s2Endpoint": _value(
+            "s2Endpoint": _aliased_value(
                 document,
-                "s2Endpoint",
+                ("s2Endpoint", "s2ApiBase"),
                 env,
-                "S2_ENDPOINT",
-                _value(document, "s2ApiBase", env, "S2_API_BASE", "https://api.semanticscholar.org/graph/v1"),
+                ("S2_ENDPOINT", "S2_API_BASE"),
+                "https://api.semanticscholar.org/graph/v1",
             ),
         }
 
     def _directory_view(self, document: Mapping[str, object]) -> dict[str, object]:
         result: dict[str, object] = {}
-        for field in ("pdfDir", "explainerDir", "translationDir", "ocrMarkdownDir"):
-            configured = document.get(field)
-            rendered = configured if isinstance(configured, str) else ""
+        for field, environment_field in _DIRECTORY_ENV_FIELDS.items():
+            rendered = _value(
+                document,
+                field,
+                self.environment,
+                environment_field,
+                "",
+            )
             default = self.default_dirs[field]
             result[field] = rendered
             result[f"default{field[0].upper()}{field[1:]}"] = _relative_to_root(
@@ -428,16 +586,24 @@ class SettingsService:
         self, kind: CredentialKind, document: Mapping[str, object]
     ) -> ProviderProfile:
         if kind is CredentialKind.LLM:
+            runtime = self._llm_runtime_from_document(document)
             return ProviderProfile(
-                provider=str(_value(document, "provider", self.environment, "LLM_PROVIDER", "deepseek")),
-                model=str(_value(document, "model", self.environment, "LLM_MODEL", "default")),
-                base_url=str(_value(document, "baseUrl", self.environment, "LLM_BASE_URL", "")) or None,
+                provider=runtime.provider,
+                model=runtime.model,
+                base_url=runtime.base_url,
             )
         if kind is CredentialKind.OCR:
             return ProviderProfile(
                 provider=str(_value(document, "ocrProvider", self.environment, "OCR_PROVIDER", "default")),
                 model=str(_value(document, "ocrModel", self.environment, "OCR_MODEL", "default")),
-                base_url=str(_value(document, "ocrBaseUrl", self.environment, "OCR_BASE_URL", "")) or None,
+                base_url=_aliased_value(
+                    document,
+                    ("ocrBaseUrl", "ocrApiBase"),
+                    self.environment,
+                    ("OCR_BASE_URL",),
+                    "",
+                )
+                or None,
             )
         if kind is CredentialKind.EMBEDDING:
             return ProviderProfile(
@@ -464,7 +630,8 @@ class SettingsService:
             elif key in _INTEGER_FIELDS:
                 if not isinstance(value, int) or isinstance(value, bool):
                     raise SettingsValidationError()
-                if value <= 0:
+                minimum = 0 if key == "llmTimeout" else 1
+                if value < minimum:
                     raise SettingsValidationError()
                 normalized[key] = value
             else:
@@ -545,7 +712,7 @@ class SettingsService:
 
     def _prepare_directories(self, document: Mapping[str, object]) -> None:
         try:
-            for field in ("pdfDir", "explainerDir", "translationDir"):
+            for field in ("pdfDir", "explainerDir", "translationDir", "ocrMarkdownDir"):
                 value = document.get(field)
                 if isinstance(value, str) and value.strip():
                     _resolve_dir(self.root, value).mkdir(parents=True, exist_ok=True)
@@ -592,6 +759,25 @@ def _value(
     return default
 
 
+def _aliased_value(
+    document: Mapping[str, object],
+    keys: Sequence[str],
+    environment: Mapping[str, str],
+    env_keys: Sequence[str],
+    default: str,
+) -> str:
+    """Resolve renamed settings without letting env outrank a saved alias."""
+    for key in keys:
+        value = document.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for env_key in env_keys:
+        value = environment.get(env_key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return default
+
+
 def _integer_value(
     document: Mapping[str, object],
     key: str,
@@ -599,17 +785,60 @@ def _integer_value(
     env_key: str,
     default: int,
 ) -> int:
+    allow_zero = key == "llmTimeout"
     value = document.get(key)
-    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+    if (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and (value > 0 or (allow_zero and value == 0))
+    ):
         return value
     env_value = environment.get(env_key)
     if isinstance(env_value, str) and env_value.strip():
         try:
             parsed = int(env_value)
-            if parsed > 0:
+            if parsed > 0 or (allow_zero and parsed == 0):
                 return parsed
         except ValueError:
             pass
+    return default
+
+
+def _aliased_integer_value(
+    document: Mapping[str, object],
+    keys: Sequence[str],
+    environment: Mapping[str, str],
+    env_keys: Sequence[str],
+    default: int,
+    *,
+    allow_zero: bool = False,
+) -> int:
+    """Resolve integer aliases with saved > environment > default priority."""
+
+    def accepted(value: object) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, str) and value.strip():
+            try:
+                parsed = int(value)
+            except ValueError:
+                return None
+        else:
+            return None
+        if parsed > 0 or (allow_zero and parsed == 0):
+            return parsed
+        return None
+
+    for key in keys:
+        parsed = accepted(document.get(key))
+        if parsed is not None:
+            return parsed
+    for env_key in env_keys:
+        parsed = accepted(environment.get(env_key))
+        if parsed is not None:
+            return parsed
     return default
 
 
@@ -704,7 +933,10 @@ def _relative_to_root(root: Path, value: Path) -> str:
 
 
 def _openai_compat_probe_transport(
-    base_url: str, model: str
+    base_url: str,
+    model: str,
+    *,
+    timeout_seconds: float | None = None,
 ) -> Callable[[Any, str], Any]:
     """Probe transport: send the fixture prompt to an OpenAI-compatible
     /chat/completions endpoint using the stored credential.  Truthy return
@@ -728,7 +960,14 @@ def _openai_compat_probe_transport(
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(request, timeout=60) as response:
+            if timeout_seconds is None:
+                response_context = urllib.request.urlopen(request)
+            else:
+                response_context = urllib.request.urlopen(
+                    request,
+                    timeout=max(0.001, float(timeout_seconds)),
+                )
+            with response_context as response:
                 document = json.loads(response.read().decode("utf-8"))
             return bool(document.get("choices"))
 

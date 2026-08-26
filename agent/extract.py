@@ -227,6 +227,7 @@ def _ocr_settings() -> dict:
         "dpi": max(72, int(config.OCR_DPI or 200)),
         "batch": max(1, int(config.OCR_PAGE_BATCH or 4)),
         "max_pages": max(0, int(config.OCR_MAX_PAGES or 0)),
+        "timeout": max(1.0, float(config.OCR_TIMEOUT or 60000) / 1000.0),
     }
 
 
@@ -269,7 +270,7 @@ def _ocr_transcribe(images_b64: list, cfg: dict) -> str:
     )
     if cfg["key"]:
         req.add_header("Authorization", "Bearer " + cfg["key"])
-    with urllib.request.urlopen(req, timeout=600) as resp:
+    with urllib.request.urlopen(req, timeout=cfg["timeout"]) as resp:
         doc = json.loads(resp.read().decode("utf-8"))
     text = (doc.get("choices") or [{}])[0].get("message", {}).get("content") or ""
     return _ocr_clean_grounding(text)
@@ -280,6 +281,8 @@ def _ocr_full_text(path, paper_id=None, quiet=False) -> str:
     传入 paper_id 且转换成功（≥200 字阈值防乱码落库）时写入 DB ocr_markdown 表，
     供讲解/翻译管道与阅读页复用。quiet=True 时不输出逐页/落库进度（篇级并发批量场景，
     避免多篇 OCRPG 行交错，批次自身有 ITEM:: 进度契约）。"""
+    if not bool(getattr(config, "OCR_ENABLED", False)):
+        raise RuntimeError("OCR 已禁用，请在设置中启用 OCR")
     cfg = _ocr_settings()
     if not cfg["base"] or not cfg["model"]:
         raise RuntimeError("OCR API 未配置（需在设置中填写 OCR 地址与模型）")

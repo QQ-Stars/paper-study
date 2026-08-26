@@ -5,6 +5,7 @@ import type { BatchRun, DuplicatePair, EnrichStatus, Paper, StudyStatus } from '
 import { DeleteConfirmDialog } from './DeleteConfirmDialog';
 import { PlusIcon, SearchIcon } from './Icons';
 import { StreamConsole, useStream } from './StreamConsole';
+import { assertMutationOk, recoverBatchFailure } from './manageBatchActions';
 import {
   BATCH_TASKS,
   buildBatchTaskRequest,
@@ -88,6 +89,10 @@ const MANAGE_SECTIONS = [
   { id: 'manage-tools', label: '批量维护' },
   { id: 'manage-delete', label: '危险操作' },
 ] as const;
+
+function batchErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function PaperFields({
   idPrefix,
@@ -265,7 +270,7 @@ export function ManagePage({
         setDraft({});
         await reloadPapers();
       } else {
-        notify(`新增失败：${result.error}`);
+        notify(`新增失败：${result.error ?? '未知错误'}`);
       }
     } catch (error) {
       notify(`新增失败：${error instanceof Error ? error.message : error}`);
@@ -316,7 +321,7 @@ export function ManagePage({
         await reloadPapers();
         setEditTarget(null);
       } else {
-        notify(`保存失败：${result.error}`);
+        notify(`保存失败：${result.error ?? '未知错误'}`);
       }
     } catch (error) {
       notify(`保存失败：${error instanceof Error ? error.message : error}`);
@@ -352,6 +357,7 @@ export function ManagePage({
   const [scanDir, setScanDir] = useState('');
   const [scanFiles, setScanFiles] = useState<Array<{ path: string; size: number }>>([]);
   const [scanPicked, setScanPicked] = useState<ReadonlySet<string>>(new Set());
+  const [scanLoading, setScanLoading] = useState(false);
   const [duplicatePairs, setDuplicatePairs] = useState<DuplicatePair[] | null>(null);
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [duplicateError, setDuplicateError] = useState('');
@@ -381,30 +387,26 @@ export function ManagePage({
   const ocrRequest = buildBatchTaskRequest('ocrMarkdown', ocrLimit.value, ocrLimit.inputInvalid);
   const enrichRequest = buildBatchTaskRequest('metadataEnrichment', enrichLimit.value, enrichLimit.inputInvalid);
 
-  const refreshTitleStatus = () => {
+  const refreshTitleStatus = () =>
     artifactApi
       .titleTranslationStatus()
       .then((status) => setTitlePending(status.pending))
       .catch(() => setTitlePending(null));
-  };
-  const refreshBatchStatus = () => {
+  const refreshBatchStatus = () =>
     artifactApi
       .explainBatchStatus()
       .then((status) => setBatchStatus(status as typeof batchStatus))
       .catch(() => setBatchStatus(null));
-  };
-  const refreshOcrBatchStatus = () => {
+  const refreshOcrBatchStatus = () =>
     artifactApi
       .ocrBatchStats()
       .then((stats) => setOcrBatchStatus(stats.ok ? stats : null))
       .catch(() => setOcrBatchStatus(null));
-  };
-  const refreshEnrichStatus = () => {
+  const refreshEnrichStatus = () =>
     maintenanceApi
       .enrichStatus()
       .then((status) => setEnrichStatus(status.ok ? status : null))
       .catch(() => setEnrichStatus(null));
-  };
   useEffect(() => {
     refreshTitleStatus();
     refreshBatchStatus();
@@ -430,6 +432,8 @@ export function ManagePage({
       notify('标题翻译补齐完成');
     } catch (error) {
       titleStream.fail(anchor, error);
+      await recoverBatchFailure(reloadPapers, refreshTitleStatus);
+      notify(`标题翻译失败：${batchErrorMessage(error)}`);
     }
   };
 
@@ -442,6 +446,8 @@ export function ManagePage({
       notify('会议名规范完成');
     } catch (error) {
       venueStream.fail(anchor, error);
+      await recoverBatchFailure(reloadPapers);
+      notify(`会议名规范失败：${batchErrorMessage(error)}`);
     }
   };
 
@@ -450,14 +456,18 @@ export function ManagePage({
       notify('请输入本机 PDF 文件夹路径');
       return;
     }
+    setScanLoading(true);
     try {
       const result = await acquireApi.scanPdfs(scanDir.trim());
+      if (result.ok === false) throw new Error(String(result.error ?? '扫描失败'));
       const files = (result.files as Array<{ path: string; size: number }>) ?? [];
       setScanFiles(files);
       setScanPicked(new Set(files.map((file) => file.path)));
       notify(`扫描到 ${files.length} 个 PDF`);
     } catch (error) {
       notify(`扫描失败：${error instanceof Error ? error.message : error}`);
+    } finally {
+      setScanLoading(false);
     }
   };
 
@@ -473,6 +483,8 @@ export function ManagePage({
       setScanFiles([]);
     } catch (error) {
       scanStream.fail(anchor, error);
+      await recoverBatchFailure(reloadPapers);
+      notify(`本地 PDF 导入失败：${batchErrorMessage(error)}`);
     }
   };
 
@@ -493,6 +505,8 @@ export function ManagePage({
       notify('PDF 补下载完成');
     } catch (error) {
       downloadStream.fail(anchor, error);
+      await recoverBatchFailure(reloadPapers);
+      notify(`PDF 补下载失败：${batchErrorMessage(error)}`);
     }
   };
 
@@ -507,15 +521,13 @@ export function ManagePage({
     try {
       const onEvent = (event: Parameters<typeof batchStream.accept>[1]) =>
         batchStream.accept(anchor, event);
-      if (explainLimit.value === '3' && !explainLimit.inputInvalid) {
-        await artifactApi.explainBatch({ limit: 3 }, onEvent);
-      } else {
-        await artifactApi.explainBatch(request.request, onEvent);
-      }
+      await artifactApi.explainBatch(request.request, onEvent);
       refreshBatchStatus();
       notify('批量讲解完成');
     } catch (error) {
       batchStream.fail(anchor, error);
+      await recoverBatchFailure(reloadPapers, refreshBatchStatus);
+      notify(`批量讲解失败：${batchErrorMessage(error)}`);
     }
   };
 
@@ -530,15 +542,13 @@ export function ManagePage({
     try {
       const onEvent = (event: Parameters<typeof ocrBatchStream.accept>[1]) =>
         ocrBatchStream.accept(anchor, event);
-      if (ocrLimit.value === '3' && !ocrLimit.inputInvalid) {
-        await artifactApi.ocrBatch({ limit: 3 }, onEvent);
-      } else {
-        await artifactApi.ocrBatch(request.request, onEvent);
-      }
+      await artifactApi.ocrBatch(request.request, onEvent);
       refreshOcrBatchStatus();
       notify('批量 PDF → Markdown 完成（已落库并写入 OCR 目录）');
     } catch (error) {
       ocrBatchStream.fail(anchor, error);
+      await recoverBatchFailure(reloadPapers, refreshOcrBatchStatus);
+      notify(`批量 PDF → Markdown 失败：${batchErrorMessage(error)}`);
     }
   };
 
@@ -588,7 +598,8 @@ export function ManagePage({
       notify('元数据补全完成');
     } catch (error) {
       enrichStream.fail(anchor, error);
-      notify(`元数据补全失败：${error instanceof Error ? error.message : String(error)}`);
+      await recoverBatchFailure(reloadPapers, refreshEnrichStatus);
+      notify(`元数据补全失败：${batchErrorMessage(error)}`);
     }
   };
 
@@ -600,6 +611,7 @@ export function ManagePage({
       notify(scope === 'all' ? '全量语义索引重建完成' : '缺失索引补齐完成');
     } catch (error) {
       embedStream.fail(anchor, error);
+      notify(`语义索引维护失败：${batchErrorMessage(error)}`);
     }
   };
 
@@ -654,7 +666,8 @@ export function ManagePage({
     for (let i = 0; i < deleteTargets.length; i++) {
       setDeleteProgress(`正在删除 ${i + 1}/${deleteTargets.length}…`);
       try {
-        await libraryApi.deletePaper(deleteTargets[i].id);
+        const result = await libraryApi.deletePaper(deleteTargets[i].id);
+        assertMutationOk(result, '删除失败');
         deletedIds.push(deleteTargets[i].id);
         ok += 1;
       } catch {
@@ -814,10 +827,13 @@ export function ManagePage({
                   titlePending === 0 ||
                   !titleRequest.valid
                 }
+                aria-busy={titleStream.state.running}
               >
-                {titlePending === 0
-                  ? '无需补齐'
-                  : `补齐（${batchLimitLabel(titleLimit.value, titleLimit.inputInvalid)}）`}
+                {titleStream.state.running
+                  ? '补齐进行中…'
+                  : titlePending === 0
+                    ? '无需补齐'
+                    : `补齐（${batchLimitLabel(titleLimit.value, titleLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={titleStream.state} />
             </article>
@@ -831,7 +847,13 @@ export function ManagePage({
               <p className="deep__fact">
                 统一 venue 缩写为权威名称 <code className="manage__endpoint">POST /api/norm-venues</code>
               </p>
-              <button type="button" className="btn btn--primary btn--sm" onClick={() => void runNormVenues()} disabled={venueStream.state.running}>
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={() => void runNormVenues()}
+                disabled={venueStream.state.running}
+                aria-busy={venueStream.state.running}
+              >
                 执行规范
               </button>
               <StreamConsole state={venueStream.state} />
@@ -851,8 +873,14 @@ export function ManagePage({
                   value={scanDir}
                   onChange={(event) => setScanDir(event.target.value)}
                 />
-                <button type="button" className="btn btn--sm" onClick={() => void runScan()}>
-                  扫描
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  onClick={() => void runScan()}
+                  disabled={scanLoading}
+                  aria-busy={scanLoading}
+                >
+                  {scanLoading ? '扫描中…' : '扫描'}
                 </button>
               </div>
               {scanFiles.length > 0 && (
@@ -884,8 +912,9 @@ export function ManagePage({
                 className="btn btn--primary btn--sm"
                 onClick={() => void runImport()}
                 disabled={scanPicked.size === 0 || scanStream.state.running}
+                aria-busy={scanStream.state.running}
               >
-                导入所选（{scanPicked.size}）
+                {scanStream.state.running ? '导入中…' : `导入所选（${scanPicked.size}）`}
               </button>
               <StreamConsole state={scanStream.state} />
             </article>
@@ -915,10 +944,13 @@ export function ManagePage({
                   downloadPendingIds.length === 0 ||
                   !downloadRequest.valid
                 }
+                aria-busy={downloadStream.state.running}
               >
-                {downloadPendingIds.length === 0
-                  ? '无需补下载'
-                  : `补下载（${batchLimitLabel(downloadLimit.value, downloadLimit.inputInvalid)}）`}
+                {downloadStream.state.running
+                  ? '补下载进行中…'
+                  : downloadPendingIds.length === 0
+                    ? '无需补下载'
+                    : `补下载（${batchLimitLabel(downloadLimit.value, downloadLimit.inputInvalid)}）`}
               </button>
               <StreamConsole state={downloadStream.state} />
             </article>
@@ -950,6 +982,7 @@ export function ManagePage({
                   batchStatus?.pending === 0 ||
                   !explainRequest.valid
                 }
+                aria-busy={batchStream.state.running}
               >
                 {batchStream.state.running
                   ? '讲解进行中…'
@@ -987,6 +1020,7 @@ export function ManagePage({
                   (ocrBatchStatus ? ocrBatchStatus.pending === 0 : false) ||
                   !ocrRequest.valid
                 }
+                aria-busy={ocrBatchStream.state.running}
               >
                 {ocrBatchStream.state.running
                   ? '转换进行中…'
@@ -1036,6 +1070,7 @@ export function ManagePage({
                 className="btn btn--primary btn--sm"
                 onClick={() => void runDuplicateScan()}
                 disabled={duplicateLoading}
+                aria-busy={duplicateLoading}
               >
                 {duplicateLoading ? '扫描中…' : '扫描'}
               </button>
@@ -1068,6 +1103,7 @@ export function ManagePage({
                   (enrichStatus ? enrichStatus.pending === 0 : false) ||
                   !enrichRequest.valid
                 }
+                aria-busy={enrichStream.state.running}
               >
                 {enrichStream.state.running
                   ? '补全进行中…'
@@ -1088,10 +1124,22 @@ export function ManagePage({
                 重建本地嵌入索引以支持语义检索 <code className="manage__endpoint">POST /api/embed</code>
               </p>
               <div className="deep__actions">
-                <button type="button" className="btn btn--sm" onClick={() => void runEmbed('missing')} disabled={embedStream.state.running}>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  onClick={() => void runEmbed('missing')}
+                  disabled={embedStream.state.running}
+                  aria-busy={embedStream.state.running}
+                >
                   补齐缺失
                 </button>
-                <button type="button" className="btn btn--sm" onClick={() => void runEmbed('all')} disabled={embedStream.state.running}>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  onClick={() => void runEmbed('all')}
+                  disabled={embedStream.state.running}
+                  aria-busy={embedStream.state.running}
+                >
                   全量重建
                 </button>
               </div>
