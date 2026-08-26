@@ -22,9 +22,17 @@ class ExperimentRunStatus(str, Enum):
     BLOCKED = "blocked"
 
 
+class ReproductionResultStatus(str, Enum):
+    REPRODUCED = "reproduced"
+    PARTIAL = "partial"
+    NOT_REPRODUCED = "not_reproduced"
+    INCONSISTENT = "inconsistent"
+
+
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _PROJECT_STATUSES = frozenset(status.value for status in ReproductionProjectStatus)
 _RUN_STATUSES = frozenset(status.value for status in ExperimentRunStatus)
+_RESULT_STATUSES = frozenset(status.value for status in ReproductionResultStatus)
 
 
 def validate_project_status(value: str) -> str:
@@ -36,6 +44,12 @@ def validate_project_status(value: str) -> str:
 def validate_run_status(value: str) -> str:
     if value not in _RUN_STATUSES:
         raise ValueError("status is invalid")
+    return value
+
+
+def validate_result_status(value: str) -> str:
+    if value not in _RESULT_STATUSES:
+        raise ValueError("result status is invalid")
     return value
 
 
@@ -99,6 +113,28 @@ class ExperimentRun:
 
 
 @dataclass(frozen=True, slots=True)
+class ReproductionResult:
+    id: str
+    project_id: str
+    metric_name: str
+    paper_value: str | None
+    reproduction_value: str | None
+    difference: str | None
+    difference_percent: str | None
+    dataset_settings: str | None
+    source: str | None
+    status: ReproductionResultStatus | str
+    notes: str | None
+    created_at: str
+    updated_at: str
+
+    def __post_init__(self) -> None:
+        if not self.id.strip() or not self.project_id.strip() or not self.metric_name.strip():
+            raise ValueError("result identity and metric_name must be nonblank")
+        object.__setattr__(self, "status", ReproductionResultStatus(self.status))
+
+
+@dataclass(frozen=True, slots=True)
 class ReproductionArtifact:
     id: str
     project_id: str
@@ -147,6 +183,8 @@ __all__ = [
     "DEFAULT_DOCUMENT",
     "ExperimentRun",
     "ExperimentRunStatus",
+    "ReproductionResult",
+    "ReproductionResultStatus",
     "ReproductionArtifact",
     "ReproductionDocument",
     "ReproductionNote",
@@ -154,5 +192,6 @@ __all__ = [
     "ReproductionProjectStatus",
     "validate_project_status",
     "validate_run_status",
+    "validate_result_status",
     "validate_sha256",
 ]

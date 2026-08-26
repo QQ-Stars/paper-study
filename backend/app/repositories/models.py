@@ -260,6 +260,7 @@ class ExperimentRunModel(Base):
     __tablename__ = "experiment_runs"
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     project_id: Mapped[str] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(Text)
     environment: Mapped[str | None] = mapped_column(Text)
     command: Mapped[str | None] = mapped_column(Text)
     parameters_json: Mapped[str] = mapped_column(Text)
@@ -269,6 +270,14 @@ class ExperimentRunModel(Base):
     status: Mapped[str] = mapped_column(Text)
     metrics_json: Mapped[str] = mapped_column(Text)
     result_summary: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[str | None] = mapped_column(Text)
+    finished_at: Mapped[str | None] = mapped_column(Text)
+    runtime_versions: Mapped[str | None] = mapped_column(Text)
+    dataset: Mapped[str | None] = mapped_column(Text)
+    preprocessing: Mapped[str | None] = mapped_column(Text)
+    repository_url: Mapped[str | None] = mapped_column(Text)
+    config: Mapped[str | None] = mapped_column(Text)
+    issues: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text)
 
@@ -292,5 +301,22 @@ class ReproductionNoteModel(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     project_id: Mapped[str] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)
+
+
+class ReproductionResultModel(Base):
+    __tablename__ = "reproduction_results"
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text)
+    metric_name: Mapped[str] = mapped_column(Text)
+    paper_value: Mapped[str | None] = mapped_column(Text)
+    reproduction_value: Mapped[str | None] = mapped_column(Text)
+    difference: Mapped[str | None] = mapped_column(Text)
+    difference_percent: Mapped[str | None] = mapped_column(Text)
+    dataset_settings: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text)

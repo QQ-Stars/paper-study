@@ -32,7 +32,7 @@ from backend.app.providers.legacy_p3 import legacy_p3_provider_factories
 from backend.app.runtime import ApiSettings
 
 
-SCHEMA_REVISION = "20260825_04"
+SCHEMA_REVISION = "20260826_01"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _TITLE_SEPARATOR = re.compile(r"[^a-z0-9\u4e00-\u9fa5]+")
 _ARXIV_ID = re.compile(r"^(\d{4}\.\d{4,5})")

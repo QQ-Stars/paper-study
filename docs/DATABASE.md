@@ -2,7 +2,7 @@
 
 Paper-Study uses one local SQLite database. The Python runtime creates a new
 database when a clone has no `data/app.db`, then applies the Alembic migrations
-through revision `20260825_04` before starting FastAPI.
+through revision `20260826_01` before starting FastAPI.
 
 ## Files
 
@@ -29,7 +29,8 @@ Alembic finishes the migration. The main groups are:
 - `processing_jobs` and related event tables for background work;
 - source-consumer, full-text-search, embedding, and Obsidian export tables.
 - `reproduction_projects`, `reproduction_documents`, `experiment_runs`,
-  `reproduction_artifacts`, and `reproduction_notes` for the paper reproduction
+  `reproduction_artifacts`, `reproduction_notes`, and `reproduction_results`
+  for the paper reproduction
   workspace. These tables are separate from ordinary paper notes, generated
   artifacts, and processing jobs. The paper relationship is nullable and uses
   `SET NULL`, retaining the project title snapshot when a paper is removed.
@@ -42,6 +43,51 @@ parameters but never executes arbitrary shell commands.
 
 The database layer enables WAL mode, foreign keys, and a busy timeout for local
 concurrent API, worker, and scheduler access.
+
+## 13. P3 source consumers、search 与回滚门禁
+
+The P3 migration contract remains additive: `20260807_02 → 20260807_03`, then
+the reproduction workspace migration `20260825_04 → 20260826_01`. Before a
+production upgrade, capture the `pre-p3-source-consumers-search` backup and
+verify the following stable snapshots:
+
+- `papers`, `progress`, `paper_reviews`, `notes`, `favorites`, `translations`,
+  `paper_vectors`, `cite_edges`, `ingest_jobs`, `job_candidates`,
+  `job_schedules`, and `schema_migrations` tableCounts/tableSha256;
+For deterministic checks use `papers` tableCounts/tableSha256, `progress` tableCounts/tableSha256,
+`paper_reviews` tableCounts/tableSha256, `notes` tableCounts/tableSha256, `favorites` tableCounts/tableSha256,
+`translations` tableCounts/tableSha256, `paper_vectors` tableCounts/tableSha256, `cite_edges` tableCounts/tableSha256,
+`ingest_jobs` tableCounts/tableSha256, `job_candidates` tableCounts/tableSha256, `job_schedules` tableCounts/tableSha256,
+and `schema_migrations` tableCounts/tableSha256.
+- `paperIds`, `explainers`, `translations`, `notes`, `paperVectors`,
+  `documentSources`, `generatedArtifacts`, and `processingJobs`
+  contentCounts/contentSha256;
+- P3 search settings: `trigram case_sensitive 0 remove_diacritics 1`, plus
+  `documentChunks`, `chunkEmbeddings`, `translationCheckpoints`,
+  `documentChunksFtsCoverage`, and `documentChunksFtsIntegrity`.
+
+The FTS checks use `INSERT INTO document_chunks_fts(document_chunks_fts,rank) VALUES('integrity-check',1)` and
+`INSERT INTO document_chunks_fts(document_chunks_fts) VALUES('rebuild')`.
+Snapshot output keeps each key in the form `paperIds` contentCounts/contentSha256,
+`explainers` contentCounts/contentSha256, `translations` contentCounts/contentSha256,
+`notes` contentCounts/contentSha256, `paperVectors` contentCounts/contentSha256,
+`documentSources` contentCounts/contentSha256, `generatedArtifacts` contentCounts/contentSha256,
+and `processingJobs` contentCounts/contentSha256.
+
+The rollback runbook is: stop new enqueue → stop worker claim → wait for or
+cancel running jobs → stop API writers. The query path never re-embeds; source stale cascade
+is verified before downgrade. Validate with `upgrade 20260807_03`,
+The exact shutdown order is 停止新 enqueue → 停止 worker claim → 等待/取消 running jobs → 停止 API writer.
+and only downgrade to
+`downgrade 20260807_02` on a disposable restore. A guarded rollback may use
+`-x allow_p3_data_loss=true downgrade 20260807_02` only when the database is
+empty; otherwise return `P3_DOWNGRADE_BLOCKED_NONEMPTY`. Keep
+`API_BACKEND_MODE=legacy`, `DOCUMENT_PIPELINE_MODE=legacy`,
+`GENERATION_PIPELINE_MODE=legacy`, `ARTIFACT_READ_MODE=legacy`,
+`ARTIFACT_WRITE_MODE=legacy`, and `OCR_ENABLED=0` available as rollback flags.
+The map-presence guard and before/after equality guard must pass. The
+allow-data-loss flag is only on restore-validation-*/app.db.
+不得在 Live 使用 allow_p3_data_loss=true.
 
 ## Commands
 

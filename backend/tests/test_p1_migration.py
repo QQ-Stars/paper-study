@@ -131,7 +131,7 @@ class P1MigrationTests(unittest.TestCase):
     def test_revision_has_single_exact_head_and_upgrade_is_additive(self) -> None:
         configuration = Config(str(ALEMBIC_CONFIG_PATH))
         scripts = ScriptDirectory.from_config(configuration)
-        self.assertEqual(["20260825_04"], scripts.get_heads())
+        self.assertEqual(["20260826_01"], scripts.get_heads())
         self.assertIsNone(scripts.get_revision("20260807_01").down_revision)
 
         with temporary_legacy_database() as database_path:

@@ -21,7 +21,7 @@ from backend.tests.support.p1_database import create_legacy_database, run_alembi
 
 
 class _Application:
-    schema_revision = "20260825_04"
+    schema_revision = "20260826_01"
 
     def __init__(self, session_factory):
         self.session_factory = session_factory
@@ -39,7 +39,7 @@ class ReproductionApiContractTests(unittest.TestCase):
         self.root = Path(self._temp.name)
         self.database_path = self.root / "database" / "app.db"
         create_legacy_database(self.database_path)
-        run_alembic(self.database_path, "20260825_04")
+        run_alembic(self.database_path, "20260826_01")
         self.session_factory = create_async_session_factory(
             DatabaseSettings(self.database_path)
         )
@@ -52,7 +52,7 @@ class ReproductionApiContractTests(unittest.TestCase):
             create_app(
                 settings=ApiSettings.for_tests(),
                 dependencies=ApiDependencies(self.application, self.session_factory),
-                required_schema_revision="20260825_04",
+                required_schema_revision="20260826_01",
             )
         )
         self.client = self.client_context.__enter__()
@@ -205,6 +205,12 @@ class ReproductionApiContractTests(unittest.TestCase):
     def test_invalid_paper_and_unknown_fields_fail_closed(self) -> None:
         response = self.client.post(
             "/api/v2/reproductions",
+            json={"name": "No association"},
+        )
+        self.assertEqual(422, response.status_code, response.text)
+
+        response = self.client.post(
+            "/api/v2/reproductions",
             json={"paperId": "missing", "name": "No paper"},
         )
         self.assertEqual(404, response.status_code, response.text)
@@ -221,7 +227,7 @@ class ReproductionApiContractTests(unittest.TestCase):
         for name in ("Zeta project", "Alpha project"):
             response = self.client.post(
                 "/api/v2/reproductions",
-                json={"name": name},
+                json={"paperId": "paper-1", "name": name},
             )
             self.assertEqual(201, response.status_code, response.text)
         response = self.client.get("/api/v2/reproductions", params={"sort": "name"})
@@ -231,10 +237,69 @@ class ReproductionApiContractTests(unittest.TestCase):
             [item["name"] for item in response.json()["items"]],
         )
 
+    def test_run_lifecycle_and_result_comparison_are_persisted(self) -> None:
+        response = self.client.post(
+            "/api/v2/reproductions",
+            json={"paperId": "paper-1", "name": "Result comparison"},
+        )
+        self.assertEqual(201, response.status_code, response.text)
+        project_id = response.json()["id"]
+
+        response = self.client.post(
+            f"/api/v2/reproductions/{project_id}/runs",
+            json={
+                "environment": "Python 3.12",
+                "status": "completed",
+                "startedAt": "2026-08-26T01:00:00+00:00",
+                "finishedAt": "2026-08-26T01:12:00+00:00",
+                "resultSummary": "Baseline completed",
+            },
+        )
+        self.assertEqual(201, response.status_code, response.text)
+        run = response.json()
+        self.assertEqual("2026-08-26T01:00:00+00:00", run["startedAt"])
+        self.assertEqual("2026-08-26T01:12:00+00:00", run["finishedAt"])
+
+        response = self.client.patch(
+            f"/api/v2/reproductions/{project_id}/runs/{run['id']}",
+            json={"status": "failed", "resultSummary": "CUDA out of memory"},
+        )
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual("failed", response.json()["status"])
+
+        response = self.client.post(
+            f"/api/v2/reproductions/{project_id}/results",
+            json={
+                "metricName": "Top-1 accuracy",
+                "paperValue": "74.2%",
+                "reproductionValue": "73.1%",
+                "difference": "-1.1 pp",
+                "differencePercent": "-1.48%",
+                "datasetSettings": "ImageNet-1K / 224px",
+                "source": "run_1",
+                "status": "inconsistent",
+                "notes": "Different augmentation policy.",
+            },
+        )
+        self.assertEqual(201, response.status_code, response.text)
+        result = response.json()
+        self.assertEqual("inconsistent", result["status"])
+
+        detail = self.client.get(f"/api/v2/reproductions/{project_id}")
+        self.assertEqual(200, detail.status_code, detail.text)
+        self.assertEqual(result["id"], detail.json()["results"][0]["id"])
+        self.assertEqual(1, detail.json()["runCount"])
+
+        response = self.client.delete(
+            f"/api/v2/reproductions/{project_id}/runs/{run['id']}"
+        )
+        self.assertEqual(204, response.status_code, response.text)
+        self.assertEqual([], self.client.get(f"/api/v2/reproductions/{project_id}/runs").json())
+
     def test_multipart_artifact_upload_is_bounded_and_server_owned(self) -> None:
         response = self.client.post(
             "/api/v2/reproductions",
-            json={"name": "Attachment safety"},
+            json={"paperId": "paper-1", "name": "Attachment safety"},
         )
         self.assertEqual(201, response.status_code, response.text)
         project_id = response.json()["id"]
@@ -282,7 +347,7 @@ class ReproductionApiContractTests(unittest.TestCase):
     def test_json_artifact_storage_key_must_belong_to_project(self) -> None:
         response = self.client.post(
             "/api/v2/reproductions",
-            json={"name": "JSON artifact boundary"},
+            json={"paperId": "paper-1", "name": "JSON artifact boundary"},
         )
         self.assertEqual(201, response.status_code, response.text)
         project_id = response.json()["id"]
@@ -303,7 +368,7 @@ class ReproductionApiContractTests(unittest.TestCase):
     def test_multipart_artifact_rejects_unknown_run_and_archived_project(self) -> None:
         response = self.client.post(
             "/api/v2/reproductions",
-            json={"name": "Run attachment safety"},
+            json={"paperId": "paper-1", "name": "Run attachment safety"},
         )
         self.assertEqual(201, response.status_code, response.text)
         project_id = response.json()["id"]

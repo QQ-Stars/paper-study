@@ -520,7 +520,7 @@ class P3MigrationTests(unittest.TestCase):
     def test_revision_chain_and_additive_chunk_columns(self) -> None:
         configuration = Config(str(ALEMBIC_CONFIG_PATH))
         scripts = ScriptDirectory.from_config(configuration)
-        self.assertEqual(["20260825_04"], scripts.get_heads())
+        self.assertEqual(["20260826_01"], scripts.get_heads())
         self.assertEqual("20260807_02", scripts.get_revision("20260807_03").down_revision)
 
         with temporary_legacy_database() as database_path:

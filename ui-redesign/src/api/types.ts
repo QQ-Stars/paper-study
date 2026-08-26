@@ -308,6 +308,13 @@ export interface ReproductionProject {
   runs?: ExperimentRun[];
   artifacts?: ReproductionArtifact[];
   notes?: ReproductionNote[];
+  results?: ReproductionResult[];
+  runCount?: number;
+  lastRunSummary?: string | null;
+  lastRunStatus?: ExperimentRunStatus | null;
+  latestMetrics?: Record<string, unknown>;
+  hasFailedTask?: boolean;
+  hasUnsavedContent?: boolean;
 }
 
 export interface ReproductionListResponse {
@@ -323,6 +330,7 @@ export type ExperimentRunStatus = 'planned' | 'running' | 'completed' | 'failed'
 export interface ExperimentRun {
   id: string;
   projectId: string;
+  name?: string;
   environment: string;
   command: string;
   parameters: Record<string, unknown>;
@@ -332,8 +340,15 @@ export interface ExperimentRun {
   status: ExperimentRunStatus;
   metrics: Record<string, unknown>;
   resultSummary: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  runtimeVersions?: string | null;
+  dataset?: string | null;
+  preprocessing?: string | null;
+  repositoryUrl?: string | null;
+  config?: string | null;
+  issues?: string | null;
   createdAt: string;
-  finishedAt: string | null;
   updatedAt?: string;
 }
 
@@ -354,6 +369,24 @@ export interface ReproductionNote {
   id: string;
   projectId: string;
   content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ReproductionResultStatus = 'reproduced' | 'partial' | 'not_reproduced' | 'inconsistent';
+
+export interface ReproductionResult {
+  id: string;
+  projectId: string;
+  metricName: string;
+  paperValue?: string | null;
+  reproductionValue?: string | null;
+  difference?: string | null;
+  differencePercent?: string | null;
+  datasetSettings?: string | null;
+  source?: string | null;
+  status: ReproductionResultStatus;
+  notes?: string | null;
   createdAt: string;
   updatedAt: string;
 }

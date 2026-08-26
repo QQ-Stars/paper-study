@@ -951,3 +951,197 @@
     grid-column: auto;
   }
 }
+
+/* The list and detail states are separate page compositions. Keep the same
+   tokens and controls, but let the list breathe as a card grid and the detail
+   workspace reserve a readable inspector column. */
+.reproduction-page--list .reproduction__workspace {
+  display: block;
+  min-height: 0;
+  overflow: visible;
+}
+
+.reproduction-page--list .reproduction__projects {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.reproduction-page--list .reproduction__projects-heading {
+  padding-inline: 0;
+  border-bottom: 0;
+}
+
+.reproduction-page--list .reproduction__project-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(26rem, 100%), 1fr));
+  gap: var(--space-3);
+}
+
+.reproduction-page--list .reproduction__project-list li {
+  min-width: 0;
+}
+
+.reproduction-page--list .reproduction__project {
+  min-height: 10.5rem;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  padding: var(--space-4);
+}
+
+.reproduction-page--list .reproduction__project:hover,
+.reproduction-page--list .reproduction__project:focus-visible {
+  border-color: var(--line-strong);
+  background: var(--paper-deep);
+}
+
+.reproduction-page--list .reproduction__project-copy strong {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+
+.reproduction__project-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.reproduction__project-tags em {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  font-style: normal;
+  padding: 0.1rem 0.35rem;
+}
+
+.reproduction__project-warning {
+  color: var(--seal);
+}
+
+.reproduction-page--detail .reproduction__workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 23rem);
+  align-items: start;
+}
+
+.reproduction-page--detail .reproduction__projects {
+  display: none;
+}
+
+.reproduction-page--detail .reproduction__editor {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.reproduction-page--detail .reproduction__inspector {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.reproduction__run-copy {
+  min-width: 0;
+}
+
+.reproduction__run-copy strong,
+.reproduction__run-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reproduction__run-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.reproduction__result-list {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.reproduction__result-list li {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.reproduction__result-list li > div {
+  min-width: 0;
+}
+
+.reproduction__result-list strong,
+.reproduction__result-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reproduction__result-status {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+}
+
+.reproduction__result-status--reproduced { color: var(--jade); }
+.reproduction__result-status--inconsistent { color: var(--seal); }
+
+@media (max-width: 1180px) {
+  .reproduction-page--detail .reproduction__workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reproduction-page--detail .reproduction__inspector {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 800px) {
+  .reproduction-page--list .reproduction__project-list {
+    grid-template-columns: 1fr;
+  }
+
+  .reproduction-page--detail .reproduction__workspace {
+    display: flex;
+  }
+
+  .reproduction-page--detail .reproduction__editor,
+  .reproduction-page--detail .reproduction__inspector {
+    width: 100%;
+  }
+
+  .reproduction__project,
+  .reproduction__segments button,
+  .reproduction__outline button,
+  .reproduction__run-actions .btn {
+    min-height: 2.75rem;
+  }
+
+  .reproduction__run-actions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reproduction-page * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

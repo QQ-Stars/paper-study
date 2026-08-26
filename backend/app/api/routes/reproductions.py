@@ -11,7 +11,7 @@ class _Body(BaseModel):
 
 
 class CreateProjectBody(_Body):
-    paperId: StrictStr | None = Field(default=None, min_length=1, max_length=200)
+    paperId: StrictStr = Field(min_length=1, max_length=200)
     name: StrictStr = Field(min_length=1, max_length=200)
     tags: list[StrictStr] = Field(default_factory=list, max_length=30)
 
@@ -29,6 +29,7 @@ class SaveDocumentBody(_Body):
 
 
 class RunBody(_Body):
+    name: StrictStr | None = Field(default=None, max_length=200)
     environment: StrictStr | None = Field(default=None, max_length=10_000)
     command: StrictStr | None = Field(default=None, max_length=10_000)
     parameters: dict[str, object] = Field(default_factory=dict)
@@ -38,6 +39,59 @@ class RunBody(_Body):
     status: Literal["planned", "running", "completed", "failed", "blocked"] = "planned"
     metrics: dict[str, object] = Field(default_factory=dict)
     resultSummary: StrictStr | None = Field(default=None, max_length=10_000)
+    startedAt: StrictStr | None = Field(default=None, max_length=100)
+    finishedAt: StrictStr | None = Field(default=None, max_length=100)
+    runtimeVersions: StrictStr | None = Field(default=None, max_length=10_000)
+    dataset: StrictStr | None = Field(default=None, max_length=10_000)
+    preprocessing: StrictStr | None = Field(default=None, max_length=10_000)
+    repositoryUrl: StrictStr | None = Field(default=None, max_length=10_000)
+    config: StrictStr | None = Field(default=None, max_length=100_000)
+    issues: StrictStr | None = Field(default=None, max_length=100_000)
+
+
+class UpdateRunBody(_Body):
+    name: StrictStr | None = Field(default=None, max_length=200)
+    environment: StrictStr | None = Field(default=None, max_length=10_000)
+    command: StrictStr | None = Field(default=None, max_length=10_000)
+    parameters: dict[str, object] | None = None
+    dataVersion: StrictStr | None = Field(default=None, max_length=10_000)
+    codeRevision: StrictStr | None = Field(default=None, max_length=10_000)
+    seed: StrictInt | None = None
+    status: Literal["planned", "running", "completed", "failed", "blocked"] | None = None
+    metrics: dict[str, object] | None = None
+    resultSummary: StrictStr | None = Field(default=None, max_length=10_000)
+    startedAt: StrictStr | None = Field(default=None, max_length=100)
+    finishedAt: StrictStr | None = Field(default=None, max_length=100)
+    runtimeVersions: StrictStr | None = Field(default=None, max_length=10_000)
+    dataset: StrictStr | None = Field(default=None, max_length=10_000)
+    preprocessing: StrictStr | None = Field(default=None, max_length=10_000)
+    repositoryUrl: StrictStr | None = Field(default=None, max_length=10_000)
+    config: StrictStr | None = Field(default=None, max_length=100_000)
+    issues: StrictStr | None = Field(default=None, max_length=100_000)
+
+
+class ResultBody(_Body):
+    metricName: StrictStr = Field(min_length=1, max_length=200)
+    paperValue: StrictStr | None = Field(default=None, max_length=10_000)
+    reproductionValue: StrictStr | None = Field(default=None, max_length=10_000)
+    difference: StrictStr | None = Field(default=None, max_length=10_000)
+    differencePercent: StrictStr | None = Field(default=None, max_length=10_000)
+    datasetSettings: StrictStr | None = Field(default=None, max_length=10_000)
+    source: StrictStr | None = Field(default=None, max_length=10_000)
+    status: Literal["reproduced", "partial", "not_reproduced", "inconsistent"] = "not_reproduced"
+    notes: StrictStr | None = Field(default=None, max_length=100_000)
+
+
+class UpdateResultBody(_Body):
+    metricName: StrictStr | None = Field(default=None, min_length=1, max_length=200)
+    paperValue: StrictStr | None = Field(default=None, max_length=10_000)
+    reproductionValue: StrictStr | None = Field(default=None, max_length=10_000)
+    difference: StrictStr | None = Field(default=None, max_length=10_000)
+    differencePercent: StrictStr | None = Field(default=None, max_length=10_000)
+    datasetSettings: StrictStr | None = Field(default=None, max_length=10_000)
+    source: StrictStr | None = Field(default=None, max_length=10_000)
+    status: Literal["reproduced", "partial", "not_reproduced", "inconsistent"] | None = None
+    notes: StrictStr | None = Field(default=None, max_length=100_000)
 
 
 class ArtifactBody(_Body):
@@ -67,7 +121,7 @@ def create_reproduction_router() -> APIRouter:
         q: Annotated[str | None, Query(max_length=200)] = None,
         status_filter: Annotated[str | None, Query(alias="status", max_length=30)] = None,
         tag: Annotated[str | None, Query(max_length=50)] = None,
-        sort: Literal["updated", "name"] = "updated",
+        sort: Literal["updated", "created", "name"] = "updated",
         limit: Annotated[int, Query(ge=1, le=100)] = 25,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict[str, object]:
@@ -115,6 +169,32 @@ def create_reproduction_router() -> APIRouter:
     async def list_experiment_runs(request: Request, project_id: str = Path(min_length=1, max_length=100)) -> list[dict[str, object]]:
         project = await _workspace(request).get_project(project_id)
         return list(project["runs"])
+
+    @router.patch("/reproductions/{project_id}/runs/{run_id}")
+    async def update_experiment_run(request: Request, body: UpdateRunBody, project_id: str = Path(min_length=1, max_length=100), run_id: str = Path(min_length=1, max_length=100)) -> dict[str, object]:
+        return await _workspace(request).update_run(
+            project_id, run_id, body.model_dump(exclude_unset=True)
+        )
+
+    @router.delete("/reproductions/{project_id}/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_experiment_run(request: Request, project_id: str = Path(min_length=1, max_length=100), run_id: str = Path(min_length=1, max_length=100)) -> Response:
+        await _workspace(request).delete_run(project_id, run_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @router.post("/reproductions/{project_id}/results", status_code=status.HTTP_201_CREATED)
+    async def add_reproduction_result(request: Request, body: ResultBody, project_id: str = Path(min_length=1, max_length=100)) -> dict[str, object]:
+        return await _workspace(request).add_result(project_id, body.model_dump())
+
+    @router.patch("/reproductions/{project_id}/results/{result_id}")
+    async def update_reproduction_result(request: Request, body: UpdateResultBody, project_id: str = Path(min_length=1, max_length=100), result_id: str = Path(min_length=1, max_length=100)) -> dict[str, object]:
+        return await _workspace(request).update_result(
+            project_id, result_id, body.model_dump(exclude_unset=True)
+        )
+
+    @router.delete("/reproductions/{project_id}/results/{result_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_reproduction_result(request: Request, project_id: str = Path(min_length=1, max_length=100), result_id: str = Path(min_length=1, max_length=100)) -> Response:
+        await _workspace(request).delete_result(project_id, result_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post("/reproductions/{project_id}/artifacts", status_code=status.HTTP_201_CREATED)
     async def add_reproduction_artifact(request: Request, project_id: str = Path(min_length=1, max_length=100)) -> dict[str, object]:

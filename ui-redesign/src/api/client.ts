@@ -24,6 +24,7 @@ import type {
   ReproductionListResponse,
   ReproductionNote,
   ReproductionProject,
+  ReproductionResult,
 } from './types';
 
 async function json<T>(response: Response): Promise<T> {
@@ -203,7 +204,7 @@ export const libraryApi = {
 /* ── 论文复现工作区（v2） ────────────────────────── */
 
 export const reproductionApi = {
-  list: (params: { q?: string; status?: string; tag?: string; sort?: 'updated' | 'name'; page?: number; limit?: number } = {}) => {
+  list: (params: { q?: string; status?: string; tag?: string; sort?: 'updated' | 'created' | 'name'; page?: number; limit?: number } = {}) => {
     const query = new URLSearchParams();
     if (params.q) query.set('q', params.q);
     if (params.status) query.set('status', params.status);
@@ -218,7 +219,7 @@ export const reproductionApi = {
     return get<ReproductionListResponse>(`/api/v2/reproductions${suffix}`);
   },
   get: (id: string) => get<ReproductionProject>(`/api/v2/reproductions/${encodeURIComponent(id)}`),
-  create: (body: { paperId: string | null; name: string; tags?: string[] }) =>
+  create: (body: { paperId: string; name: string; tags?: string[] }) =>
     post<ReproductionProject>('/api/v2/reproductions', body),
   update: (id: string, body: { name?: string; status?: string; tags?: string[]; expectedRevision: number }) =>
     mutate<ReproductionProject>('PATCH', `/api/v2/reproductions/${encodeURIComponent(id)}`, body),
@@ -230,8 +231,18 @@ export const reproductionApi = {
     mutate<ReproductionDocument>('PUT', `/api/v2/reproductions/${encodeURIComponent(id)}/document`, body),
   listRuns: (id: string) =>
     get<ExperimentRun[] | { items: ExperimentRun[] }>(`/api/v2/reproductions/${encodeURIComponent(id)}/runs`),
-  createRun: (id: string, body: Omit<ExperimentRun, 'id' | 'projectId' | 'createdAt' | 'finishedAt'>) =>
+  createRun: (id: string, body: Partial<Omit<ExperimentRun, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>>) =>
     post<ExperimentRun>(`/api/v2/reproductions/${encodeURIComponent(id)}/runs`, body),
+  updateRun: (projectId: string, runId: string, body: Partial<Omit<ExperimentRun, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>>) =>
+    mutate<ExperimentRun>('PATCH', `/api/v2/reproductions/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`, body),
+  deleteRun: (projectId: string, runId: string) =>
+    mutate<void>('DELETE', `/api/v2/reproductions/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`),
+  createResult: (id: string, body: Omit<ReproductionResult, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>) =>
+    post<ReproductionResult>(`/api/v2/reproductions/${encodeURIComponent(id)}/results`, body),
+  updateResult: (projectId: string, resultId: string, body: Partial<Omit<ReproductionResult, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>>) =>
+    mutate<ReproductionResult>('PATCH', `/api/v2/reproductions/${encodeURIComponent(projectId)}/results/${encodeURIComponent(resultId)}`, body),
+  deleteResult: (projectId: string, resultId: string) =>
+    mutate<void>('DELETE', `/api/v2/reproductions/${encodeURIComponent(projectId)}/results/${encodeURIComponent(resultId)}`),
   listArtifacts: (id: string) =>
     get<ReproductionArtifact[] | { items: ReproductionArtifact[] }>(`/api/v2/reproductions/${encodeURIComponent(id)}/artifacts`),
   uploadArtifact: (id: string, body: FormData) =>

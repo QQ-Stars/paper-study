@@ -17,6 +17,7 @@ export type PageId =
   | 'overview'
   | 'library'
   | 'reproduction'
+  | 'reproduction-detail'
   | 'manage'
   | 'reviews'
   | 'acquire'

@@ -37,6 +37,7 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [readerPaperId, setReaderPaperId] = useState<string | null>(null);
   const [reproductionPaperId, setReproductionPaperId] = useState<string | null>(null);
+  const [reproductionProjectId, setReproductionProjectId] = useState<string | null>(null);
   const [pdfViewer, setPdfViewer] = useState<{ id: string; title: string } | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState('');
@@ -126,6 +127,7 @@ export default function App() {
     setPage(next);
     if (next !== 'library') setSelectedPaperId(null);
     if (next !== 'reproduction') setReproductionPaperId(null);
+    if (next !== 'reproduction-detail') setReproductionProjectId(null);
   }, []);
 
   const openPaper = useCallback((id: string) => {
@@ -135,15 +137,24 @@ export default function App() {
 
   const openReproduction = useCallback((id: string) => {
     setReproductionPaperId(id);
+    setReproductionProjectId(null);
     setPage('reproduction');
+  }, []);
+
+  const openReproductionProject = useCallback((id: string) => {
+    setReproductionProjectId(id);
+    setReproductionPaperId(null);
+    setPage('reproduction-detail');
   }, []);
 
   const current = NAV_ITEMS.find((item) => item.id === page) ?? NAV_ITEMS[0];
   const papersReady = papers ?? [];
-  const topbarLabel = page === 'reader' ? '阅读' : current.label;
+  const topbarLabel = page === 'reader' ? '阅读' : page === 'reproduction-detail' ? '论文复现' : current.label;
   const topbarHint =
     page === 'reader'
       ? (papersReady.find((paper) => paper.id === readerPaperId)?.title_zh ?? '论文精读')
+      : page === 'reproduction-detail'
+        ? '独立复现工作区 · 文档、实验与结果'
       : papersError
         ? `后端连接失败：${papersError}`
         : current.hint;
@@ -167,7 +178,7 @@ export default function App() {
   return (
     <div className="app">
       <Sidebar
-        page={page}
+        page={page === 'reproduction-detail' ? 'reproduction' : page}
         dueCount={dueCount}
         libraryCount={papers?.length ?? 0}
         onNavigate={navigate}
@@ -203,7 +214,8 @@ export default function App() {
               openReproduction={openReproduction}
             />
           )}
-          {page === 'reproduction' && <ReproductionPage papers={papersReady} notify={notify} openPaper={openPaper} initialPaperId={reproductionPaperId} />}
+          {page === 'reproduction' && <ReproductionPage papers={papersReady} notify={notify} openPaper={openPaper} initialPaperId={reproductionPaperId} listOnly onOpenProject={openReproductionProject} />}
+          {page === 'reproduction-detail' && <ReproductionPage papers={papersReady} notify={notify} openPaper={openPaper} initialProjectId={reproductionProjectId} detailOnly onBack={() => navigate('reproduction')} />}
           {page === 'manage' && <ManagePage papers={papersReady} {...shared} />}
           {page === 'reviews' && (
             <ReviewsPage reviews={reviews} {...shared} />

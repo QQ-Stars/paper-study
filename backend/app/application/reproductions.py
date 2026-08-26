@@ -18,6 +18,7 @@ from backend.app.domain import (
     ReproductionNotFoundError,
     ReproductionValidationError,
     validate_project_status,
+    validate_result_status,
     validate_run_status,
     validate_sha256,
 )
@@ -84,9 +85,10 @@ class ReproductionWorkspace:
             project["runs"] = await work.reproductions.list_runs(project_id)
             project["artifacts"] = await work.reproductions.list_artifacts(project_id)
             project["notes"] = await work.reproductions.list_notes(project_id)
+            project["results"] = await work.reproductions.list_results(project_id)
         return project
 
-    async def create_project(self, *, paper_id: str | None, name: str, tags: list[str]) -> dict[str, object]:
+    async def create_project(self, *, paper_id: str, name: str, tags: list[str]) -> dict[str, object]:
         name = name.strip()
         if not name or len(name) > 200:
             raise ReproductionValidationError()
@@ -95,14 +97,14 @@ class ReproductionWorkspace:
         project_id = f"repro_{uuid4().hex}"
         document_id = f"rdoc_{uuid4().hex}"
         async with self._work_factory() as work:
-            paper = await work.papers.get_legacy(paper_id) if paper_id else None
-            if paper_id and paper is None:
+            paper = await work.papers.get_legacy(paper_id)
+            if paper is None:
                 from backend.app.domain import MissingPaperError
                 raise MissingPaperError(paper_id=paper_id)
             await work.reproductions.add_project(
                 {
                     "id": project_id, "paper_id": paper_id,
-                    "paper_title": str(paper.get("title") or "Untitled paper") if paper else "未关联论文",
+                    "paper_title": str(paper.get("title") or "Untitled paper"),
                     "name": name, "status": "planned", "tags_json": json.dumps(cleaned_tags, ensure_ascii=False),
                     "revision": 1, "created_at": now, "updated_at": now,
                 },
@@ -218,15 +220,85 @@ class ReproductionWorkspace:
             now = _timestamp(self._clock())
             run_id = f"run_{uuid4().hex}"
             await work.reproductions.add_run({
-                "id": run_id, "project_id": project_id, "environment": _optional_text(body.get("environment")),
+                "id": run_id, "project_id": project_id,
+                "name": _optional_text(body.get("name")) or "实验运行",
+                "environment": _optional_text(body.get("environment")),
                 "command": _optional_text(body.get("command")), "parameters_json": _json_dict(body.get("parameters")),
                 "data_version": _optional_text(body.get("dataVersion")), "code_revision": _optional_text(body.get("codeRevision")),
                 "seed": _optional_int(body.get("seed")), "status": status, "metrics_json": _json_dict(body.get("metrics")),
-                "result_summary": _optional_text(body.get("resultSummary")), "created_at": now, "updated_at": now,
+                "result_summary": _optional_text(body.get("resultSummary")),
+                "started_at": _optional_text(body.get("startedAt")), "finished_at": _optional_text(body.get("finishedAt")),
+                "runtime_versions": _optional_text(body.get("runtimeVersions")), "dataset": _optional_text(body.get("dataset")),
+                "preprocessing": _optional_text(body.get("preprocessing")), "repository_url": _optional_text(body.get("repositoryUrl")),
+                "config": _optional_text(body.get("config")), "issues": _optional_text(body.get("issues")),
+                "created_at": now, "updated_at": now,
             })
             await work.commit()
             runs = await work.reproductions.list_runs(project_id)
         return next(row for row in runs if row["id"] == run_id)
+
+    async def update_run(self, project_id: str, run_id: str, body: Mapping[str, object]) -> dict[str, object]:
+        values = _run_update_values(body, _timestamp(self._clock()))
+        async with self._work_factory() as work:
+            current = await work.reproductions.get_project(project_id)
+            if current is None:
+                raise ReproductionNotFoundError(project_id=project_id)
+            if current["status"] == "archived":
+                raise ReproductionArchivedError(project_id=project_id)
+            if not values or not await work.reproductions.update_run(project_id, run_id, values):
+                raise ReproductionNotFoundError(project_id=project_id)
+            await work.commit()
+            runs = await work.reproductions.list_runs(project_id)
+        return next(row for row in runs if row["id"] == run_id)
+
+    async def delete_run(self, project_id: str, run_id: str) -> None:
+        async with self._work_factory() as work:
+            current = await work.reproductions.get_project(project_id)
+            if current is None:
+                raise ReproductionNotFoundError(project_id=project_id)
+            if current["status"] == "archived":
+                raise ReproductionArchivedError(project_id=project_id)
+            if not await work.reproductions.delete_run(project_id, run_id):
+                raise ReproductionNotFoundError(project_id=project_id)
+            await work.commit()
+
+    async def add_result(self, project_id: str, body: Mapping[str, object]) -> dict[str, object]:
+        values = _result_values(project_id, body, _timestamp(self._clock()))
+        async with self._work_factory() as work:
+            current = await work.reproductions.get_project(project_id)
+            if current is None:
+                raise ReproductionNotFoundError(project_id=project_id)
+            if current["status"] == "archived":
+                raise ReproductionArchivedError(project_id=project_id)
+            await work.reproductions.add_result(values)
+            await work.commit()
+        return _result_public(values)
+
+    async def update_result(self, project_id: str, result_id: str, body: Mapping[str, object]) -> dict[str, object]:
+        now = _timestamp(self._clock())
+        values = _result_update_values(body, now)
+        async with self._work_factory() as work:
+            current = await work.reproductions.get_project(project_id)
+            if current is None:
+                raise ReproductionNotFoundError(project_id=project_id)
+            if current["status"] == "archived":
+                raise ReproductionArchivedError(project_id=project_id)
+            if not values or not await work.reproductions.update_result(project_id, result_id, values):
+                raise ReproductionNotFoundError(project_id=project_id)
+            await work.commit()
+            results = await work.reproductions.list_results(project_id)
+        return next(item for item in results if item["id"] == result_id)
+
+    async def delete_result(self, project_id: str, result_id: str) -> None:
+        async with self._work_factory() as work:
+            current = await work.reproductions.get_project(project_id)
+            if current is None:
+                raise ReproductionNotFoundError(project_id=project_id)
+            if current["status"] == "archived":
+                raise ReproductionArchivedError(project_id=project_id)
+            if not await work.reproductions.delete_result(project_id, result_id):
+                raise ReproductionNotFoundError(project_id=project_id)
+            await work.commit()
 
     async def add_artifact(self, project_id: str, body: Mapping[str, object]) -> dict[str, object]:
         kind = _required_text(body.get("kind"), 80)
@@ -391,6 +463,109 @@ def _tags(values: object) -> list[str]:
         if value.strip() not in result:
             result.append(value.strip())
     return result
+
+
+_RUN_TEXT_FIELDS = {
+    "name": "name",
+    "environment": "environment",
+    "command": "command",
+    "dataVersion": "data_version",
+    "codeRevision": "code_revision",
+    "resultSummary": "result_summary",
+    "startedAt": "started_at",
+    "finishedAt": "finished_at",
+    "runtimeVersions": "runtime_versions",
+    "dataset": "dataset",
+    "preprocessing": "preprocessing",
+    "repositoryUrl": "repository_url",
+    "config": "config",
+    "issues": "issues",
+}
+
+
+def _run_update_values(body: Mapping[str, object], now: str) -> dict[str, object]:
+    values: dict[str, object] = {}
+    for public, stored in _RUN_TEXT_FIELDS.items():
+        if public in body:
+            values[stored] = _optional_text(body.get(public))
+    if "seed" in body:
+        values["seed"] = _optional_int(body.get("seed"))
+    if "parameters" in body:
+        values["parameters_json"] = _json_dict(body.get("parameters"))
+    if "metrics" in body:
+        values["metrics_json"] = _json_dict(body.get("metrics"))
+    if "status" in body:
+        status = str(body.get("status") or "")
+        try:
+            validate_run_status(status)
+        except ValueError as error:
+            raise ReproductionValidationError() from error
+        values["status"] = status
+    if values:
+        values["updated_at"] = now
+    return values
+
+
+_RESULT_TEXT_FIELDS = {
+    "metricName": "metric_name",
+    "paperValue": "paper_value",
+    "reproductionValue": "reproduction_value",
+    "difference": "difference",
+    "differencePercent": "difference_percent",
+    "datasetSettings": "dataset_settings",
+    "source": "source",
+    "notes": "notes",
+}
+
+
+def _result_update_values(body: Mapping[str, object], now: str) -> dict[str, object]:
+    values: dict[str, object] = {}
+    for public, stored in _RESULT_TEXT_FIELDS.items():
+        if public in body:
+            value = _optional_text(body.get(public))
+            if public == "metricName" and value is None:
+                raise ReproductionValidationError()
+            values[stored] = value
+    if "status" in body:
+        status = str(body.get("status") or "")
+        try:
+            validate_result_status(status)
+        except ValueError as error:
+            raise ReproductionValidationError() from error
+        values["status"] = status
+    if values:
+        values["updated_at"] = now
+    return values
+
+
+def _result_values(project_id: str, body: Mapping[str, object], now: str) -> dict[str, object]:
+    values = _result_update_values(body, now)
+    metric_name = values.get("metric_name")
+    if not isinstance(metric_name, str) or not metric_name:
+        raise ReproductionValidationError()
+    values.update(
+        {
+            "id": f"result_{uuid4().hex}",
+            "project_id": project_id,
+            "status": values.get("status") or "not_reproduced",
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+    for stored in _RESULT_TEXT_FIELDS.values():
+        values.setdefault(stored, None)
+    return values
+
+
+def _result_public(values: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "id": values["id"], "projectId": values["project_id"],
+        "metricName": values["metric_name"], "paperValue": values.get("paper_value"),
+        "reproductionValue": values.get("reproduction_value"), "difference": values.get("difference"),
+        "differencePercent": values.get("difference_percent"), "datasetSettings": values.get("dataset_settings"),
+        "source": values.get("source"), "status": values["status"], "notes": values.get("notes"),
+        "createdAt": values["created_at"], "updatedAt": values["updated_at"],
+    }
 
 
 def _required_text(value: object, maximum: int) -> str:
