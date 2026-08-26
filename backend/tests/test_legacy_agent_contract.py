@@ -113,6 +113,7 @@ class LegacyAgentContractTests(unittest.TestCase):
 
     def test_ocr_failure_does_not_write_ocr_markdown(self) -> None:
         with (
+            mock.patch.object(extract.config, "OCR_ENABLED", True),
             mock.patch.object(
                 extract,
                 "_ocr_settings",
@@ -129,6 +130,29 @@ class LegacyAgentContractTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "OCR transport failed"):
                 extract._ocr_full_text("paper.pdf", paper_id="paper-1")
         write.assert_not_called()
+
+    def test_ocr_disabled_is_reported_before_provider_configuration(self) -> None:
+        with (
+            mock.patch.object(extract.config, "OCR_ENABLED", False),
+            mock.patch.object(extract, "_ocr_settings", side_effect=AssertionError("settings must not be read")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "OCR 已禁用"):
+                extract._ocr_full_text("paper.pdf")
+
+    def test_ocr_request_uses_saved_timeout_in_seconds(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": "# OCR result"}}]}
+        ).encode("utf-8")
+        with (
+            mock.patch.object(extract, "urllib") as urllib,
+            mock.patch.object(extract.config, "OCR_TIMEOUT", 2500),
+        ):
+            urllib.request.urlopen.return_value = response
+            value = extract._ocr_transcribe(["image"], {"base": "https://ocr.example/v1", "key": "", "model": "vision", "timeout": 2.5})
+        self.assertEqual("# OCR result", value)
+        self.assertEqual(2.5, urllib.request.urlopen.call_args.kwargs["timeout"])
 
     def test_translate_ocr_failure_does_not_use_local_pdf_text(self) -> None:
         row = {"id": "paper-1", "title": "Paper", "pdf_path": "paper.pdf"}

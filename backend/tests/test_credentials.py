@@ -13,6 +13,7 @@ import unittest
 from unittest import mock
 
 from backend.app.application.credentials import CredentialService
+from backend.app.application.settings import SettingsService
 from backend.app.domain import (
     CredentialBackendError,
     CredentialKind,
@@ -158,7 +159,7 @@ class CredentialPriorityTests(CredentialFixture):
                     {env_name: f" env-{kind.value} "}
                 )
                 credential = await store.get(kind)
-                self.assertEqual(f" env-{kind.value} ", credential.value)
+                self.assertEqual(f"keyring-{kind.value}", credential.value)
 
                 _env, _keyring, _legacy, store = self.stores()
                 credential = await store.get(kind)
@@ -169,6 +170,16 @@ class CredentialPriorityTests(CredentialFixture):
                 credential = await store.get(kind)
                 self.assertEqual(self.settings[legacy_field], credential.value)
 
+                empty_path = Path(self._temp.name) / f"empty-{kind.value}.json"
+                empty_path.write_text("{}", encoding="utf-8")
+                env_only = CompositeCredentialStore(
+                    EnvironmentCredentialStore({env_name: f" env-{kind.value} "}),
+                    KeyringCredentialStore(FakeKeyringAdapter()),
+                    LegacySettingsCredentialStore(empty_path),
+                )
+                credential = await env_only.get(kind)
+                self.assertEqual(f" env-{kind.value} ", credential.value)
+
         empty_path = Path(self._temp.name) / "empty.json"
         empty_path.write_text("{}", encoding="utf-8")
         store = CompositeCredentialStore(
@@ -178,6 +189,21 @@ class CredentialPriorityTests(CredentialFixture):
         )
         for kind, *_rest in KIND_CASES:
             self.assertIsNone(await store.get(kind))
+
+    async def test_saved_settings_credential_wins_over_environment_for_connection_test(self) -> None:
+        _env, _keyring, _legacy, store = self.stores({"LLM_API_KEY": "environment-secret"})
+        observed: list[str] = []
+        service = SettingsService(
+            settings_path=self.settings_path,
+            credential_service=CredentialService(store, SafeCredentialProbe()),
+            environment_snapshot={"LLM_API_KEY": "environment-secret"},
+            llm_transport=lambda credential, _prompt: observed.append(credential.value) or True,
+        )
+
+        result = await service.test_llm()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(["legacy-llm-secret"], observed)
 
 
 class KeyringCredentialStoreTests(CredentialFixture):
@@ -470,7 +496,13 @@ class CredentialStatusTests(CredentialFixture):
     async def test_status_shape_and_tail_rules_for_all_kinds(self) -> None:
         for kind, env_name, _field, _username in KIND_CASES:
             for value, tail in (("short", "****"), ("long-secret-value", "****alue")):
-                _env, _keyring, _legacy, store = self.stores({env_name: value})
+                empty_path = Path(self._temp.name) / f"status-{kind.value}.json"
+                empty_path.write_text("{}", encoding="utf-8")
+                store = CompositeCredentialStore(
+                    EnvironmentCredentialStore({env_name: value}),
+                    KeyringCredentialStore(FakeKeyringAdapter()),
+                    LegacySettingsCredentialStore(empty_path),
+                )
                 status = await store.status(kind)
                 self.assertEqual(
                     {

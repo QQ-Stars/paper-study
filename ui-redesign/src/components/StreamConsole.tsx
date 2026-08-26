@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { StreamEvent } from '../api/types';
+import { formatTerminalSummary } from './streamSummary';
 
 /* 统一的流式任务控制台：追加 NDJSON 事件日志，展示终态结果 */
 
@@ -34,6 +35,10 @@ export function useStream() {
     if (anchor !== anchorRef.current) return;
     const isTerminal = event.type === 'done' || event.type === 'result';
     const describe = (): string => {
+      if (isTerminal) {
+        const batchSummary = formatTerminalSummary(event);
+        if (batchSummary) return batchSummary;
+      }
       if (event.type === 'result') {
         if (event.ok === false) return `失败：${String(event.error ?? '未知错误')}`;
         const added = typeof event.added === 'number' ? `新增 ${event.added} 篇` : '';
@@ -84,7 +89,7 @@ export function useStream() {
       running: false,
       progress: '',
       lines: [...prev.lines, `错误：${error instanceof Error ? error.message : String(error)}`],
-      summary: '',
+      summary: '任务失败',
     }));
   };
 
@@ -92,7 +97,7 @@ export function useStream() {
 }
 
 export function StreamConsole({ state, placeholder }: { state: StreamState; placeholder?: string }) {
-  const endRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLLIElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' });
   }, [state.lines.length]);
@@ -100,7 +105,13 @@ export function StreamConsole({ state, placeholder }: { state: StreamState; plac
   if (state.lines.length === 0 && !state.running) return null;
 
   return (
-    <div className="stream-console" role="log" aria-live="polite">
+    <div
+      className="stream-console"
+      role="log"
+      aria-label="任务进度"
+      aria-live="polite"
+      aria-busy={state.running}
+    >
       <div className="stream-console__head">
         <span className={`stream-console__dot${state.running ? ' stream-console__dot--live' : ''}`} />
         {state.running
@@ -111,7 +122,7 @@ export function StreamConsole({ state, placeholder }: { state: StreamState; plac
         {(state.lines.length > 0 ? state.lines : [placeholder ?? '等待输出…']).map((line, index) => (
           <li key={index}>{line}</li>
         ))}
-        <div ref={endRef} />
+        <li ref={endRef} aria-hidden="true" className="stream-console__end" />
       </ol>
     </div>
   );

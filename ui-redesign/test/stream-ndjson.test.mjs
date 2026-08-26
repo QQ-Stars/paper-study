@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { streamNdjson } from '../src/api/client.ts';
+import { artifactApi, streamNdjson } from '../src/api/client.ts';
 
 const originalFetch = globalThis.fetch;
 
@@ -108,5 +108,48 @@ test('streamNdjson rejects duplicate terminal events', async () => {
   await assert.rejects(
     streamNdjson('/api/search', {}, () => {}),
     /流式任务返回多个完成状态/,
+  );
+});
+
+test('streamNdjson reports malformed NDJSON instead of silently dropping it', async () => {
+  globalThis.fetch = async () =>
+    streamResponse(['{"type":"progress","line":"searching"}\nnot-json\n']);
+
+  await assert.rejects(
+    streamNdjson('/api/search', {}, () => {}),
+    /第 2 行不是有效 JSON/,
+  );
+});
+
+test('streamNdjson rejects a successful response with a non-NDJSON content type', async () => {
+  globalThis.fetch = async () =>
+    new Response('{"type":"result","ok":true}\n', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+
+  await assert.rejects(
+    streamNdjson('/api/search', {}, () => {}),
+    /Content-Type.*application\/x-ndjson/,
+  );
+});
+
+test('artifact text reads reject HTTP errors instead of presenting an empty artifact', async () => {
+  globalThis.fetch = async () =>
+    new Response('artifact store unavailable', { status: 503 });
+
+  await assert.rejects(
+    artifactApi.getExplainer('paper-1'),
+    /HTTP 503: artifact store unavailable/,
+  );
+});
+
+test('streamNdjson rejects a terminal event without a boolean ok field', async () => {
+  globalThis.fetch = async () =>
+    streamResponse(['{"type":"result","candidates":[] }\n']);
+
+  await assert.rejects(
+    streamNdjson('/api/search', {}, () => {}),
+    /\u5b8c\u6210\u72b6\u6001\u7f3a\u5c11\u6709\u6548 ok \u5b57\u6bb5/,
   );
 });

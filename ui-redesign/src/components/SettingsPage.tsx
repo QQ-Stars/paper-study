@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { settingsApi, v2Api } from '../api/client';
 import type { Settings } from '../api/types';
+import { formatLlmConnectionResult } from './settingsFeedback';
 
 interface SettingsPageProps {
   notify: (message: string) => void;
@@ -75,6 +76,9 @@ export function SettingsPage({ notify }: SettingsPageProps) {
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
   const [keys, setKeys] = useState({ apiKey: '', ocrApiKey: '', embedApiKey: '', s2ApiKey: '' });
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [testingLlm, setTestingLlm] = useState(false);
+  const [clearingKey, setClearingKey] = useState<string | null>(null);
   const [llmResult, setLlmResult] = useState('');
   const [activeSection, setActiveSection] = useState(NAV[0].id);
   const [obsidian, setObsidian] = useState<{
@@ -88,6 +92,7 @@ export function SettingsPage({ notify }: SettingsPageProps) {
     setDraft((prev) => ({ ...prev, [field]: value }));
 
   const load = useCallback(async () => {
+    setLoadError('');
     try {
       const data = await settingsApi.get();
       setSettings(data);
@@ -129,8 +134,8 @@ export function SettingsPage({ notify }: SettingsPageProps) {
         obsidianExportTranslation: data.obsidianExportTranslation,
         obsidianAutoExport: data.obsidianAutoExport,
       });
-    } catch {
-      setSettings(null);
+    } catch (error: unknown) {
+      setLoadError(error instanceof Error ? error.message : String(error));
     }
     v2Api
       .obsidianStatus()
@@ -205,6 +210,7 @@ export function SettingsPage({ notify }: SettingsPageProps) {
 
   const clearKey = async (kind: string, label: string) => {
     if (!window.confirm(`确认清除「${label}」的已保存凭据？`)) return;
+    setClearingKey(kind);
     try {
       const result = await settingsApi.update({ clearCredentials: [kind] });
       if (result.ok) {
@@ -215,19 +221,39 @@ export function SettingsPage({ notify }: SettingsPageProps) {
       }
     } catch (error) {
       notify(`清除失败：${error instanceof Error ? error.message : error}`);
+    } finally {
+      setClearingKey(null);
     }
   };
 
   const testLlm = async () => {
+    setTestingLlm(true);
     setLlmResult('测试中…');
-    const result = await settingsApi.testLlm();
-    setLlmResult(result.ok ? '连通正常' : `失败：${result.error ?? '检查 Key / Base URL / 模型'}`);
+    try {
+      const result = await settingsApi.testLlm();
+      setLlmResult(formatLlmConnectionResult(result));
+    } catch (error: unknown) {
+      setLlmResult(`失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setTestingLlm(false);
+    }
   };
 
   if (!settings) {
     return (
       <div className="page page-enter settings">
-        <div className="card reviews__placeholder">正在加载设置（GET /api/settings）…</div>
+        <div className={`card reviews__placeholder${loadError ? ' reader__empty--error' : ''}`} role={loadError ? 'alert' : 'status'}>
+          {loadError ? (
+            <>
+              <p>设置加载失败：{loadError}</p>
+              <button type="button" className="btn btn--sm" onClick={() => void load()}>
+                重新加载
+              </button>
+            </>
+          ) : (
+            '正在加载设置（GET /api/settings）…'
+          )}
+        </div>
       </div>
     );
   }
@@ -248,6 +274,14 @@ export function SettingsPage({ notify }: SettingsPageProps) {
 
   return (
     <div className="page page-enter settings">
+      {loadError && (
+        <div className="card reader__empty--error" role="alert">
+          <p>设置刷新失败：{loadError}</p>
+          <button type="button" className="btn btn--sm" onClick={() => void load()}>
+            重试
+          </button>
+        </div>
+      )}
       <div className="settings-layout">
         <div className="settings-sections">
           <Section id="sec-llm" title="LLM 模型" desc="讲解、翻译、推荐与采集增强所用的大模型">
@@ -281,13 +315,14 @@ export function SettingsPage({ notify }: SettingsPageProps) {
                 onChange={(event) => set('model')(event.target.value)}
               />
             </Row>
-            <Row title="超时" desc="单位毫秒，须为正整数">
+            <Row title="超时" desc="单位毫秒；0＝使用 SDK 默认超时">
               <input
                 className="input"
                 type="number"
                 aria-label="LLM 超时"
                 value={Number(draft.llmTimeout ?? 60000)}
-                onChange={(event) => set('llmTimeout')(Number(event.target.value) || 60000)}
+                min={0}
+                onChange={(event) => set('llmTimeout')(event.target.value === '' ? 0 : Number(event.target.value))}
               />
             </Row>
             <Row title="研究方向主题" desc="采集页默认检索方向">
@@ -299,11 +334,11 @@ export function SettingsPage({ notify }: SettingsPageProps) {
               />
             </Row>
             <Row title="连通性测试">
-              <button type="button" className="btn btn--sm" onClick={() => void testLlm()}>
-                测试模型连通
+              <button type="button" className="btn btn--sm" onClick={() => void testLlm()} disabled={testingLlm} aria-busy={testingLlm}>
+                {testingLlm ? '测试中…' : '测试模型连通'}
               </button>
               {llmResult && (
-                <span className={`badge ${llmResult === '连通正常' ? 'badge--jade' : 'badge--seal'}`}>
+                <span className={`badge ${llmResult === '连通正常' ? 'badge--jade' : 'badge--seal'}`} role="status" aria-live="polite">
                   {llmResult}
                 </span>
               )}
@@ -343,9 +378,11 @@ export function SettingsPage({ notify }: SettingsPageProps) {
                       <button
                         type="button"
                         className="btn btn--ghost btn--sm"
+                        disabled={clearingKey !== null}
+                        aria-busy={clearingKey === card.kind}
                         onClick={() => void clearKey(card.kind, card.label)}
                       >
-                        清除
+                        {clearingKey === card.kind ? '清除中…' : '清除'}
                       </button>
                     )}
                   </div>
@@ -475,8 +512,8 @@ export function SettingsPage({ notify }: SettingsPageProps) {
                 className="input"
                 type="number"
                 aria-label="OCR 每批页数"
-                value={Number(draft.ocrPageBatchSize ?? 1)}
-                onChange={(event) => set('ocrPageBatchSize')(Number(event.target.value) || 1)}
+                value={Number(draft.ocrPageBatchSize ?? 4)}
+                onChange={(event) => set('ocrPageBatchSize')(Number(event.target.value) || 4)}
               />
             </Row>
             <Row title="并发数" desc="1–4">
@@ -484,8 +521,8 @@ export function SettingsPage({ notify }: SettingsPageProps) {
                 className="input"
                 type="number"
                 aria-label="OCR 并发数"
-                value={Number(draft.ocrMaxConcurrency ?? 1)}
-                onChange={(event) => set('ocrMaxConcurrency')(Number(event.target.value) || 1)}
+                value={Number(draft.ocrMaxConcurrency ?? 2)}
+                onChange={(event) => set('ocrMaxConcurrency')(Number(event.target.value) || 2)}
               />
             </Row>
           </Section>
@@ -733,6 +770,7 @@ export function SettingsPage({ notify }: SettingsPageProps) {
                   className="btn btn--primary"
                   onClick={() => void save()}
                   disabled={saving}
+                  aria-busy={saving}
                 >
                   {saving ? '保存中…' : '保存全部设置'}
                 </button>

@@ -156,26 +156,32 @@ class CompositeCredentialStore:
         self._migrated.add(kind)
 
     async def _effective(self, kind: CredentialKind) -> Credential | None:
-        environment = await self._environment.get(kind)
-        if environment is not None:
-            return environment
+        # Keyring and the synchronized legacy settings field are both saved
+        # configuration.  They outrank process-level environment defaults.
         keyring = await self._keyring_get(kind)
         if keyring is not None:
             return keyring
-        return await self._legacy.get(kind)
+        legacy = await self._legacy.get(kind)
+        if legacy is not None:
+            return legacy
+        return await self._environment.get(kind)
 
     async def _status_unlocked(self, kind: CredentialKind) -> CredentialStatus:
         environment = await self._environment.get(kind)
-        effective = environment
+        keyring = await self._keyring_get(kind)
+        legacy = await self._legacy.get(kind)
+        effective = keyring
         if effective is None:
-            effective = await self._keyring_get(kind)
+            effective = legacy
         if effective is None:
-            effective = await self._legacy.get(kind)
+            effective = environment
         return CredentialStatus(
             kind=kind,
             has_key=effective is not None,
             key_tail=_tail(effective.value) if effective is not None else None,
-            environment_managed=environment is not None,
+            environment_managed=(
+                environment is not None and keyring is None and legacy is None
+            ),
         )
 
     async def _keyring_get(self, kind: CredentialKind) -> Credential | None:

@@ -145,6 +145,57 @@ class ProductionOcrRegistryTests(unittest.TestCase):
 
 
 class EnabledOcrSelectionTests(unittest.TestCase):
+    def test_runtime_settings_resolver_controls_enablement_identity_and_defaults(self) -> None:
+        from backend.app.providers.ocr.fake import FakeOcrProvider
+        from backend.app.providers.ocr.registry import (
+            compose_ocr_gate,
+            create_test_ocr_registry,
+        )
+
+        runtime = {
+            "ocrEnabled": False,
+            "ocrProvider": "fake",
+            "ocrModel": "saved-ocr-model",
+            "ocrPageBatchSize": 4,
+            "ocrMaxConcurrency": 2,
+        }
+        fake = FakeOcrProvider(pages={1: "# page one\n"})
+        gate = compose_ocr_gate(
+            enabled=False,
+            registry_factory=lambda: create_test_ocr_registry({"fake": fake}),
+            settings_resolver=lambda: runtime,
+        )
+
+        with self.assertRaises(Exception) as caught:
+            gate.select(
+                source_mode="ocr",
+                provider_id=None,
+                model=None,
+                options=None,
+            )
+        self.assertEqual("OCR_DISABLED", getattr(caught.exception, "code", None))
+
+        runtime["ocrEnabled"] = True
+        selection = gate.select(
+            source_mode="ocr",
+            provider_id=None,
+            model=None,
+            options=None,
+        )
+        self.assertEqual("fake", selection.provider_id)
+        self.assertEqual("saved-ocr-model", selection.model)
+        self.assertEqual({"pageBatchSize": 4, "maxConcurrency": 2}, dict(selection.options))
+
+        runtime["ocrPageBatchSize"] = 3
+        runtime["ocrMaxConcurrency"] = 1
+        selection = gate.select(
+            source_mode="ocr",
+            provider_id=None,
+            model=None,
+            options={"pageBatchSize": 2},
+        )
+        self.assertEqual({"pageBatchSize": 2, "maxConcurrency": 1}, dict(selection.options))
+
     def test_enabled_test_override_selects_fake_with_canonical_options(self) -> None:
         from backend.app.providers.ocr.fake import FakeOcrProvider
         from backend.app.providers.ocr.registry import (

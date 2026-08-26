@@ -196,6 +196,255 @@ class LegacyAgentProviderTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_in_process_mode_reads_injected_saved_settings_path(self) -> None:
+        from agent import __main__ as agent_main
+        from agent import config as agent_config
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        with tempfile.TemporaryDirectory(prefix="study-app-agent-settings-") as temp:
+            settings_path = Path(temp) / "settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "provider": "qwen",
+                        "model": "saved-model",
+                        "baseUrl": "https://saved.example/v1",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            async def scenario() -> None:
+                provider = LegacyAgentProvider(
+                    in_process=True,
+                    environment={
+                        **os.environ,
+                        "PAPER_STUDY_SETTINGS_PATH": str(settings_path),
+                        "LLM_PROVIDER": "deepseek",
+                        "LLM_MODEL": "env-model",
+                    },
+                    timeout_seconds=2.0,
+                )
+
+                def fake_main() -> None:
+                    print(
+                        json.dumps(
+                            {
+                                "provider": agent_config.PROVIDER,
+                                "model": agent_config.MODEL,
+                                "base": agent_config.BASE_URL,
+                            }
+                        ),
+                        flush=True,
+                    )
+
+                with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                    result = await provider.run("settings")
+                self.assertEqual(0, result.returncode)
+                self.assertEqual(
+                    {
+                        "provider": "qwen",
+                        "model": "saved-model",
+                        "base": "https://saved.example/v1",
+                    },
+                    json.loads(result.stdout),
+                )
+
+            asyncio.run(scenario())
+
+    def test_in_process_mode_prefers_backend_credential_snapshot(self) -> None:
+        from agent import __main__ as agent_main
+        from agent import config as agent_config
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        with tempfile.TemporaryDirectory(prefix="study-app-agent-credential-") as temp:
+            settings_path = Path(temp) / "settings.json"
+            settings_path.write_text(
+                json.dumps({"apiKey": "stale-json-secret"}), encoding="utf-8"
+            )
+
+            async def scenario() -> None:
+                provider = LegacyAgentProvider(
+                    in_process=True,
+                    environment={
+                        **os.environ,
+                        "PAPER_STUDY_SETTINGS_PATH": str(settings_path),
+                        "PAPER_STUDY_LLM_API_KEY": "keyring-secret",
+                    },
+                    timeout_seconds=2.0,
+                )
+
+                def fake_main() -> None:
+                    print(agent_config.API_KEY, flush=True)
+
+                with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                    result = await provider.run("settings")
+                self.assertEqual(0, result.returncode)
+                self.assertEqual("keyring-secret", result.stdout.strip())
+
+            asyncio.run(scenario())
+
+    def test_in_process_mode_prefers_backend_snapshot_for_all_credential_kinds(self) -> None:
+        from agent import __main__ as agent_main
+        from agent import config as agent_config
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        with tempfile.TemporaryDirectory(prefix="study-app-agent-credentials-") as temp:
+            settings_path = Path(temp) / "settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "apiKey": "stale-llm",
+                        "ocrApiKey": "stale-ocr",
+                        "embedApiKey": "stale-embed",
+                        "s2ApiKey": "stale-s2",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            async def scenario() -> None:
+                provider = LegacyAgentProvider(
+                    in_process=True,
+                    environment={
+                        **os.environ,
+                        "PAPER_STUDY_SETTINGS_PATH": str(settings_path),
+                        "PAPER_STUDY_LLM_API_KEY": "effective-llm",
+                        "PAPER_STUDY_OCR_API_KEY": "effective-ocr",
+                        "PAPER_STUDY_EMBED_API_KEY": "effective-embed",
+                        "PAPER_STUDY_S2_API_KEY": "effective-s2",
+                    },
+                    timeout_seconds=2.0,
+                )
+
+                def fake_main() -> None:
+                    print(
+                        "|".join(
+                            (
+                                agent_config.API_KEY,
+                                agent_config.OCR_API_KEY,
+                                agent_config.EMBED_API_KEY,
+                                agent_config.S2_API_KEY,
+                            )
+                        ),
+                        flush=True,
+                    )
+
+                with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                    result = await provider.run("settings")
+                self.assertEqual(0, result.returncode)
+                self.assertEqual(
+                    "effective-llm|effective-ocr|effective-embed|effective-s2",
+                    result.stdout.strip(),
+                )
+
+            asyncio.run(scenario())
+
+    def test_in_process_mode_uses_settings_page_embedding_model_alias(self) -> None:
+        from agent import __main__ as agent_main
+        from agent import config as agent_config
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        with tempfile.TemporaryDirectory(prefix="study-app-agent-embedding-settings-") as temp:
+            settings_path = Path(temp) / "settings.json"
+            settings_path.write_text(
+                json.dumps({"embedApiModel": "saved-embedding-model"}),
+                encoding="utf-8",
+            )
+
+            async def scenario() -> None:
+                provider = LegacyAgentProvider(
+                    in_process=True,
+                    environment={
+                        **os.environ,
+                        "PAPER_STUDY_SETTINGS_PATH": str(settings_path),
+                        "EMBED_MODEL": "environment-model",
+                    },
+                    timeout_seconds=2.0,
+                )
+
+                def fake_main() -> None:
+                    print(agent_config.EMBED_MODEL, flush=True)
+
+                with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                    result = await provider.run("settings")
+                self.assertEqual(0, result.returncode)
+                self.assertEqual("saved-embedding-model", result.stdout.strip())
+
+            asyncio.run(scenario())
+
+    def test_in_process_batch_summary_failure_is_not_reported_as_success(self) -> None:
+        from agent import __main__ as agent_main
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+
+            def fake_main() -> None:
+                print(
+                    json.dumps(
+                        {
+                            "ok": False,
+                            "total": 0,
+                            "done": 0,
+                            "failed": [],
+                            "error": "OCR disabled",
+                        }
+                    ),
+                    flush=True,
+                )
+
+            with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                events = [
+                    event
+                    async for event in provider.stream_events(
+                        "ocr-md-batch",
+                        terminal_fields={"summary": {}},
+                        stdout_object_field="summary",
+                    )
+                ]
+
+            self.assertEqual("result", events[-1]["type"])
+            self.assertFalse(events[-1]["ok"])
+            self.assertEqual("OCR disabled", events[-1]["error"])
+            self.assertFalse(events[-1]["summary"]["ok"])
+
+        asyncio.run(scenario())
+
+    def test_in_process_non_structured_invalid_json_is_failed_not_empty_success(self) -> None:
+        """A malformed agent payload must not become an optimistic empty result."""
+        from agent import __main__ as agent_main
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+
+            def fake_main() -> None:
+                print("{not-json", flush=True)
+
+            with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                events = [
+                    event
+                    async for event in provider.stream_events(
+                        "search",
+                        stdout_array_field="candidates",
+                        terminal_fields={"candidates": []},
+                    )
+                ]
+
+            self.assertEqual(1, len(events))
+            self.assertEqual(
+                {
+                    "type": "result",
+                    "ok": False,
+                    "candidates": [],
+                    "error": "LEGACY_AGENT_MALFORMED_JSON",
+                },
+                events[-1],
+            )
+
+        asyncio.run(scenario())
+
     def test_in_process_structured_stream_without_terminal_is_failed_once(self) -> None:
         from agent import __main__ as agent_main
         from backend.app.providers.legacy_agent import LegacyAgentProvider
@@ -230,6 +479,106 @@ class LegacyAgentProviderTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_in_process_structured_stream_malformed_ndjson_fails_once_and_last(self) -> None:
+        from agent import __main__ as agent_main
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+
+            def fake_main() -> None:
+                print(
+                    json.dumps({"type": "progress", "line": "TITLE::before"}),
+                    flush=True,
+                )
+                print("not-json apiKey=malformed-secret", flush=True)
+                print(
+                    json.dumps(
+                        {
+                            "type": "result",
+                            "ok": True,
+                            "items": [{"id": "safe"}],
+                        }
+                    ),
+                    flush=True,
+                )
+
+            with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                events = [
+                    event
+                    async for event in provider.stream_events("title-translations")
+                ]
+
+            terminals = [event for event in events if event.get("type") == "result"]
+            self.assertEqual(1, len(terminals))
+            self.assertEqual(terminals[0], events[-1])
+            self.assertFalse(terminals[0]["ok"])
+            self.assertEqual(
+                "LEGACY_AGENT_MALFORMED_NDJSON",
+                terminals[0]["error"],
+            )
+            self.assertEqual("TITLE::before", events[0]["line"])
+            self.assertNotIn("malformed-secret", json.dumps(events))
+
+        asyncio.run(scenario())
+
+    def test_subprocess_structured_stream_malformed_ndjson_fails_once_and_last(
+        self,
+    ) -> None:
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        malformed_agent = r'''
+import json
+
+print(json.dumps({"type": "progress", "line": "TITLE::before"}), flush=True)
+print("not-json apiKey=malformed-secret", flush=True)
+print(json.dumps({"type": "result", "ok": True, "items": [{"id": "safe"}]}), flush=True)
+'''
+
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory(
+                prefix="study-app-legacy-agent-malformed-"
+            ) as temporary:
+                root = Path(temporary)
+                package = root / "agent"
+                package.mkdir()
+                (package / "__init__.py").write_text("", encoding="utf-8")
+                (package / "__main__.py").write_text(
+                    malformed_agent,
+                    encoding="utf-8",
+                )
+                environment = {
+                    **os.environ,
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                    "PYTHONPATH": os.pathsep.join(
+                        [str(root), os.environ.get("PYTHONPATH", "")]
+                    ),
+                }
+                provider = LegacyAgentProvider(
+                    executable=sys.executable,
+                    cwd=root,
+                    environment=environment,
+                    timeout_seconds=2.0,
+                )
+                events = [
+                    event
+                    async for event in provider.stream_events("title-translations")
+                ]
+
+            terminals = [event for event in events if event.get("type") == "result"]
+            self.assertEqual(1, len(terminals))
+            self.assertEqual(terminals[0], events[-1])
+            self.assertFalse(terminals[0]["ok"])
+            self.assertEqual(
+                "LEGACY_AGENT_MALFORMED_NDJSON",
+                terminals[0]["error"],
+            )
+            self.assertEqual("TITLE::before", events[0]["line"])
+            self.assertNotIn("malformed-secret", json.dumps(events))
+
+        asyncio.run(scenario())
+
     def test_in_process_progress_redacts_header_and_json_secrets(self) -> None:
         from agent import __main__ as agent_main
         from backend.app.providers.legacy_agent import LegacyAgentProvider
@@ -256,6 +605,57 @@ class LegacyAgentProviderTests(unittest.TestCase):
             self.assertNotIn("header-secret", rendered)
             self.assertNotIn("json-secret", rendered)
             self.assertNotIn("pass-secret", rendered)
+            self.assertIn("[redacted]", rendered)
+
+        asyncio.run(scenario())
+
+    def test_structured_stdout_events_redact_nested_failure_secrets(self) -> None:
+        from agent import __main__ as agent_main
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+
+            def fake_main() -> None:
+                print(
+                    json.dumps(
+                        {
+                            "type": "progress",
+                            "stage": "item",
+                            "state": "failed",
+                            "title": "safe title",
+                            "failure": {
+                                "error": "apiKey=structured-secret",
+                                "headers": ["Authorization: Bearer nested-secret"],
+                                "hint": "model unavailable",
+                            },
+                        }
+                    ),
+                    flush=True,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "type": "result",
+                            "ok": False,
+                            "summary": {"failed": [{"error": "token=terminal-secret"}]},
+                        }
+                    ),
+                    flush=True,
+                )
+
+            with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                events = [
+                    event
+                    async for event in provider.stream_events("title-translations")
+                ]
+
+            rendered = json.dumps(events)
+            self.assertNotIn("structured-secret", rendered)
+            self.assertNotIn("nested-secret", rendered)
+            self.assertNotIn("terminal-secret", rendered)
+            self.assertEqual("safe title", events[0]["title"])
+            self.assertEqual("model unavailable", events[0]["failure"]["hint"])
             self.assertIn("[redacted]", rendered)
 
         asyncio.run(scenario())
@@ -328,11 +728,7 @@ class LegacyAgentProviderTests(unittest.TestCase):
             first_task = asyncio.create_task(anext(stream))
             await _wait_for_path(root / "stream.ready")
             try:
-                self.assertTrue(
-                    first_task.done(),
-                    "stderr progress was buffered until the subprocess exited",
-                )
-                first = await first_task
+                first = await asyncio.wait_for(first_task, timeout=0.5)
                 self.assertEqual(
                     {"type": "progress", "line": "STAGE::first"},
                     first,

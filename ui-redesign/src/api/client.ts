@@ -44,6 +44,20 @@ function get<T>(url: string): Promise<T> {
   return fetch(url).then((response) => json<T>(response));
 }
 
+async function text(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    let detail = '';
+    try {
+      detail = (await response.text()).slice(0, 300);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+  }
+  return response.text();
+}
+
 function post<T>(url: string, body: unknown = {}): Promise<T> {
   return fetch(url, {
     method: 'POST',
@@ -81,10 +95,35 @@ export async function streamNdjson(
     }
     throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
   }
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+  if (!contentType.startsWith('application/x-ndjson')) {
+    throw new Error(
+      `流式任务 Content-Type 应为 application/x-ndjson，实际为 ${contentType || '缺失'}`,
+    );
+  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let lineNumber = 0;
   let terminal: StreamEvent | undefined;
+  const parseEvent = (line: string, number: number): StreamEvent => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      throw new Error(`流式任务第 ${number} 行不是有效 JSON`);
+    }
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed) ||
+      typeof (parsed as { type?: unknown }).type !== 'string' ||
+      !(parsed as { type: string }).type
+    ) {
+      throw new Error(`流式任务第 ${number} 行缺少有效事件类型`);
+    }
+    return parsed as StreamEvent;
+  };
   const accept = (event: StreamEvent) => {
     if (terminal) {
       if (event.type === 'done' || event.type === 'result') {
@@ -103,35 +142,23 @@ export async function streamNdjson(
     while (newline >= 0) {
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
+      lineNumber += 1;
       if (line) {
-        let event: StreamEvent | undefined;
-        try {
-          event = JSON.parse(line) as StreamEvent;
-        } catch {
-          /* 忽略不完整行 */
-          event = undefined;
-        }
-        if (event !== undefined) {
-          accept(event);
-        }
+        accept(parseEvent(line, lineNumber));
       }
       newline = buffer.indexOf('\n');
     }
   }
+  buffer += decoder.decode();
   const tail = buffer.trim();
   if (tail) {
-    let event: StreamEvent | undefined;
-    try {
-      event = JSON.parse(tail) as StreamEvent;
-    } catch {
-      /* ignore */
-      event = undefined;
-    }
-    if (event !== undefined) {
-      accept(event);
-    }
+    lineNumber += 1;
+    accept(parseEvent(tail, lineNumber));
   }
   if (!terminal) throw new Error('流式任务未返回完成状态');
+  if (typeof terminal.ok !== 'boolean') {
+    throw new Error('流式任务完成状态缺少有效 ok 字段');
+  }
   if (terminal.ok === false) {
     throw new Error(String(terminal.error ?? '任务执行失败'));
   }
@@ -153,7 +180,7 @@ export const libraryApi = {
     post<{ ok: boolean }>('/api/progress', { id, status }),
   setFavorite: (id: string, favorite: boolean) =>
     post<{ ok: boolean }>('/api/favorite', { id, favorite }),
-  deletePaper: (id: string) => post<{ ok: boolean }>('/api/delete', { id }),
+  deletePaper: (id: string) => post<{ ok: boolean; error?: string }>('/api/delete', { id }),
   pdfStatus: (id: string) =>
     get<{ ok: boolean; hasPdf: boolean; size: number; path: string; canDownload: boolean }>(
       `/api/pdf/status?id=${encodeURIComponent(id)}`,
@@ -222,19 +249,13 @@ export const reproductionApi = {
 
 export const artifactApi = {
   getNote: (id: string) =>
-    fetch(`/api/note?id=${encodeURIComponent(id)}`).then((response) =>
-      response.ok ? response.text() : '',
-    ),
+    text(`/api/note?id=${encodeURIComponent(id)}`),
   saveNote: (id: string, content: string) =>
     post<{ ok: boolean }>('/api/note', { id, content }),
   getExplainer: (id: string) =>
-    fetch(`/api/explainer?id=${encodeURIComponent(id)}`).then((response) =>
-      response.ok ? response.text() : '',
-    ),
+    text(`/api/explainer?id=${encodeURIComponent(id)}`),
   getTranslation: (id: string) =>
-    fetch(`/api/translation?id=${encodeURIComponent(id)}`).then((response) =>
-      response.ok ? response.text() : '',
-    ),
+    text(`/api/translation?id=${encodeURIComponent(id)}`),
   explain: (id: string, onEvent: (event: StreamEvent) => void) =>
     streamNdjson('/api/explain', { id }, onEvent),
   translate: (id: string, onEvent: (event: StreamEvent) => void) =>
@@ -268,9 +289,7 @@ export const artifactApi = {
     streamNdjson('/api/ocr-md', { id }, onEvent),
   /* 读已保存的 OCR Markdown（GET /api/ocr-md?id=）；无记录返回空字符串。 */
   getOcrMarkdown: (id: string) =>
-    fetch(`/api/ocr-md?id=${encodeURIComponent(id)}`).then((response) =>
-      response.ok ? response.text() : '',
-    ),
+    text(`/api/ocr-md?id=${encodeURIComponent(id)}`),
   /* 批量 OCR 统计：待转换/已有 OCR/缺 PDF 篇数。 */
   ocrBatchStats: () =>
     get<{
@@ -404,7 +423,8 @@ export const settingsApi = {
   get: () => get<Settings>('/api/settings'),
   update: (fields: Record<string, unknown>) =>
     post<{ ok: boolean; error?: string }>('/api/settings', fields),
-  testLlm: () => post<{ ok: boolean; latencyMs?: number; error?: string }>('/api/test-llm'),
+  testLlm: () =>
+    post<{ ok: boolean; latencyMs?: number; output?: string; error?: string }>('/api/test-llm'),
 };
 
 /* ── v2 durable 处理管线 ─────────────────────────── */

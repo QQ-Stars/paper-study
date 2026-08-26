@@ -17,6 +17,14 @@ from backend.app.api.middleware.ndjson import ndjson_response
 
 _JSON_CONTENT_TYPE = "application/json; charset=utf-8"
 _DURABLE_STREAM_TIMEOUT_SECONDS = 45.0
+# Only storage-identity misses indicate that a paper predates the durable
+# source-document pipeline.  Provider failures must stay terminal: invoking
+# the compatibility agent after a real durable failure can duplicate an LLM
+# call or obscure the actionable error returned by the durable worker.
+_DURABLE_ARTIFACT_FALLBACK_ERRORS = frozenset({"SOURCE_IDENTITY_MISSING"})
+# Embedding jobs use the same compatibility boundary as artifact jobs: only
+# records that predate durable source identity may be retried through agent.
+_DURABLE_EMBEDDING_FALLBACK_ERRORS = _DURABLE_ARTIFACT_FALLBACK_ERRORS
 
 
 def create_legacy_router() -> APIRouter:
@@ -93,10 +101,15 @@ def create_legacy_router() -> APIRouter:
         paper_id = _safe_base(body.get("id"))
         if not paper_id:
             return _json_response({"ok": False, "error": "缺少 id"}, 400)
-        try:
-            row = await _services(request).library_queries.get_paper(paper_id)
-        except Exception:
-            row = None
+        library_queries = _optional_service(request, "library_queries")
+        row = None
+        if library_queries is not None:
+            try:
+                row = await library_queries.get_paper(paper_id)
+            except MissingPaperError:
+                row = None
+            except Exception as error:
+                return _safe_json_error(error)
         stored = row.get("pdf_path") if isinstance(row, dict) else None
         try:
             file = _pdf_files(request).resolve_for_id(paper_id, stored_path=stored)
@@ -129,9 +142,13 @@ def create_legacy_router() -> APIRouter:
                     {"pid": paper_id},
                 )
                 row = result.first()
-        except Exception:
-            # 表不存在（从未执行过 OCR）→ 视同无记录
-            return _markdown_response(None)
+        except Exception as error:
+            # A database outage/lock must remain visible to the caller.  Only
+            # the first-run compatibility case (the optional table genuinely
+            # does not exist) is equivalent to an empty artifact.
+            if _is_missing_ocr_table_error(error):
+                return _markdown_response(None)
+            return _safe_text_error(error)
         return _markdown_response(row[0] if row else None)
 
     @router.get("/api/cite-context")
@@ -1144,36 +1161,69 @@ async def _durable_artifact_events(
     agent_args: list[str] | tuple[str, ...] = (),
 ):
     # 优先走 durable processing 管道；存量 legacy 论文没有 ready source
-    # document（SOURCE_IDENTITY_MISSING）时回退到兼容适配器。旧实现会无限
-    # 等待外部模型，导致阅读页按钮看起来像“卡死”；这里给 durable 作业
-    # 一个明确的边界，并把超时作业取消后再执行兼容路径。
+    # document（SOURCE_IDENTITY_MISSING）时回退到兼容适配器。旧实现会在
+    # durable 流断流或超时后继续调用兼容 agent，可能重复发起昂贵的模型请求；
+    # durable 只在明确报告“没有可用 source identity”时允许回退。
     service = _processing_streams(request)
     stream = getattr(service, "artifact_events", None)
     durable_error: str | None = None
     durable_terminal: dict[str, object] | None = None
     if callable(stream):
         observed: list[dict[str, object]] = []
+        iterator = stream(paper_id, kind, profile=profile).__aiter__()
+        timed_out = False
 
-        async def collect() -> None:
-            async for event in stream(paper_id, kind, profile=profile):
-                if isinstance(event, dict):
-                    observed.append(event)
+        async def close_iterator() -> None:
+            close = getattr(iterator, "aclose", None)
+            if callable(close):
+                try:
+                    await close()
+                except Exception:
+                    pass
 
         try:
-            await asyncio.wait_for(collect(), timeout=_DURABLE_STREAM_TIMEOUT_SECONDS)
-            for event in observed:
-                if isinstance(event, dict) and event.get("type") == "result":
+            deadline = (
+                asyncio.get_running_loop().time()
+                + _DURABLE_STREAM_TIMEOUT_SECONDS
+            )
+            while True:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    event = await asyncio.wait_for(
+                        iterator.__anext__(),
+                        timeout=remaining,
+                    )
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    timed_out = True
+                    break
+                except Exception as error:
+                    durable_terminal = {"ok": False, "error": _safe_error(error)}
+                    break
+                if not isinstance(event, dict):
+                    continue
+                observed.append(event)
+                if event.get("type") in {"done", "result"}:
                     durable_terminal = event
                     if event.get("ok"):
+                        await close_iterator()
                         yield event
                         return
-                    continue
+                    break
+                # Progress is forwarded as soon as the durable stream emits it;
+                # terminal failures remain buffered until fallback eligibility is
+                # known so they cannot be emitted before a legacy result.
                 yield event
-        except asyncio.TimeoutError:
+        except asyncio.CancelledError:
+            await close_iterator()
+            raise
+        if timed_out:
+            await close_iterator()
             durable_error = "PROCESSING_TIMEOUT"
-            for event in observed:
-                if event.get("type") != "result":
-                    yield event
             job_ids = {
                 str(event.get("jobId"))
                 for event in observed
@@ -1184,11 +1234,33 @@ async def _durable_artifact_events(
                     await request.app.state.container.processing_api.cancel_job(job_id)
                 except Exception:
                     pass
-            yield {"type": "progress", "line": "DURABLE::timeout，已取消并切换兼容处理"}
-        except Exception as error:
-            durable_terminal = {"ok": False, "error": _safe_error(error)}
+            yield {"type": "progress", "line": "DURABLE::timeout，已取消"}
+            yield {
+                "type": "result",
+                "ok": False,
+                "markdown": "",
+                "error": durable_error,
+            }
+            return
+        await close_iterator()
+        if durable_terminal is None:
+            yield {
+                "type": "result",
+                "ok": False,
+                "markdown": "",
+                "error": "PROCESSING_STREAM_NO_TERMINAL",
+            }
+            return
         if durable_terminal is not None:
             durable_error = str(durable_terminal.get("error") or "") or "processing failed"
+            if durable_error not in _DURABLE_ARTIFACT_FALLBACK_ERRORS:
+                failed = dict(durable_terminal)
+                failed["type"] = "result"
+                failed["ok"] = False
+                failed.setdefault("markdown", "")
+                failed["error"] = durable_error
+                yield failed
+                return
     else:
         durable_error = "processing service unavailable"
     if agent_command is None:
@@ -1234,7 +1306,7 @@ async def _durable_embedding_events(request: Request, scope: str):
     if callable(stream):
         try:
             async for event in stream(scope):
-                if isinstance(event, dict) and event.get("type") == "result":
+                if isinstance(event, dict) and event.get("type") in {"done", "result"}:
                     durable_terminal = event
                     if event.get("ok"):
                         yield event
@@ -1245,6 +1317,25 @@ async def _durable_embedding_events(request: Request, scope: str):
             durable_terminal = {"ok": False, "error": _safe_error(error)}
     else:
         durable_terminal = {"ok": False, "error": "processing service unavailable"}
+    if durable_terminal is None:
+        yield {
+            "type": "result",
+            "ok": False,
+            "indexed": 0,
+            "total": 0,
+            "error": "PROCESSING_STREAM_NO_TERMINAL",
+        }
+        return
+    durable_error = str(durable_terminal.get("error") or "") or "processing failed"
+    if durable_error not in _DURABLE_EMBEDDING_FALLBACK_ERRORS:
+        failed = dict(durable_terminal)
+        failed["type"] = "result"
+        failed["ok"] = False
+        failed.setdefault("indexed", 0)
+        failed.setdefault("total", 0)
+        failed["error"] = durable_error
+        yield failed
+        return
     async for event in _agent_events(
         request,
         "embed",
@@ -1322,7 +1413,7 @@ async def _agent_events(
                     "result",
                 }:
                     terminal_seen = True
-                    yield event
+                    yield _validated_agent_terminal(command, event)
                     return
                 yield event
         except Exception as error:
@@ -1381,9 +1472,35 @@ async def _agent_events(
         else:
             decoded.setdefault("ok", True)
             decoded.setdefault("error", "")
-        yield {"type": terminal_type, **decoded}
+        yield _validated_agent_terminal(
+            command,
+            {"type": terminal_type, **decoded},
+        )
     except Exception:
         yield {"type": terminal_type, "ok": False, **fields, "error": "legacy agent failed"}
+
+
+def _validated_agent_terminal(
+    command: str,
+    event: dict[str, object],
+) -> dict[str, object]:
+    """Enforce content-bearing success contracts at the NDJSON adapter seam."""
+    if event.get("ok") is not True or command not in {
+        "explain",
+        "translate",
+        "ocr-md",
+    }:
+        return event
+    if str(event.get("markdown") or "").strip():
+        return event
+    failed = dict(event)
+    failed["ok"] = False
+    failed["error"] = (
+        "OCR 结果为空，请重试或检查 OCR 配置"
+        if command == "ocr-md"
+        else "模型返回为空，请检查模型配置后重试"
+    )
+    return failed
 
 
 def _optional_args(body: dict[str, object], field: str) -> list[str]:
@@ -1491,6 +1608,35 @@ def _markdown_response(value: object, status_code: int = 200) -> Response:
         status_code=status_code,
         headers={"Content-Type": "text/markdown; charset=utf-8"},
     )
+
+
+def _is_missing_ocr_table_error(error: BaseException) -> bool:
+    """Recognize only a missing ``ocr_markdown`` table across DB adapters."""
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        message = str(current).lower()
+        if (
+            "ocr_markdown" in message
+            and (
+                "no such table" in message
+                or "does not exist" in message
+                or "undefined table" in message
+            )
+        ):
+            return True
+        for nested in (
+            getattr(current, "orig", None),
+            getattr(current, "__cause__", None),
+            getattr(current, "__context__", None),
+        ):
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+    return False
 
 
 def _foreign_key_error() -> Response:

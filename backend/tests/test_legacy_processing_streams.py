@@ -33,6 +33,8 @@ class _StructuredProvider:
 class _StreamFixture:
     context: P3ContextFixture
     streams: LegacyProcessingStreams
+    artifact_service: DocumentArtifactService
+    document_search: DocumentSearch
 
 
 @asynccontextmanager
@@ -86,6 +88,8 @@ async def _stream_fixture(*, prefix: str):
                     sleep=asyncio.sleep,
                     poll_interval=0.001,
                 ),
+                artifact_service=artifact_service,
+                document_search=search,
             )
 
 
@@ -164,6 +168,43 @@ async def _complete_embedding_job(context: P3ContextFixture) -> str:
 
 
 class LegacyProcessingStreamsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_embedding_events_uses_runtime_profile_resolver_for_next_job(self) -> None:
+        async with _stream_fixture(prefix="legacy-stream-profile-refresh-") as fixture:
+            latest = EmbeddingProfile(
+                provider="fake-embedding",
+                model="saved-settings-model",
+                embedding_version="saved-settings-v1",
+                dimensions=2,
+            )
+
+            async def resolve_profile() -> EmbeddingProfile:
+                return latest
+
+            streams = LegacyProcessingStreams(
+                fixture.context.unit_of_work_factory,
+                artifact_service=fixture.artifact_service,
+                document_search=fixture.document_search,
+                embedding_profile=EmbeddingProfile(
+                    provider="fake-embedding",
+                    model="startup-model",
+                    embedding_version="startup-v1",
+                    dimensions=2,
+                ),
+                embedding_profile_resolver=resolve_profile,
+                clock=lambda: _NOW,
+                sleep=asyncio.sleep,
+                poll_interval=0.001,
+            )
+
+            subscriber = streams.embedding_events(scope="all")
+            first = await anext(subscriber)
+            await subscriber.aclose()
+            self.assertEqual("enqueued", first["event"])
+            async with fixture.context.unit_of_work_factory() as work:
+                queued = await work.jobs.load_spec(first["jobId"])
+            self.assertEqual("saved-settings-model", queued.value.model)
+            self.assertEqual("saved-settings-v1", queued.value.embedding_version)
+
     async def test_disconnect_detaches_persisted_job_without_cancelling_worker(self) -> None:
         async with _stream_fixture(prefix="legacy-stream-disconnect-") as fixture:
             subscriber = fixture.streams.artifact_events("paper-1")

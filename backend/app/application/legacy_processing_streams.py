@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import inspect
 import json
 from typing import Any
 
@@ -38,6 +39,10 @@ class LegacyProcessingStreams:
         artifact_service: Any,
         document_search: Any,
         embedding_profile: EmbeddingProfile | None,
+        embedding_profile_resolver: Callable[
+            [], EmbeddingProfile | None | Awaitable[EmbeddingProfile | None]
+        ]
+        | None = None,
         clock: Callable[[], datetime] | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         poll_interval: float = 0.05,
@@ -46,6 +51,10 @@ class LegacyProcessingStreams:
             raise TypeError("unit_of_work_factory must be callable")
         if not callable(sleep):
             raise TypeError("sleep must be callable")
+        if embedding_profile_resolver is not None and not callable(
+            embedding_profile_resolver
+        ):
+            raise TypeError("embedding_profile_resolver must be callable")
         if (
             not isinstance(poll_interval, (int, float))
             or isinstance(poll_interval, bool)
@@ -56,6 +65,7 @@ class LegacyProcessingStreams:
         self._artifact_service = artifact_service
         self._document_search = document_search
         self._embedding_profile = embedding_profile
+        self._embedding_profile_resolver = embedding_profile_resolver
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._sleep = sleep
         self._poll_interval = float(poll_interval)
@@ -123,7 +133,20 @@ class LegacyProcessingStreams:
         try:
             if scope not in _EMBEDDING_SCOPES:
                 raise LegacyProcessingStreamError("EMBEDDING_SCOPE_INVALID")
-            if not isinstance(self._embedding_profile, EmbeddingProfile):
+            profile = self._embedding_profile
+            if self._embedding_profile_resolver is not None:
+                try:
+                    resolved = self._embedding_profile_resolver()
+                    profile = (
+                        await resolved
+                        if inspect.isawaitable(resolved)
+                        else resolved
+                    )
+                except Exception:
+                    raise LegacyProcessingStreamError(
+                        "EMBEDDING_PROFILE_UNAVAILABLE"
+                    ) from None
+            if not isinstance(profile, EmbeddingProfile):
                 raise LegacyProcessingStreamError("EMBEDDING_PROFILE_UNAVAILABLE")
             paper_ids = await self._paper_ids()
             resolved_sources: list[tuple[str, object]] = []
@@ -146,7 +169,7 @@ class LegacyProcessingStreams:
                     source_mode=_value(source.mode),
                     source_document_id=source.id,
                     include_embeddings=True,
-                    profile=self._embedding_profile,
+                    profile=profile,
                 )
                 enqueued.append(result.job)
 

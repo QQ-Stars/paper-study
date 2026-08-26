@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from types import SimpleNamespace
 import unittest
 
 from fastapi.testclient import TestClient
 
 from backend.app.api.app import create_app
+from backend.app.api.routes.legacy import _durable_artifact_events
 from backend.tests.support.p3_database import p3_database_fixture
 
 
@@ -38,6 +40,101 @@ class _TruncatedAgent:
 class _RejectingArtifactAgent:
     async def run(self, command: str, *_args, **_kwargs):
         raise AssertionError(f"durable stream must not call legacy agent: {command}")
+
+
+class _CountingArtifactAgent:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def stream_events(self, command: str, *_args, **_kwargs):
+        self.calls.append(command)
+        yield {"type": "result", "ok": True, "markdown": "# legacy fallback"}
+
+
+class _EmptyOcrAgent:
+    async def stream_events(self, command: str, *_args, **_kwargs):
+        assert command == "ocr-md"
+        yield {"type": "result", "ok": True, "markdown": ""}
+
+
+class _EmptyArtifactAgent:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def stream_events(self, command: str, *_args, **_kwargs):
+        self.calls.append(command)
+        yield {"type": "result", "ok": True, "markdown": ""}
+
+
+class _FailingArtifactStreams:
+    def __init__(self, error: str) -> None:
+        self.error = error
+
+    async def artifact_events(self, paper_id: str, kind: str, *, profile: str):
+        del paper_id, kind, profile
+        yield {"type": "progress", "line": "JOB::queued"}
+        yield {"type": "result", "ok": False, "error": self.error}
+
+
+class _TruncatedArtifactStreams:
+    async def artifact_events(self, paper_id: str, kind: str, *, profile: str):
+        del paper_id, kind, profile
+        yield {"type": "progress", "line": "JOB::queued"}
+
+
+class _BlockingArtifactStreams:
+    def __init__(self) -> None:
+        self.progress_emitted = asyncio.Event()
+        self.release_terminal = asyncio.Event()
+        self.closed = asyncio.Event()
+
+    async def artifact_events(self, paper_id: str, kind: str, *, profile: str):
+        del paper_id, kind, profile
+        try:
+            self.progress_emitted.set()
+            yield {"type": "progress", "line": "JOB::running", "jobId": "job-1"}
+            await self.release_terminal.wait()
+            yield {"type": "result", "ok": True, "markdown": "# durable result"}
+        finally:
+            self.closed.set()
+
+
+class _FailingSession:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def execute(self, *_args, **_kwargs):
+        raise self.error
+
+
+class _FailingSessionFactory:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def __call__(self):
+        return _FailingSession(self.error)
+
+
+class _FailingEmbeddingStreams:
+    def __init__(self, error: str) -> None:
+        self.error = error
+
+    async def embedding_events(self, scope: str):
+        del scope
+        yield {"type": "progress", "line": "JOB::queued"}
+        yield {
+            "type": "result",
+            "ok": False,
+            "indexed": 0,
+            "total": 1,
+            "error": self.error,
+        }
 
 
 class _FakeProcessingStreams:
@@ -90,6 +187,100 @@ class _TruncatedIngest:
 
 
 class NdjsonApiTests(unittest.TestCase):
+    def test_durable_artifact_progress_is_yielded_before_terminal_arrives(self) -> None:
+        async def scenario() -> None:
+            streams = _BlockingArtifactStreams()
+            request = SimpleNamespace(
+                app=SimpleNamespace(
+                    state=SimpleNamespace(
+                        container=SimpleNamespace(
+                            legacy=SimpleNamespace(
+                                agent=_RejectingArtifactAgent(),
+                                processing_streams=streams,
+                            )
+                        )
+                    )
+                )
+            )
+            events = _durable_artifact_events(
+                request,
+                "paper-1",
+                "explainer",
+                profile="standard",
+                agent_command="explain",
+                agent_args=("--id", "paper-1"),
+            )
+            first_task = asyncio.create_task(anext(events))
+            await asyncio.wait_for(streams.progress_emitted.wait(), timeout=0.5)
+            try:
+                first = await asyncio.wait_for(
+                    asyncio.shield(first_task),
+                    timeout=0.1,
+                )
+            except BaseException:
+                streams.release_terminal.set()
+                await first_task
+                await events.aclose()
+                raise
+
+            self.assertEqual(
+                {"type": "progress", "line": "JOB::running", "jobId": "job-1"},
+                first,
+            )
+            self.assertFalse(streams.release_terminal.is_set())
+            streams.release_terminal.set()
+            remaining = [event async for event in events]
+            await asyncio.wait_for(streams.closed.wait(), timeout=0.5)
+            all_events = [first, *remaining]
+            terminals = [
+                event
+                for event in all_events
+                if event.get("type") in {"done", "result"}
+            ]
+            self.assertEqual(1, len(terminals))
+            self.assertEqual(terminals[0], all_events[-1])
+            self.assertEqual("# durable result", terminals[0]["markdown"])
+
+        asyncio.run(scenario())
+
+    def test_get_ocr_md_database_failure_is_not_reported_as_empty_success(self) -> None:
+        class Services:
+            schema_revision = "20260807_03"
+            legacy = SimpleNamespace()
+
+            async def dispose(self) -> None:
+                return None
+
+        app = create_app(
+            Services(),
+            _FailingSessionFactory(RuntimeError("database connection lost")),
+            required_schema_revision="20260807_03",
+        )
+        with TestClient(app) as client:
+            response = client.get("/api/ocr-md?id=paper-1")
+
+        self.assertEqual(500, response.status_code, response.text)
+        self.assertEqual("请求处理失败", response.text)
+
+    def test_get_ocr_md_missing_table_remains_an_empty_result(self) -> None:
+        class Services:
+            schema_revision = "20260807_03"
+            legacy = SimpleNamespace()
+
+            async def dispose(self) -> None:
+                return None
+
+        app = create_app(
+            Services(),
+            _FailingSessionFactory(sqlite3.OperationalError("no such table: ocr_markdown")),
+            required_schema_revision="20260807_03",
+        )
+        with TestClient(app) as client:
+            response = client.get("/api/ocr-md?id=paper-1")
+
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual("", response.text)
+
     def test_search_route_synthesizes_terminal_when_agent_stream_ends(self) -> None:
         async def scenario() -> None:
             async with p3_database_fixture(prefix="study-app-p4-search-truncated-") as fixture:
@@ -287,6 +478,254 @@ class NdjsonApiTests(unittest.TestCase):
                     ],
                     streams.calls,
                 )
+
+        asyncio.run(scenario())
+
+    def test_durable_artifact_failure_does_not_fallback_unless_source_identity_missing(self) -> None:
+        async def scenario() -> None:
+            for durable_error, should_fallback in (
+                ("LLM_RATE_LIMITED", False),
+                ("SOURCE_IDENTITY_MISSING", True),
+            ):
+                with self.subTest(durable_error=durable_error):
+                    async with p3_database_fixture(
+                        prefix="study-app-p4-durable-fallback-"
+                    ) as fixture:
+                        agent = _CountingArtifactAgent()
+                        streams = _FailingArtifactStreams(durable_error)
+
+                        class Services:
+                            schema_revision = "20260807_03"
+                            legacy = SimpleNamespace(
+                                agent=agent,
+                                processing_streams=streams,
+                            )
+
+                            async def dispose(self) -> None:
+                                return None
+
+                        app = create_app(
+                            Services(),
+                            fixture.session_factory,
+                            required_schema_revision="20260807_03",
+                        )
+                        with TestClient(app) as client:
+                            response = client.post(
+                                "/api/explain",
+                                json={"id": "paper-1"},
+                            )
+
+                        self.assertEqual(200, response.status_code, response.text)
+                        events = [
+                            json.loads(line) for line in response.text.splitlines()
+                        ]
+                        self.assertEqual("result", events[-1]["type"])
+                        if should_fallback:
+                            self.assertTrue(events[-1]["ok"])
+                            self.assertEqual("# legacy fallback", events[-1]["markdown"])
+                            self.assertEqual(["explain"], agent.calls)
+                        else:
+                            self.assertFalse(events[-1]["ok"])
+                            self.assertEqual(durable_error, events[-1]["error"])
+                            self.assertEqual([], agent.calls)
+
+        asyncio.run(scenario())
+
+    def test_durable_artifact_without_terminal_is_failed_without_legacy_fallback(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(
+                prefix="study-app-p4-durable-no-terminal-"
+            ) as fixture:
+                agent = _CountingArtifactAgent()
+
+                class Services:
+                    schema_revision = "20260807_03"
+                    legacy = SimpleNamespace(
+                        agent=agent,
+                        processing_streams=_TruncatedArtifactStreams(),
+                    )
+
+                    async def dispose(self) -> None:
+                        return None
+
+                app = create_app(
+                    Services(),
+                    fixture.session_factory,
+                    required_schema_revision="20260807_03",
+                )
+                with TestClient(app) as client:
+                    response = client.post("/api/explain", json={"id": "paper-1"})
+
+                self.assertEqual(200, response.status_code, response.text)
+                events = [json.loads(line) for line in response.text.splitlines()]
+                self.assertEqual("result", events[-1]["type"])
+                self.assertFalse(events[-1]["ok"])
+                self.assertEqual("PROCESSING_STREAM_NO_TERMINAL", events[-1]["error"])
+                self.assertEqual([], agent.calls)
+
+        asyncio.run(scenario())
+
+    def test_durable_embedding_failure_does_not_fallback_to_legacy_agent(self) -> None:
+        async def scenario() -> None:
+            for durable_error, should_fallback in (
+                ("PROCESSING_JOB_FAILED", False),
+                ("SOURCE_IDENTITY_MISSING", True),
+            ):
+                with self.subTest(durable_error=durable_error):
+                    async with p3_database_fixture(
+                        prefix="study-app-p4-durable-embedding-fallback-"
+                    ) as fixture:
+                        agent = _CountingArtifactAgent()
+                        streams = _FailingEmbeddingStreams(durable_error)
+
+                        class Services:
+                            schema_revision = "20260807_03"
+                            legacy = SimpleNamespace(
+                                agent=agent,
+                                processing_streams=streams,
+                            )
+
+                            async def dispose(self) -> None:
+                                return None
+
+                        app = create_app(
+                            Services(),
+                            fixture.session_factory,
+                            required_schema_revision="20260807_03",
+                        )
+                        with TestClient(app) as client:
+                            response = client.post("/api/embed", json={"scope": "all"})
+
+                        self.assertEqual(200, response.status_code, response.text)
+                        events = [json.loads(line) for line in response.text.splitlines()]
+                        self.assertEqual("progress", events[0]["type"])
+                        if should_fallback:
+                            self.assertTrue(events[-1]["ok"])
+                            self.assertEqual("# legacy fallback", events[-1].get("markdown"))
+                            self.assertEqual(["embed"], agent.calls)
+                        else:
+                            self.assertEqual(
+                                {
+                                    "type": "result",
+                                    "ok": False,
+                                    "indexed": 0,
+                                    "total": 1,
+                                    "error": durable_error,
+                                },
+                                events[-1],
+                            )
+                            self.assertEqual([], agent.calls)
+
+        asyncio.run(scenario())
+
+    def test_ocr_success_requires_nonempty_markdown(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(prefix="study-app-p4-ocr-empty-terminal-") as fixture:
+                class Services:
+                    schema_revision = "20260807_03"
+                    legacy = SimpleNamespace(
+                        agent=_EmptyOcrAgent(),
+                        pdf_files=SimpleNamespace(
+                            resolve_for_id=lambda _paper_id, stored_path=None: object()
+                        ),
+                    )
+
+                    async def dispose(self) -> None:
+                        return None
+
+                app = create_app(
+                    Services(),
+                    fixture.session_factory,
+                    required_schema_revision="20260807_03",
+                )
+                with TestClient(app) as client:
+                    response = client.post("/api/ocr-md", json={"id": "paper-1"})
+                self.assertEqual(200, response.status_code, response.text)
+                events = [json.loads(line) for line in response.text.splitlines()]
+                self.assertEqual(
+                    {
+                        "type": "result",
+                        "ok": False,
+                        "markdown": "",
+                        "error": "OCR 结果为空，请重试或检查 OCR 配置",
+                    },
+                    events[-1],
+                )
+
+        asyncio.run(scenario())
+
+    def test_ocr_database_lookup_failure_is_not_converted_to_pdf_processing(self) -> None:
+        class _BrokenLibraryQueries:
+            async def get_paper(self, _paper_id: str) -> dict[str, object] | None:
+                raise RuntimeError("database connection lost")
+
+        class Services:
+            schema_revision = "20260807_03"
+            legacy = SimpleNamespace(
+                agent=_EmptyOcrAgent(),
+                library_queries=_BrokenLibraryQueries(),
+                pdf_files=SimpleNamespace(
+                    resolve_for_id=lambda _paper_id, stored_path=None: object()
+                ),
+            )
+
+            async def dispose(self) -> None:
+                return None
+
+        app = create_app(
+            Services(),
+            _FailingSessionFactory(RuntimeError("database connection lost")),
+            required_schema_revision="20260807_03",
+        )
+        with TestClient(app) as client:
+            response = client.post("/api/ocr-md", json={"id": "paper-1"})
+
+        self.assertEqual(500, response.status_code, response.text)
+        self.assertEqual(
+            {"ok": False, "error": "请求处理失败"},
+            response.json(),
+        )
+
+    def test_legacy_explain_and_translate_success_require_nonempty_markdown(self) -> None:
+        async def scenario() -> None:
+            for path, command in (
+                ("/api/explain", "explain"),
+                ("/api/translate", "translate"),
+            ):
+                with self.subTest(path=path):
+                    async with p3_database_fixture(
+                        prefix="study-app-p4-empty-artifact-terminal-"
+                    ) as fixture:
+                        agent = _EmptyArtifactAgent()
+
+                        class Services:
+                            schema_revision = "20260807_03"
+                            legacy = SimpleNamespace(
+                                agent=agent,
+                                processing_streams=_FailingArtifactStreams(
+                                    "SOURCE_IDENTITY_MISSING"
+                                ),
+                            )
+
+                            async def dispose(self) -> None:
+                                return None
+
+                        app = create_app(
+                            Services(),
+                            fixture.session_factory,
+                            required_schema_revision="20260807_03",
+                        )
+                        with TestClient(app) as client:
+                            response = client.post(path, json={"id": "paper-1"})
+
+                    self.assertEqual(200, response.status_code, response.text)
+                    events = [json.loads(line) for line in response.text.splitlines()]
+                    self.assertEqual(1, len([e for e in events if e["type"] == "result"]))
+                    self.assertEqual("result", events[-1]["type"])
+                    self.assertFalse(events[-1]["ok"])
+                    self.assertEqual("", events[-1]["markdown"])
+                    self.assertEqual("模型返回为空，请检查模型配置后重试", events[-1]["error"])
+                    self.assertEqual([command], agent.calls)
 
         asyncio.run(scenario())
 

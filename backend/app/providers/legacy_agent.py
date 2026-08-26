@@ -41,6 +41,7 @@ class LegacyAgentProvider:
         environment: Mapping[str, str] | None = None,
         timeout_seconds: float = 900.0,
         in_process: bool = False,
+        environment_provider: Callable[[], Awaitable[Mapping[str, str]]] | None = None,
     ) -> None:
         self.executable = str(executable or sys.executable)
         self.cwd = str(cwd or Path(__file__).resolve().parents[3])
@@ -50,6 +51,12 @@ class LegacyAgentProvider:
         # every button click.  Tests and external callers keep the historical
         # subprocess mode unless the runtime opts in explicitly.
         self.in_process = in_process
+        self._environment_provider = environment_provider
+
+    async def _effective_environment(self) -> dict[str, str]:
+        if self._environment_provider is None:
+            return dict(self.environment)
+        return dict(await self._environment_provider())
 
     async def run(
         self,
@@ -59,8 +66,18 @@ class LegacyAgentProvider:
         stdin: str | bytes | None = None,
     ) -> LegacyAgentResult:
         if self.in_process:
-            return await self._run_in_process(command, args, stdin=stdin)
-        process = await self._start(command, args, stdin=stdin)
+            return await self._run_in_process(
+                command,
+                args,
+                stdin=stdin,
+                environment=await self._effective_environment(),
+            )
+        process = await self._start(
+            command,
+            args,
+            stdin=stdin,
+            environment=await self._effective_environment(),
+        )
         input_bytes = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
         communication = asyncio.create_task(process.communicate(input_bytes))
         try:
@@ -85,6 +102,7 @@ class LegacyAgentProvider:
         args: Sequence[str],
         *,
         stdin: str | bytes | None,
+        environment: Mapping[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
         argv = [
             self.executable,
@@ -96,7 +114,7 @@ class LegacyAgentProvider:
         return await asyncio.create_subprocess_exec(
             *argv,
             cwd=self.cwd,
-            env=self.environment,
+            env=dict(environment or self.environment),
             stdin=asyncio.subprocess.PIPE if stdin is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -117,6 +135,7 @@ class LegacyAgentProvider:
         stdout_text_field: str | None = None,
         stdout_object_field: str | None = None,
     ):
+        environment = await self._effective_environment()
         if self.in_process:
             async for event in self._stream_in_process_events(
                 command,
@@ -127,6 +146,7 @@ class LegacyAgentProvider:
                 stdout_array_field=stdout_array_field,
                 stdout_text_field=stdout_text_field,
                 stdout_object_field=stdout_object_field,
+                environment=environment,
             ):
                 yield event
             return
@@ -136,10 +156,16 @@ class LegacyAgentProvider:
                 args,
                 terminal_type=terminal_type,
                 terminal_fields=terminal_fields,
+                environment=environment,
             ):
                 yield event
             return
-        process = await self._start(command, args, stdin=stdin)
+        process = await self._start(
+            command,
+            args,
+            stdin=stdin,
+            environment=environment,
+        )
         assert process.stdout is not None
         assert process.stderr is not None
         stdout_task = asyncio.create_task(process.stdout.read())
@@ -196,6 +222,7 @@ class LegacyAgentProvider:
 
         returncode = 124 if timed_out else int(process.returncode or 0)
         payload: dict[str, object] = {}
+        malformed_output = False
         try:
             stdout_text = stdout.decode("utf-8", errors="replace")
             decoded = json.loads(stdout_text) if stdout_text.strip() else {}
@@ -214,14 +241,21 @@ class LegacyAgentProvider:
                 # 非 JSON stdout：整段文本包进指定字段（如 explain/translate
                 # 的 markdown，对齐旧 Node 行为）。
                 payload[stdout_text_field] = stdout_text
+            elif stdout_text.strip():
+                malformed_output = True
         except (TypeError, ValueError):
             # stdout 不是 JSON（如 explain/translate 直接输出 markdown）：
             # 整段包进指定终态字段，对齐旧 Node 行为。
             if stdout_text_field is not None and stdout_text.strip():
                 payload[stdout_text_field] = stdout_text
+            elif stdout_text.strip():
+                malformed_output = True
         for key, value in dict(terminal_fields or {}).items():
             payload.setdefault(key, value)
-        if returncode != 0:
+        if malformed_output:
+            payload["ok"] = False
+            payload["error"] = "LEGACY_AGENT_MALFORMED_JSON"
+        elif returncode != 0:
             # A command may have emitted a stale/optimistic ``ok: true`` before
             # failing. The process exit status is authoritative.
             payload["ok"] = False
@@ -234,7 +268,7 @@ class LegacyAgentProvider:
             payload.setdefault("ok", True)
             _mark_partial_failure(payload)
             payload.setdefault("error", "")
-        yield {"type": terminal_type, **payload}
+        yield _redact_event({"type": terminal_type, **payload})
 
     async def _stream_stdout_json_events(
         self,
@@ -243,10 +277,16 @@ class LegacyAgentProvider:
         *,
         terminal_type: str,
         terminal_fields: Mapping[str, object] | None,
+        environment: Mapping[str, str],
     ):
         """逐行读 stdout 的结构化 JSON 事件并透传（title-translations 等命令）。
         子进程未发出终止事件（崩溃/超时/被 kill）时补发失败终态。"""
-        process = await self._start(command, args, stdin=None)
+        process = await self._start(
+            command,
+            args,
+            stdin=None,
+            environment=environment,
+        )
         assert process.stdout is not None
         deadline = asyncio.get_running_loop().time() + self.timeout_seconds
         fields = dict(terminal_fields or {})
@@ -257,6 +297,7 @@ class LegacyAgentProvider:
         )
         background = tuple(task for task in (drain_task,) if task is not None)
         terminal_event: dict[str, object] | None = None
+        malformed_stdout = False
         timed_out = False
         try:
             while True:
@@ -271,12 +312,17 @@ class LegacyAgentProvider:
                 try:
                     event = json.loads(line)
                 except ValueError:
+                    malformed_stdout = True
                     continue
-                if isinstance(event, dict):
-                    if event.get("type") == terminal_type:
-                        terminal_event = event
-                    else:
-                        yield event
+                if not isinstance(event, dict):
+                    malformed_stdout = True
+                    continue
+                if malformed_stdout:
+                    continue
+                if event.get("type") == terminal_type:
+                    terminal_event = _redact_event(event)
+                else:
+                    yield _redact_event(event)
             await _wait_before_deadline(process.wait(), deadline)
             if drain_task is not None:
                 await drain_task
@@ -288,7 +334,14 @@ class LegacyAgentProvider:
             raise
         else:
             await _finish_process(process, background, kill=False)
-        if terminal_event is not None:
+        if malformed_stdout:
+            yield {
+                "type": terminal_type,
+                "ok": False,
+                **fields,
+                "error": "LEGACY_AGENT_MALFORMED_NDJSON",
+            }
+        elif terminal_event is not None:
             if timed_out or process.returncode not in (0, None):
                 terminal_event = dict(terminal_event)
                 terminal_event["ok"] = False
@@ -297,7 +350,7 @@ class LegacyAgentProvider:
                     if timed_out
                     else "legacy agent failed"
                 )
-            yield terminal_event
+            yield _redact_event(terminal_event)
         else:
             returncode = 124 if timed_out else int(process.returncode or 0)
             yield {
@@ -315,6 +368,7 @@ class LegacyAgentProvider:
         args: Sequence[str],
         *,
         stdin: str | bytes | None,
+        environment: Mapping[str, str],
     ) -> LegacyAgentResult:
         loop = asyncio.get_running_loop()
         result_future: asyncio.Future[LegacyAgentResult] = loop.create_future()
@@ -325,7 +379,7 @@ class LegacyAgentProvider:
 
         worker = threading.Thread(
             target=_invoke_agent_main,
-            args=(command, args, stdin, self.environment, loop, deliver),
+            args=(command, args, stdin, environment, loop, deliver),
             name="legacy-agent-run",
             daemon=True,
         )
@@ -352,6 +406,7 @@ class LegacyAgentProvider:
         stdout_array_field: str | None,
         stdout_text_field: str | None,
         stdout_object_field: str | None,
+        environment: Mapping[str, str],
     ):
         """Run an in-process command while preserving incremental events.
 
@@ -374,13 +429,14 @@ class LegacyAgentProvider:
                 loop,
                 queue,
                 command in self._STRUCTURED_STDOUT_COMMANDS,
-                self.environment,
+                environment,
             ),
             name="legacy-agent-stream",
             daemon=True,
         )
         worker.start()
         terminal_event: dict[str, object] | None = None
+        malformed_stdout = False
         result: LegacyAgentResult | None = None
         deadline: float | None = loop.time() + self.timeout_seconds
         while True:
@@ -403,13 +459,24 @@ class LegacyAgentProvider:
                 if line:
                     yield {"type": "progress", "line": _redact_error(line)}
             elif kind == "stdout":
-                event = _decode_json_line(str(value))
-                if event is None:
+                line = str(value)
+                if not line.strip():
                     continue
+                try:
+                    decoded = json.loads(line)
+                except (TypeError, ValueError):
+                    malformed_stdout = True
+                    continue
+                if not isinstance(decoded, dict):
+                    malformed_stdout = True
+                    continue
+                if malformed_stdout:
+                    continue
+                event = decoded
                 if event.get("type") == terminal_type:
-                    terminal_event = event
+                    terminal_event = _redact_event(event)
                 else:
-                    yield event
+                    yield _redact_event(event)
             elif kind == "complete":
                 result = value
                 break
@@ -425,6 +492,14 @@ class LegacyAgentProvider:
 
         fields = dict(terminal_fields or {})
         if command in self._STRUCTURED_STDOUT_COMMANDS:
+            if malformed_stdout:
+                yield {
+                    "type": terminal_type,
+                    **fields,
+                    "ok": False,
+                    "error": "LEGACY_AGENT_MALFORMED_NDJSON",
+                }
+                return
             if terminal_event is not None:
                 if result.returncode != 0:
                     terminal_event = dict(terminal_event)
@@ -432,7 +507,7 @@ class LegacyAgentProvider:
                     terminal_event["error"] = _friendly_error(
                         result, command=command
                     )
-                yield terminal_event
+                yield _redact_event(terminal_event)
                 return
             yield {
                 "type": terminal_type,
@@ -448,6 +523,7 @@ class LegacyAgentProvider:
 
         payload: dict[str, object] = {}
         raw_stdout = result.stdout or ""
+        malformed_output = False
         try:
             parsed = json.loads(raw_stdout) if raw_stdout.strip() else {}
             if isinstance(parsed, dict):
@@ -459,19 +535,26 @@ class LegacyAgentProvider:
                 payload[stdout_array_field] = parsed
             elif stdout_text_field is not None and raw_stdout.strip():
                 payload[stdout_text_field] = raw_stdout
+            elif raw_stdout.strip():
+                malformed_output = True
         except (TypeError, ValueError):
             if stdout_text_field is not None and raw_stdout.strip():
                 payload[stdout_text_field] = raw_stdout
+            elif raw_stdout.strip():
+                malformed_output = True
         for key, value in fields.items():
             payload.setdefault(key, value)
-        if result.returncode != 0:
+        if malformed_output:
+            payload["ok"] = False
+            payload["error"] = "LEGACY_AGENT_MALFORMED_JSON"
+        elif result.returncode != 0:
             payload["ok"] = False
             payload["error"] = _friendly_error(result, command=command)
         else:
             payload.setdefault("ok", True)
             _mark_partial_failure(payload)
             payload.setdefault("error", "")
-        yield {"type": terminal_type, **payload}
+        yield _redact_event({"type": terminal_type, **payload})
 
     async def confirm_candidates(
         self,
@@ -771,6 +854,28 @@ def _redact_error(value: str) -> str:
     return redact_sensitive_text(value, limit=300)
 
 
+def _redact_event(value: dict[str, object]) -> dict[str, object]:
+    """Recursively redact provider-controlled strings before NDJSON exposure.
+
+    Structured commands can place exception details inside nested summaries or
+    failure arrays, bypassing the stderr-only redaction path.  Preserve the
+    event shape and all ordinary text while removing credential-shaped values.
+    """
+
+    def redact(item: object) -> object:
+        if isinstance(item, str):
+            return redact_sensitive_text(item)
+        if isinstance(item, Mapping):
+            return {key: redact(nested) for key, nested in item.items()}
+        if isinstance(item, list):
+            return [redact(nested) for nested in item]
+        if isinstance(item, tuple):
+            return tuple(redact(nested) for nested in item)
+        return item
+
+    return {key: redact(item) for key, item in value.items()}
+
+
 def _mark_partial_failure(payload: dict[str, object]) -> None:
     """Make batch failures visible to the NDJSON console instead of hiding them."""
     if payload.get("ok") is not True:
@@ -778,6 +883,18 @@ def _mark_partial_failure(payload: dict[str, object]) -> None:
     failed = payload.get("failed")
     summary = payload.get("summary")
     if isinstance(summary, Mapping):
+        # Batch commands return their authoritative status inside ``summary``
+        # when the stdout object is adapted through ``stdout_object_field``.
+        # Do not let the adapter's optimistic top-level ``ok`` mask a disabled
+        # provider, an empty run, or another explicit nested failure.
+        if summary.get("ok") is False:
+            payload["ok"] = False
+            nested_error = summary.get("error")
+            if isinstance(nested_error, str) and nested_error.strip():
+                payload["error"] = _redact_error(nested_error)
+            else:
+                payload.setdefault("error", "批量任务失败，请查看进度详情")
+            return
         failed = summary.get("failed")
     has_failures = (
         isinstance(failed, (list, tuple, set)) and bool(failed)

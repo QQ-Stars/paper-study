@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import re
@@ -38,6 +38,7 @@ from backend.app.application.source_documents import (
 )
 from backend.app.config import DatabaseSettings
 from backend.app.domain import (
+    CredentialKind,
     OcrProviderContractUnverifiedError,
     OcrUnavailableError,
     SchemaRevisionMismatchError,
@@ -66,6 +67,7 @@ from backend.app.repositories.translation_checkpoints import (
 )
 from backend.app.providers.ocr.registry import compose_ocr_gate, create_production_ocr_registry
 from backend.app.providers.legacy_agent import LegacyAgentProvider
+from backend.app.providers.legacy_p3 import legacy_p3_runtime_config_resolver
 from backend.app.providers.pdf_files import PdfFiles
 from backend.app.workers.scheduler import LegacyScheduler
 from backend.app.workers.processing_worker import (
@@ -123,6 +125,7 @@ class ApplicationContainer:
     document_artifacts: Any = None
     document_search: Any = None
     embedding_profile: EmbeddingProfile | None = None
+    embedding_profile_resolver: Any = None
     p3_translation_provider: Any = None
     p3_structured_provider: Any = None
     obsidian_jobs: Any = None
@@ -249,6 +252,7 @@ def bootstrap(
         if legacy_settings_path is not None
         else Path(__file__).resolve().parents[2] / "data" / "settings.json"
     )
+    effective_environment["PAPER_STUDY_SETTINGS_PATH"] = str(resolved_settings_path)
     credential_store = CompositeCredentialStore(
         EnvironmentCredentialStore(effective_environment),
         KeyringCredentialStore(keyring_adapter),
@@ -270,8 +274,35 @@ def bootstrap(
             "pdfDir": repository_root / "data" / "pdfs",
             "explainerDir": repository_root / "data" / "explainers",
             "translationDir": repository_root / "data" / "translations",
+            "ocrMarkdownDir": repository_root / "data" / "ocr_markdown",
         },
     )
+    translation_provider_factory = _bind_p3_credential_resolver(
+        translation_provider_factory,
+        credential_store,
+        runtime_config_resolver=settings_service.llm_runtime_settings,
+    )
+    structured_provider_factory = _bind_p3_credential_resolver(
+        structured_provider_factory,
+        credential_store,
+        runtime_config_resolver=settings_service.llm_runtime_settings,
+    )
+
+    async def resolve_embedding_profile() -> EmbeddingProfile | None:
+        # Read the settings document for each new request/job.  Worker leases
+        # remain immutable; only the profile used to enqueue the next job is
+        # resolved dynamically.
+        return await settings_service.embedding_profile(embedding_profile)
+
+    def resolve_ocr_runtime_settings() -> dict[str, object]:
+        runtime = settings_service.ocr_runtime_settings(
+            fallback_enabled=rollout.ocr_enabled,
+        )
+        # Rollout composition is a hard safety gate; a saved UI toggle cannot
+        # enable OCR when this process was started without OCR support.
+        if not rollout.ocr_enabled:
+            runtime["ocrEnabled"] = False
+        return runtime
     # Keep compatibility commands inside the current runtime.  Spawning a
     # second Python process for every legacy button is blocked by Windows
     # socket policy and surfaces as the misleading "legacy agent failed".
@@ -280,6 +311,10 @@ def bootstrap(
         environment=effective_environment,
         in_process=True,
         timeout_seconds=120.0,
+        environment_provider=lambda: _legacy_agent_environment(
+            effective_environment,
+            credential_store,
+        ),
     )
     legacy_ingest = LegacyIngestService(
         session_factory,
@@ -350,6 +385,7 @@ def bootstrap(
             compose_ocr_gate(
                 enabled=rollout.ocr_enabled,
                 registry_factory=ocr_registry_factory,
+                settings_resolver=resolve_ocr_runtime_settings,
             ),
             artifact_generator,
             cursor_secret=cursor_secret,
@@ -377,6 +413,7 @@ def bootstrap(
             compose_ocr_gate(
                 enabled=rollout.ocr_enabled,
                 registry_factory=ocr_registry_factory,
+                settings_resolver=resolve_ocr_runtime_settings,
             ),
             artifact_generator,
             cursor_secret=cursor_secret,
@@ -387,6 +424,7 @@ def bootstrap(
             artifact_service=document_artifacts,
             document_search=document_search,
             embedding_profile=embedding_profile,
+            embedding_profile_resolver=resolve_embedding_profile,
             clock=lambda: datetime.now(timezone.utc),
         )
     obsidian_jobs = (
@@ -413,6 +451,7 @@ def bootstrap(
         document_artifacts=document_artifacts,
         document_search=document_search,
         embedding_profile=embedding_profile,
+        embedding_profile_resolver=resolve_embedding_profile,
         p3_translation_provider=p3_translation_provider,
         p3_structured_provider=p3_structured_provider,
         obsidian_jobs=obsidian_jobs,
@@ -446,6 +485,26 @@ def _processing_cursor_secret(
             "PROCESSING_CURSOR_SECRET must contain at least 32 UTF-8 bytes"
         )
     return encoded
+
+
+async def _legacy_agent_environment(
+    base: Mapping[str, str],
+    credential_store: Any,
+) -> dict[str, str]:
+    """Resolve one task-scoped environment from the backend credential seam."""
+    environment = dict(base)
+    mappings = {
+        CredentialKind.LLM: ("LLM_API_KEY", "PAPER_STUDY_LLM_API_KEY"),
+        CredentialKind.OCR: ("OCR_API_KEY", "PAPER_STUDY_OCR_API_KEY"),
+        CredentialKind.EMBEDDING: ("EMBED_API_KEY", "PAPER_STUDY_EMBED_API_KEY"),
+        CredentialKind.SEMANTIC_SCHOLAR: ("S2_API_KEY", "PAPER_STUDY_S2_API_KEY"),
+    }
+    for kind, (variable, snapshot_variable) in mappings.items():
+        credential = await credential_store.get(kind)
+        if credential is not None:
+            environment[variable] = credential.value
+            environment[snapshot_variable] = credential.value
+    return environment
 
 
 def verify_schema_revision(
@@ -562,11 +621,39 @@ def bootstrap_processing_worker(
             if legacy_settings_path is not None
             else repository_root / "data" / "settings.json"
         )
+        effective_environment["PAPER_STUDY_SETTINGS_PATH"] = str(resolved_settings_path)
         p3_credential_store = credential_store or CompositeCredentialStore(
             EnvironmentCredentialStore(effective_environment),
             KeyringCredentialStore(None),
             LegacySettingsCredentialStore(resolved_settings_path),
             allow_legacy_fallback=allow_legacy_credential_fallback,
+        )
+        p3_settings_service = SettingsService(
+            settings_path=resolved_settings_path,
+            root=repository_root,
+            credential_service=CredentialService(
+                p3_credential_store,
+                SafeCredentialProbe(),
+            ),
+            environment_snapshot=effective_environment,
+            rollout_snapshot=RolloutSettings(obsidian_enabled=obsidian_enabled),
+            default_dirs={
+                "pdfDir": repository_root / "data" / "pdfs",
+                "explainerDir": repository_root / "data" / "explainers",
+                "translationDir": repository_root / "data" / "translations",
+                "ocrMarkdownDir": repository_root / "data" / "ocr_markdown",
+            },
+        )
+        settings_service = p3_settings_service
+        translation_provider_factory = _bind_p3_credential_resolver(
+            translation_provider_factory,
+            p3_credential_store,
+            runtime_config_resolver=p3_settings_service.llm_runtime_settings,
+        )
+        structured_provider_factory = _bind_p3_credential_resolver(
+            structured_provider_factory,
+            p3_credential_store,
+            runtime_config_resolver=p3_settings_service.llm_runtime_settings,
         )
         if obsidian_enabled:
             if (obsidian_job_service is None) != (obsidian_exporter is None):
@@ -574,22 +661,7 @@ def bootstrap_processing_worker(
                     "Obsidian worker composition requires both job service and exporter"
                 )
             if obsidian_job_service is None:
-                credential_service = CredentialService(
-                    p3_credential_store,
-                    SafeCredentialProbe(),
-                )
-                settings_service = SettingsService(
-                    settings_path=resolved_settings_path,
-                    root=repository_root,
-                    credential_service=credential_service,
-                    environment_snapshot=effective_environment,
-                    rollout_snapshot=RolloutSettings(obsidian_enabled=True),
-                    default_dirs={
-                        "pdfDir": repository_root / "data" / "pdfs",
-                        "explainerDir": repository_root / "data" / "explainers",
-                        "translationDir": repository_root / "data" / "translations",
-                    },
-                )
+                credential_service = p3_settings_service.credential_service
                 pdf_files = PdfFiles(
                     root=repository_root,
                     default_directory=repository_root / "data" / "pdfs",
@@ -795,6 +867,39 @@ def _validate_p3_worker_configuration(
         raise ValueError("P3 worker requires an explicit embedding_profile")
     if not callable(embedding_provider_factory):
         raise ValueError("P3 worker requires an explicit embedding_provider_factory")
+
+
+def _bind_p3_credential_resolver(
+    factory: Callable[[], Any] | None,
+    credential_store: Any,
+    *,
+    runtime_config_resolver: Callable[[], Any] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Callable[[], Any] | None:
+    """Inject the one backend credential seam into durable P3 providers.
+
+    Compatibility factories are intentionally allowed to remain unaware of
+    credentials.  Providers that opt into the seam resolve per request, while
+    test/custom providers keep their original zero-argument composition.
+    """
+    if not callable(factory):
+        return factory
+
+    def bound() -> Any:
+        provider = factory()
+        binder = getattr(provider, "bind_credential_resolver", None)
+        if callable(binder):
+            binder(credential_store.get)
+        runtime_binder = getattr(provider, "bind_runtime_config_resolver", None)
+        if callable(runtime_binder):
+            resolver = runtime_config_resolver
+            if resolver is None and environment is not None:
+                resolver = legacy_p3_runtime_config_resolver(environment)
+            if resolver is not None:
+                runtime_binder(resolver)
+        return provider
+
+    return bound
 
 
 def _compose_p3_services(

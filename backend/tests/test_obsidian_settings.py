@@ -296,6 +296,7 @@ class ObsidianSettingsTests(unittest.IsolatedAsyncioTestCase):
                 "pdfDir": root / "pdfs",
                 "explainerDir": root / "explainers",
                 "translationDir": root / "translations",
+                "ocrMarkdownDir": root / "ocr_markdown",
             },
         )
 

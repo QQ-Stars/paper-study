@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { artifactApi, libraryApi } from '../api/client';
 import type { Paper, StudyStatus } from '../api/types';
@@ -115,6 +115,8 @@ export function ReaderPage({
   const [fFav, setFFav] = useState<'all' | 'fav'>('all');
   const [fQueue, setFQueue] = useState<'all' | 'queue'>('all');
   const [content, setContent] = useState({ loading: false, text: '', error: '' });
+  const artifactRequestRef = useRef(0);
+  const ocrRequestRef = useRef(0);
   const [regen, setRegen] = useState<{
     kind: 'explainer' | 'translation' | null;
     log: string;
@@ -143,6 +145,11 @@ export function ReaderPage({
   const [authors, setAuthors] = useState<string[]>([]);
   const [translateHistory, setTranslateHistory] = useState<TranslateHistoryEntry[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [pdfStatusError, setPdfStatusError] = useState('');
+  const [pdfStatusRetry, setPdfStatusRetry] = useState(0);
+  const [pdfError, setPdfError] = useState('');
+  const [pdfRetry, setPdfRetry] = useState(0);
+  const tabRefs = useRef<Partial<Record<ReaderTab, HTMLButtonElement | null>>>({});
 
   const paper = papers.find((item) => item.id === paperId) ?? null;
 
@@ -187,27 +194,47 @@ export function ReaderPage({
     [papers],
   );
 
-  /* 讲解 / 翻译 / 笔记按需加载；PDF 状态随论文变化刷新 */
   useEffect(() => {
+    ocrRequestRef.current += 1;
     setTab('overview');
     setContent({ loading: false, text: '', error: '' });
     setPdfUrl('');
     setPdfInfo(null);
+    setPdfStatusError('');
+    setPdfStatusRetry(0);
+    setPdfError('');
+    setPdfRetry(0);
+    setRegen({ kind: null, log: '' });
     setOcr({ phase: 'idle', progress: '', markdown: '', error: '', saved: false, savedChecked: false });
     setCiteCtx({ cites: [], citedBy: [] });
     setPair({ on: false, loading: false, ocrText: '', checked: false });
     setAuthors([]);
     setHistoryOpen(false);
+  }, [paper?.id]);
+
+  useEffect(() => {
+    if (tab !== 'ocr') ocrRequestRef.current += 1;
+  }, [tab]);
+
+  /* 讲解 / 翻译 / 笔记按需加载；PDF 状态随论文变化刷新 */
+  useEffect(() => {
     if (!paper) return;
     let cancelled = false;
+    setPdfStatusError('');
     setTranslateHistory(readTranslateHistory(paper.id));
     libraryApi
       .pdfStatus(paper.id)
       .then((status) => {
-        if (!cancelled) setPdfInfo({ hasPdf: status.hasPdf, canDownload: status.canDownload });
+        if (!cancelled) {
+          setPdfStatusError('');
+          setPdfInfo({ hasPdf: status.hasPdf, canDownload: status.canDownload });
+        }
       })
-      .catch(() => {
-        if (!cancelled) setPdfInfo(null);
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setPdfInfo(null);
+          setPdfStatusError(error instanceof Error ? error.message : String(error));
+        }
       });
     libraryApi
       .citeContext(paper.id)
@@ -228,9 +255,11 @@ export function ReaderPage({
     return () => {
       cancelled = true;
     };
-  }, [paper?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [paper?.id, pdfStatusRetry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    const requestId = ++artifactRequestRef.current;
+    setRegen({ kind: null, log: '' });
     if (!paper) return;
     if (tab === 'explainer' || tab === 'translation' || tab === 'note') {
       setContent({ loading: true, text: '', error: '' });
@@ -241,26 +270,37 @@ export function ReaderPage({
             ? artifactApi.getTranslation(paper.id)
             : artifactApi.getNote(paper.id);
       loader
-        .then((text) => setContent({ loading: false, text, error: '' }))
-        .catch((error: unknown) =>
-          setContent({
-            loading: false,
-            text: '',
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
+        .then((text) => {
+          if (requestId === artifactRequestRef.current) setContent({ loading: false, text, error: '' });
+        })
+        .catch((error: unknown) => {
+          if (requestId === artifactRequestRef.current) {
+            setContent({
+              loading: false,
+              text: '',
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        });
     }
+    return () => {
+      if (artifactRequestRef.current === requestId) artifactRequestRef.current += 1;
+    };
   }, [tab, paper?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* 重新生成讲解/翻译：POST /api/explain | /api/translate（NDJSON 流）；
    * 启用 OCR 提取时后端自动优先使用 OCR Markdown 作为全文源。 */
   const regenerate = async (kind: 'explainer' | 'translation') => {
     if (!paper) return;
+    const paperId = paper.id;
+    const requestId = ++artifactRequestRef.current;
     setRegen({ kind, log: '正在启动…' });
+    setContent({ loading: true, text: '', error: '' });
     try {
       const streamFn =
         kind === 'explainer' ? artifactApi.explain : artifactApi.translate;
       await streamFn(paper.id, (event) => {
+        if (requestId !== artifactRequestRef.current) return;
         let line = String(event.line ?? event.message ?? '');
         if (line.startsWith('STAGE::')) line = line.split('::').slice(2).join('::');
         if (line) setRegen((prev) => ({ ...prev, log: line }));
@@ -270,8 +310,9 @@ export function ReaderPage({
       });
       const text =
         kind === 'explainer'
-          ? await artifactApi.getExplainer(paper.id)
-          : await artifactApi.getTranslation(paper.id);
+          ? await artifactApi.getExplainer(paperId)
+          : await artifactApi.getTranslation(paperId);
+      if (requestId !== artifactRequestRef.current) return;
       setContent({ loading: false, text, error: '' });
       setRegen({ kind: null, log: '' });
       notify(
@@ -280,10 +321,11 @@ export function ReaderPage({
           : '全文翻译已重新生成（启用 OCR 提取时优先使用 OCR Markdown）',
       );
     } catch (error) {
+      if (requestId !== artifactRequestRef.current) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setContent({ loading: false, text: '', error: message });
       setRegen({ kind: null, log: '' });
-      notify(
-        `重新生成失败：${error instanceof Error ? error.message : String(error)}`,
-      );
+      notify(`重新生成失败：${message}`);
     }
   };
 
@@ -292,26 +334,32 @@ export function ReaderPage({
     if (tab !== 'pdf' || !paper || !pdfInfo?.hasPdf) return;
     let cancelled = false;
     let objectUrl = '';
+    setPdfError('');
+    setPdfUrl('');
     fetch(libraryApi.pdfUrl(paper.id))
       .then((response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.blob();
       })
       .then((blob) => {
-        if (cancelled || blob.size === 0) return;
+        if (cancelled) return;
+        if (blob.size === 0) throw new Error('PDF 响应为空');
         objectUrl = URL.createObjectURL(
           blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' }),
         );
-        setPdfUrl(objectUrl);
+        if (!cancelled) setPdfUrl(objectUrl);
       })
-      .catch((error: unknown) =>
-        notify(`PDF 加载失败：${error instanceof Error ? error.message : error}`),
-      );
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setPdfError(message);
+        notify(`PDF 加载失败：${message}`);
+      });
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [tab, paper?.id, pdfInfo?.hasPdf]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab, paper?.id, pdfInfo?.hasPdf, pdfRetry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* 进入 OCR 全文 tab 时优先读已落库的 OCR Markdown（GET /api/ocr-md?id=） */
   useEffect(() => {
@@ -335,7 +383,14 @@ export function ReaderPage({
         }
       })
       .catch(() => {
-        if (!cancelled) setOcr((prev) => ({ ...prev, savedChecked: true }));
+        if (!cancelled) {
+          setOcr((prev) => ({
+            ...prev,
+            phase: 'error',
+            error: 'OCR 已保存结果读取失败，请重试',
+            savedChecked: true,
+          }));
+        }
       });
     return () => {
       cancelled = true;
@@ -344,10 +399,20 @@ export function ReaderPage({
 
   /* PDF → Markdown（OCR）：后端 NDJSON 流，进度 OCRPG::i/n → progress 事件 */
   const runOcr = async () => {
-    if (!paper) return;
+    if (!paper || ocr.phase === 'loading') return;
+    if (!pdfInfo) {
+      notify('正在检测 PDF 状态，请稍后再试');
+      return;
+    }
+    if (!pdfInfo.hasPdf && !pdfInfo.canDownload) {
+      notify('该论文没有可用于 OCR 的 PDF');
+      return;
+    }
+    const requestId = ++ocrRequestRef.current;
     setOcr({ phase: 'loading', progress: '正在启动 OCR…', markdown: '', error: '', saved: false, savedChecked: true });
     try {
       await artifactApi.ocrMarkdown(paper.id, (event) => {
+        if (requestId !== ocrRequestRef.current) return;
         if (event.type === 'progress') {
           const line = String(event.line ?? event.message ?? '');
           const matched = line.match(/OCRPG::(\d+)::(\d+)/);
@@ -356,7 +421,7 @@ export function ReaderPage({
           } else if (line.startsWith('STAGE::')) {
             setOcr((prev) => ({ ...prev, progress: line.slice(7) }));
           }
-        } else if (event.type === 'result') {
+        } else if (event.type === 'result' || event.type === 'done') {
           const md = String((event as { markdown?: string }).markdown ?? '');
           if (event.ok && md.trim()) {
             setOcr({ phase: 'done', progress: '', markdown: md, error: '', saved: true, savedChecked: true });
@@ -370,11 +435,11 @@ export function ReaderPage({
               saved: false,
               savedChecked: true,
             });
-            notify(`OCR 失败：${message}`);
           }
         }
       });
     } catch (error) {
+      if (requestId !== ocrRequestRef.current) return;
       const message = error instanceof Error ? error.message : String(error);
       setOcr({
         phase: 'error',
@@ -602,7 +667,7 @@ export function ReaderPage({
           </div>
           <div>
             <dt>本地 PDF</dt>
-            <dd>{pdfInfo ? (pdfInfo.hasPdf ? '就绪' : pdfInfo.canDownload ? '未下载（可补下载）' : '缺失且无来源') : '检测中…'}</dd>
+            <dd>{pdfInfo ? (pdfInfo.hasPdf ? '就绪' : pdfInfo.canDownload ? '未下载（可补下载）' : '缺失且无来源') : pdfStatusError ? '读取失败' : '检测中…'}</dd>
           </div>
           <div>
             <dt>arXiv / DOI</dt>
@@ -626,15 +691,40 @@ export function ReaderPage({
           </div>
         </dl>
 
-        <nav className="reader__tabs" role="tablist" aria-label="阅读内容">
+        <nav className="reader__tabs" role="tablist" aria-label="阅读内容" aria-orientation="horizontal">
           {TABS.map((item) => (
             <button
               key={item.id}
               type="button"
               role="tab"
+              ref={(element) => {
+                tabRefs.current[item.id] = element;
+              }}
+              id={`reader-tab-${item.id}`}
               aria-selected={tab === item.id}
+              aria-controls="reader-panel"
+              tabIndex={tab === item.id ? 0 : -1}
               className={`reader__tab${tab === item.id ? ' reader__tab--active' : ''}`}
               onClick={() => setTab(item.id)}
+              onKeyDown={(event) => {
+                const index = TABS.findIndex((candidate) => candidate.id === item.id);
+                const nextIndex =
+                  event.key === 'ArrowRight'
+                    ? (index + 1) % TABS.length
+                    : event.key === 'ArrowLeft'
+                      ? (index - 1 + TABS.length) % TABS.length
+                      : event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? TABS.length - 1
+                          : -1;
+                if (nextIndex >= 0) {
+                  event.preventDefault();
+                  const nextTab = TABS[nextIndex].id;
+                  setTab(nextTab);
+                  tabRefs.current[nextTab]?.focus();
+                }
+              }}
             >
               {item.label}
             </button>
@@ -642,7 +732,14 @@ export function ReaderPage({
         </nav>
 
         <SelectionTranslate onSuccess={recordSelectionTranslation}>
-          <div className="reader__content">
+          <div
+            className="reader__content"
+            role="tabpanel"
+            id="reader-panel"
+            aria-labelledby={`reader-tab-${tab}`}
+            aria-busy={content.loading || regen.kind !== null || ocr.phase === 'loading'}
+            tabIndex={0}
+          >
             {tab === 'overview' && (
               <>
                 {paper.tldr ? (
@@ -722,20 +819,25 @@ export function ReaderPage({
                     className="btn btn--sm"
                     onClick={() => void regenerate('explainer')}
                     disabled={regen.kind !== null || content.loading}
+                    aria-busy={regen.kind === 'explainer'}
                   >
-                    {content.text ? '重新生成讲解' : '生成讲解'}
+                    {regen.kind === 'explainer'
+                      ? '讲解生成中…'
+                      : content.text
+                        ? '重新生成讲解'
+                        : '生成讲解'}
                   </button>
                 </div>
                 {regen.kind === 'explainer' && (
-                  <div className="ocr-panel ocr-panel--loading">
+                  <div className="ocr-panel ocr-panel--loading" role="status" aria-live="polite" aria-busy="true">
                     <span className="acquire__spinner" aria-hidden="true" />
                     <span>{regen.log || '生成中…'}（可能需数分钟，请勿离开）</span>
                   </div>
                 )}
                 {content.loading ? (
-                  <p className="reader__empty">正在加载讲解…</p>
+                  <p className="reader__empty" role="status" aria-live="polite">正在加载讲解…</p>
                 ) : content.error ? (
-                  <p className="reader__empty reader__empty--error">讲解加载失败：{content.error}</p>
+                  <p className="reader__empty reader__empty--error" role="alert">讲解加载失败：{content.error}</p>
                 ) : content.text ? (
                   <div className="doc-viewer reader__doc">
                     <MarkdownView source={content.text} />
@@ -775,8 +877,13 @@ export function ReaderPage({
                       className="btn btn--sm"
                       onClick={() => void regenerate('translation')}
                       disabled={regen.kind !== null || content.loading}
+                      aria-busy={regen.kind === 'translation'}
                     >
-                      {content.text ? '重新生成翻译' : '生成翻译'}
+                      {regen.kind === 'translation'
+                        ? '翻译生成中…'
+                        : content.text
+                          ? '重新生成翻译'
+                          : '生成翻译'}
                     </button>
                   </div>
                 </div>
@@ -809,15 +916,15 @@ export function ReaderPage({
                   </section>
                 )}
                 {regen.kind === 'translation' && (
-                  <div className="ocr-panel ocr-panel--loading">
+                  <div className="ocr-panel ocr-panel--loading" role="status" aria-live="polite" aria-busy="true">
                     <span className="acquire__spinner" aria-hidden="true" />
                     <span>{regen.log || '翻译中…'}（全文分块翻译，可能需较长时间，请勿离开）</span>
                   </div>
                 )}
                 {content.loading ? (
-                  <p className="reader__empty">正在加载翻译…</p>
+                  <p className="reader__empty" role="status" aria-live="polite">正在加载翻译…</p>
                 ) : content.error ? (
-                  <p className="reader__empty reader__empty--error">翻译加载失败：{content.error}</p>
+                  <p className="reader__empty reader__empty--error" role="alert">翻译加载失败：{content.error}</p>
                 ) : pair.on && pair.ocrText ? (
                   (() => {
                     const ocrSections = splitSections(pair.ocrText);
@@ -869,8 +976,12 @@ export function ReaderPage({
             )}
 
             {tab === 'ocr' &&
-              (ocr.phase === 'loading' ? (
-                <div className="ocr-panel ocr-panel--loading">
+              (!ocr.savedChecked ? (
+                <p className="reader__empty" role="status" aria-live="polite" aria-busy="true">
+                  正在读取已保存的 OCR 全文…
+                </p>
+              ) : ocr.phase === 'loading' ? (
+                <div className="ocr-panel ocr-panel--loading" role="status" aria-live="polite" aria-busy="true">
                   <span className="acquire__spinner" aria-hidden="true" />
                   <span>{ocr.progress || 'OCR 进行中…'}（逐页调用 OCR 模型，可能需数分钟）</span>
                 </div>
@@ -895,7 +1006,7 @@ export function ReaderPage({
                 </div>
               ) : (
                 <div className="ocr-empty">
-                  {ocr.phase === 'error' && <p className="ocr-empty__error">上次转换失败：{ocr.error}</p>}
+                  {ocr.phase === 'error' && <p className="ocr-empty__error" role="alert">上次转换失败：{ocr.error}</p>}
                   {pdfInfo && !pdfInfo.hasPdf && !pdfInfo.canDownload ? (
                     <p>该论文没有本地 PDF，也无可用下载来源，无法执行 OCR。请先在文献库详情「下载 PDF 入库」。</p>
                   ) : (
@@ -908,7 +1019,11 @@ export function ReaderPage({
                     type="button"
                     className="btn btn--primary"
                     onClick={() => void runOcr()}
-                    disabled={!!pdfInfo && !pdfInfo.hasPdf && !pdfInfo.canDownload}
+                    disabled={
+                      !ocr.savedChecked ||
+                      !pdfInfo ||
+                      (!pdfInfo.hasPdf && !pdfInfo.canDownload)
+                    }
                   >
                     PDF 转 Markdown
                   </button>
@@ -917,7 +1032,11 @@ export function ReaderPage({
 
             {tab === 'note' &&
               (content.loading ? (
-                <p className="reader__empty">正在加载笔记…</p>
+                <p className="reader__empty" role="status" aria-live="polite">正在加载笔记…</p>
+              ) : content.error ? (
+                <p className="reader__empty reader__empty--error" role="alert">
+                  笔记加载失败：{content.error}
+                </p>
               ) : content.text ? (
                 <div className="doc-viewer reader__doc">
                   <MarkdownView source={content.text} />
@@ -927,7 +1046,16 @@ export function ReaderPage({
               ))}
 
             {tab === 'pdf' &&
-              (pdfInfo?.hasPdf ? (
+              (pdfStatusError ? (
+                <div className="reader__empty reader__empty--error" role="alert">
+                  <p>PDF 状态读取失败：{pdfStatusError}</p>
+                  <button type="button" className="btn btn--sm" onClick={() => setPdfStatusRetry((value) => value + 1)}>
+                    重新检测
+                  </button>
+                </div>
+              ) : !pdfInfo ? (
+                <p className="reader__empty" role="status">正在检测 PDF 状态…</p>
+              ) : pdfInfo.hasPdf ? (
                 pdfUrl ? (
                   <PdfViewer
                     url={pdfUrl}
@@ -935,8 +1063,15 @@ export function ReaderPage({
                     onConvert={() => void runOcr()}
                     converting={ocr.phase === 'loading'}
                   />
+                ) : pdfError ? (
+                  <div className="reader__empty reader__empty--error" role="alert">
+                    <p>PDF 加载失败：{pdfError}</p>
+                    <button type="button" className="btn btn--sm" onClick={() => setPdfRetry((value) => value + 1)}>
+                      重新加载
+                    </button>
+                  </div>
                 ) : (
-                  <p className="reader__empty">正在加载 PDF…</p>
+                  <p className="reader__empty" role="status">正在加载 PDF…</p>
                 )
               ) : pdfInfo?.canDownload ? (
                 <p className="reader__empty">本地暂无 PDF，请先在文献库详情点击「下载 PDF 入库」后回来阅读。</p>
