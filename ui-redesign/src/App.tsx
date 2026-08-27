@@ -24,10 +24,13 @@ import { SettingsPage } from './components/SettingsPage';
 import { Sidebar } from './components/Sidebar';
 import { Toast } from './components/Toast';
 import { Topbar } from './components/Topbar';
+import { ThemePage } from './components/ThemePage';
 import { NAV_ITEMS, type PageId } from './nav';
+import { applyTheme, readStoredTheme, type ThemeId } from './themes';
 
 export default function App() {
   const [page, setPage] = useState<PageId>('overview');
+  const [theme, setTheme] = useState<ThemeId>(() => readStoredTheme());
   const [papers, setPapers] = useState<Paper[] | null>(null);
   const [readingQueueIds, setReadingQueueIds] = useState<string[]>(readReadingQueue);
   const [papersError, setPapersError] = useState('');
@@ -123,6 +126,10 @@ export default function App() {
     void reloadReviews();
   }, [reloadPapers, reloadReviews]);
 
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
   const navigate = useCallback((next: PageId) => {
     setPage(next);
     if (next !== 'library') setSelectedPaperId(null);
@@ -149,12 +156,14 @@ export default function App() {
 
   const current = NAV_ITEMS.find((item) => item.id === page) ?? NAV_ITEMS[0];
   const papersReady = papers ?? [];
-  const topbarLabel = page === 'reader' ? '阅读' : page === 'reproduction-detail' ? '论文复现' : current.label;
+  const topbarLabel = page === 'reader' ? '阅读' : page === 'reproduction-detail' ? '论文复现' : page === 'themes' ? '主题' : current.label;
   const topbarHint =
     page === 'reader'
       ? (papersReady.find((paper) => paper.id === readerPaperId)?.title_zh ?? '论文精读')
       : page === 'reproduction-detail'
         ? '独立复现工作区 · 文档、实验与结果'
+        : page === 'themes'
+          ? '选择一套适合长时间研究的工作界面'
       : papersError
         ? `后端连接失败：${papersError}`
         : current.hint;
@@ -179,6 +188,7 @@ export default function App() {
     <div className="app">
       <Sidebar
         page={page === 'reproduction-detail' ? 'reproduction' : page}
+        theme={theme}
         dueCount={dueCount}
         libraryCount={papers?.length ?? 0}
         onNavigate={navigate}
@@ -225,6 +235,7 @@ export default function App() {
           {page === 'insights' && <InsightsPage papers={papersReady} {...shared} />}
           {page === 'mcp' && <McpPage />}
           {page === 'settings' && <SettingsPage notify={notify} />}
+          {page === 'themes' && <ThemePage theme={theme} onChange={setTheme} />}
           {page === 'reader' && (
             <ReaderPage
               papers={papersReady}

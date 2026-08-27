@@ -428,6 +428,42 @@ class SqlAlchemyProcessingJobRepository:
             # Validate before recovery as well: corrupted rows are never
             # transitioned or rewritten by an automated recovery path.
             self._stored_from_row(row)
+            if row.attempt >= row.max_attempts:
+                terminal = await self._session.execute(
+                    update(ProcessingJobModel)
+                    .where(
+                        ProcessingJobModel.id == row.id,
+                        ProcessingJobModel.status == "running",
+                        ProcessingJobModel.lease_token == row.lease_token,
+                        ProcessingJobModel.lease_expires_at == row.lease_expires_at,
+                    )
+                    .values(
+                        status="failed",
+                        finished_at=now_text,
+                        lease_owner=None,
+                        lease_token=None,
+                        lease_expires_at=None,
+                        heartbeat_at=None,
+                        error_code="PROCESSING_LEASE_EXPIRED",
+                        error_message=None,
+                        updated_at=now_text,
+                    )
+                )
+                if terminal.rowcount == 1:
+                    await self._set_target_status(
+                        row,
+                        "failed",
+                        now_text,
+                        error_code="PROCESSING_LEASE_EXPIRED",
+                    )
+                    await self._append_event(
+                        row.id,
+                        "failed",
+                        {},
+                        "PROCESSING_LEASE_EXPIRED",
+                        now_text,
+                    )
+                continue
             recovered = await self._session.execute(
                 update(ProcessingJobModel)
                 .where(
@@ -812,7 +848,8 @@ class SqlAlchemyProcessingJobRepository:
     async def retry(self, job_id: str, *, now: datetime):
         """Create (or return) one active descendant by copying parent bytes verbatim."""
         now_text = _timestamp(now)
-        await self._session.execute(text("BEGIN IMMEDIATE"))
+        if not self._session.in_transaction():
+            await self._session.execute(text("BEGIN IMMEDIATE"))
         parent = await self._session.get(ProcessingJobModel, job_id)
         if parent is None:
             raise PersistenceConflictError(operation="retry_processing_job_missing")
@@ -836,14 +873,30 @@ class SqlAlchemyProcessingJobRepository:
             return EnqueueResult(job=_new_job_from_row(existing, self._stored_from_row(existing).value), deduplicated=True)
         if not await self._target_has_status(parent, parent.status):
             raise JobNotRetryableError(operation="retry_processing_job_target")
+        latest_retry_sequence = (
+            await self._session.execute(
+                select(ProcessingJobModel.retry_sequence)
+                .where(ProcessingJobModel.retry_of_job_id == parent.id)
+                .order_by(ProcessingJobModel.retry_sequence.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        next_retry_sequence = max(
+            parent.retry_sequence + 1,
+            (latest_retry_sequence + 1) if latest_retry_sequence is not None else 0,
+        )
         descendant = NewProcessingJob(
             id=f"retry-{secrets.token_urlsafe(18)}",
             spec=stored.value,
-            idempotency_key=f"{parent.idempotency_key}:retry:{parent.retry_sequence + 1}",
+            idempotency_key=f"{parent.idempotency_key}:retry:{next_retry_sequence}",
             created_at=now,
             max_attempts=parent.max_attempts,
         )
-        result = await self.copy_spec_for_retry(parent.id, descendant)
+        result = await self.copy_spec_for_retry(
+            parent.id,
+            descendant,
+            retry_sequence=next_retry_sequence,
+        )
         await self._set_target_status(parent, "queued", now_text)
         await self._append_event(parent.id, "retry_scheduled", {}, None, now_text)
         return result
@@ -859,7 +912,13 @@ class SqlAlchemyProcessingJobRepository:
             return False
         return target is not None and target.status == expected_status
 
-    async def copy_spec_for_retry(self, parent_job_id: str, descendant: NewProcessingJob) -> EnqueueResult:
+    async def copy_spec_for_retry(
+        self,
+        parent_job_id: str,
+        descendant: NewProcessingJob,
+        *,
+        retry_sequence: int | None = None,
+    ) -> EnqueueResult:
         parent = await self._session.get(ProcessingJobModel, parent_job_id)
         if parent is None:
             raise PersistenceConflictError(operation="copy_processing_job_spec_missing")
@@ -894,7 +953,11 @@ class SqlAlchemyProcessingJobRepository:
             result_json=None,
             updated_at=_timestamp(descendant.created_at),
             retry_of_job_id=parent.id,
-            retry_sequence=parent.retry_sequence + 1,
+            retry_sequence=(
+                parent.retry_sequence + 1
+                if retry_sequence is None
+                else retry_sequence
+            ),
         )
         try:
             inserted = await self._session.execute(statement)

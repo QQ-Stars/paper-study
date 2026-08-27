@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { artifactApi, libraryApi } from '../api/client';
-import type { Paper, StudyStatus } from '../api/types';
+import { artifactApi, libraryApi, settingsApi } from '../api/client';
+import type { Paper, Settings, StudyStatus } from '../api/types';
 import { ArrowRightIcon, BookmarkIcon, StarIcon } from './Icons';
 import { MarkdownView } from './MarkdownView';
 import { PdfViewer } from './PdfViewer';
 import { SelectionTranslate } from './SelectionTranslate';
+import {
+  formatRegenerationLine,
+  normalizeTranslationMode,
+  translationModeHint,
+  translationProgressMode,
+  type TranslationMode,
+} from './readerTranslation';
 
 interface ReaderPageProps {
   papers: Paper[];
@@ -117,6 +124,7 @@ export function ReaderPage({
   const [content, setContent] = useState({ loading: false, text: '', error: '' });
   const artifactRequestRef = useRef(0);
   const ocrRequestRef = useRef(0);
+  const [translationMode, setTranslationMode] = useState<TranslationMode>('chunked');
   const [regen, setRegen] = useState<{
     kind: 'explainer' | 'translation' | null;
     log: string;
@@ -152,6 +160,23 @@ export function ReaderPage({
   const tabRefs = useRef<Partial<Record<ReaderTab, HTMLButtonElement | null>>>({});
 
   const paper = papers.find((item) => item.id === paperId) ?? null;
+
+  /* 翻译提示必须跟随持久化设置；设置接口失败时保留兼容的分块默认值，
+   * 不阻断阅读页其它内容的加载。 */
+  useEffect(() => {
+    let cancelled = false;
+    settingsApi
+      .get()
+      .then((settings: Settings) => {
+        if (!cancelled) setTranslationMode(normalizeTranslationMode(settings.translateMode));
+      })
+      .catch(() => {
+        /* 阅读页可独立工作；后端事件仍会在任务开始后校正模式。 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /* 页内可切换范围：按属性筛选后的论文序列 */
   const scope = useMemo(
@@ -294,15 +319,35 @@ export function ReaderPage({
     if (!paper) return;
     const paperId = paper.id;
     const requestId = ++artifactRequestRef.current;
+    let activeTranslationMode = translationMode;
     setRegen({ kind, log: '正在启动…' });
     setContent({ loading: true, text: '', error: '' });
     try {
+      // Refresh immediately before enqueue so a settings change made in
+      // another tab is reflected in the first status message as well as in
+      // the durable job that the backend creates.
+      if (kind === 'translation') {
+        try {
+          const latest = await settingsApi.get();
+          activeTranslationMode = normalizeTranslationMode(latest.translateMode);
+          if (requestId === artifactRequestRef.current) {
+            setTranslationMode(activeTranslationMode);
+          }
+        } catch {
+          /* The backend remains authoritative; retain the last known mode. */
+        }
+      }
+      if (requestId !== artifactRequestRef.current) return;
       const streamFn =
         kind === 'explainer' ? artifactApi.explain : artifactApi.translate;
       await streamFn(paper.id, (event) => {
         if (requestId !== artifactRequestRef.current) return;
-        let line = String(event.line ?? event.message ?? '');
-        if (line.startsWith('STAGE::')) line = line.split('::').slice(2).join('::');
+        const detectedMode = kind === 'translation' ? translationProgressMode(event) : null;
+        if (detectedMode !== null) {
+          activeTranslationMode = detectedMode;
+          setTranslationMode(detectedMode);
+        }
+        const line = formatRegenerationLine(event, kind, activeTranslationMode);
         if (line) setRegen((prev) => ({ ...prev, log: line }));
         if (event.type === 'result' && event.ok === false) {
           throw new Error(String(event.error ?? '生成失败'));
@@ -852,7 +897,7 @@ export function ReaderPage({
               <>
                 <div className="reader__tab-actions">
                   <span className="reader__tab-hint">
-                    启用「OCR 提取」后重新生成将优先使用 OCR Markdown 全文
+                    当前模式：{translationMode === 'full' ? '全文一次请求' : '全文分块'}；启用「OCR 提取」后重新生成将优先使用 OCR Markdown 全文
                   </span>
                   <div className="reader__tab-btns">
                     <button
@@ -918,7 +963,9 @@ export function ReaderPage({
                 {regen.kind === 'translation' && (
                   <div className="ocr-panel ocr-panel--loading" role="status" aria-live="polite" aria-busy="true">
                     <span className="acquire__spinner" aria-hidden="true" />
-                    <span>{regen.log || '翻译中…'}（全文分块翻译，可能需较长时间，请勿离开）</span>
+                    <span>
+                      {regen.log || '翻译中…'}（{translationModeHint(translationMode)}）
+                    </span>
                   </div>
                 )}
                 {content.loading ? (

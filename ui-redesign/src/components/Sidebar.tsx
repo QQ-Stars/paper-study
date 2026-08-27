@@ -1,63 +1,16 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-
 import { NAV_ITEMS, type PageId } from '../nav';
-import { applyTheme, readStoredTheme, THEMES, type ThemeId } from '../themes';
-import { CheckIcon, MoonIcon } from './Icons';
+import { THEMES, type ThemeId } from '../themes';
+import { MoonIcon } from './Icons';
 
 interface SidebarProps {
   page: PageId;
   dueCount: number;
   libraryCount: number;
+  theme: ThemeId;
   onNavigate: (page: PageId) => void;
 }
 
-export function Sidebar({ page, dueCount, libraryCount, onNavigate }: SidebarProps) {
-  const [theme, setTheme] = useState<ThemeId>(() => readStoredTheme());
-  const [themeOpen, setThemeOpen] = useState(false);
-  const themeRootRef = useRef<HTMLDivElement>(null);
-  const themeToggleRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
-
-  /* 面板打开：外部点击关闭、Escape 关闭并归还焦点、焦点落入当前选中项 */
-  useEffect(() => {
-    if (!themeOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!themeRootRef.current?.contains(event.target as Node)) setThemeOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      setThemeOpen(false);
-      themeToggleRef.current?.focus();
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    const initial =
-      panelRef.current?.querySelector<HTMLElement>('[aria-checked="true"]') ??
-      panelRef.current?.querySelector<HTMLElement>('[role="radio"]');
-    initial?.focus();
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [themeOpen]);
-
-  const onPanelKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-    const items = [...(panelRef.current?.querySelectorAll<HTMLElement>('[role="radio"]') ?? [])];
-    if (items.length === 0) return;
-    event.preventDefault();
-    const index = items.indexOf(document.activeElement as HTMLElement);
-    const next =
-      event.key === 'ArrowDown'
-        ? (index + 1) % items.length
-        : (index - 1 + items.length) % items.length;
-    items[next]?.focus();
-  };
-
+export function Sidebar({ page, dueCount, libraryCount, theme, onNavigate }: SidebarProps) {
   const currentTheme = THEMES.find((item) => item.id === theme) ?? THEMES[0];
 
   return (
@@ -102,50 +55,19 @@ export function Sidebar({ page, dueCount, libraryCount, onNavigate }: SidebarPro
       </nav>
 
       <div className="sidebar__foot">
-        <div className="sidebar__theme" ref={themeRootRef}>
+        <div className="sidebar__theme">
           <button
-            ref={themeToggleRef}
             type="button"
-            className="sidebar__link"
+            className={`sidebar__link${page === 'themes' ? ' sidebar__link--active' : ''}`}
             aria-label="主题"
             title={`主题 · 当前 ${currentTheme.label}`}
-            aria-haspopup="true"
-            aria-expanded={themeOpen}
-            aria-controls="sidebar-theme-panel"
-            onClick={() => setThemeOpen((open) => !open)}
+            aria-current={page === 'themes' ? 'page' : undefined}
+            onClick={() => onNavigate('themes')}
           >
             <MoonIcon size={17} />
             <span className="sidebar__label">主题</span>
             <span className="sidebar__theme-current">{currentTheme.label}</span>
           </button>
-          {themeOpen && (
-            <div
-              ref={panelRef}
-              id="sidebar-theme-panel"
-              className="sidebar__theme-panel"
-              role="radiogroup"
-              aria-label="选择主题"
-              onKeyDown={onPanelKeyDown}
-            >
-              {THEMES.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={item.id === theme}
-                  className={`sidebar__theme-option${item.id === theme ? ' is-active' : ''}`}
-                  onClick={() => setTheme(item.id)}
-                >
-                  <span className="sidebar__theme-swatch" data-swatch={item.id} aria-hidden="true" />
-                  <span className="sidebar__theme-copy">
-                    <strong>{item.label}</strong>
-                    <small>{item.description}</small>
-                  </span>
-                  {item.id === theme && <CheckIcon size={14} />}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         <div className="sidebar__locality">

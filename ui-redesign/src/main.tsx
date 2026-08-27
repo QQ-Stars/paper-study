@@ -11,6 +11,7 @@ import './styles/pages3.css';
 import './styles/pages4.css';
 import './styles/reader.css';
 import './styles/reproduction.css';
+import './styles/theme-page.css';
 
 const rootElement = document.getElementById('root');
 

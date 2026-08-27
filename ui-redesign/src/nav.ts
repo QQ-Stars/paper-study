@@ -25,6 +25,7 @@ export type PageId =
   | 'insights'
   | 'mcp'
   | 'settings'
+  | 'themes'
   | 'reader';
 
 export interface NavItem {

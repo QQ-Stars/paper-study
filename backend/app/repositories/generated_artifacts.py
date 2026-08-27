@@ -210,6 +210,14 @@ class SqlAlchemyGeneratedArtifactRepository(_P1ArtifactRepository):
             spec_json=spec_json,
             spec_sha256=spec_sha256,
         )
+        # Exact artifact identities are intentionally stable, but a terminal
+        # job must not make that identity permanently un-runnable.  A fresh
+        # user generation request retries the immutable spec and moves the
+        # cancelled/failed artifact target back to queued atomically.
+        if result.deduplicated:
+            stored_job = await self._jobs.get(result.job.id)
+            if stored_job is not None and stored_job.status.value in {"failed", "cancelled"}:
+                result = await self._jobs.retry(result.job.id, now=artifact.updated_at)
         if pdf_path is not None:
             await _assert_artifact_enqueue_pdf_identity(
                 paper=paper,
@@ -443,6 +451,7 @@ class SqlAlchemyGeneratedArtifactRepository(_P1ArtifactRepository):
         expected_head_artifact_id: str | None,
         content: str,
         content_sha256: str,
+        translation_mode: str = "chunked",
         updated_at,
     ) -> GeneratedArtifact:
         """Publish translation, head, legacy row, and job after one identity fence."""
@@ -453,6 +462,14 @@ class SqlAlchemyGeneratedArtifactRepository(_P1ArtifactRepository):
         if job is None:
             raise JobLeaseLostError(operation="publish_translation_job_missing")
         stored = self._jobs._stored_from_row(job)
+        stored_translation_mode = getattr(stored.value, "mode", "chunked")
+        if translation_mode not in {"chunked", "full"}:
+            raise PersistenceConflictError(operation="publish_translation_mode_invalid")
+        # The mode is part of the immutable job spec.  Never let a caller use
+        # the full-document publication rules for a chunked job (or vice
+        # versa), even when all of the other source and lease fences match.
+        if stored_translation_mode != translation_mode:
+            raise PersistenceConflictError(operation="publish_translation_mode_changed")
         if (
             stored != lease.spec
             or job.job_type != "translate"
@@ -517,31 +534,47 @@ class SqlAlchemyGeneratedArtifactRepository(_P1ArtifactRepository):
                 .order_by(ArtifactTranslationCheckpointModel.sequence.asc())
             )
         ).scalars().all()
-        assembled = "".join(
-            checkpoint.translated_markdown or "" for checkpoint in checkpoints
-        )
-        if (
-            len(checkpoints) != len(chunks)
-            or any(
-                checkpoint.sequence != sequence
-                or checkpoint.chunk_id != chunks[sequence].id
-                or checkpoint.source_content_sha256 != expected_source_content_sha256
-                or checkpoint.provider != artifact.generator_provider
-                or checkpoint.model != artifact.generator_model
-                or checkpoint.prompt_version != artifact.prompt_version
-                or checkpoint.status != "succeeded"
-                or checkpoint.translated_markdown is None
-                or checkpoint.content_sha256
-                != hashlib.sha256(
-                    checkpoint.translated_markdown.encode("utf-8")
-                ).hexdigest()
-                for sequence, checkpoint in enumerate(checkpoints)
+        if not isinstance(content, str) or not content.strip():
+            raise PersistenceConflictError(operation="publish_translation_output_invalid")
+        if hashlib.sha256(content.encode("utf-8")).hexdigest() != content_sha256:
+            raise PersistenceConflictError(operation="publish_translation_output_changed")
+
+        if translation_mode == "chunked":
+            # Chunked translation is resumable: every persisted checkpoint is
+            # part of the publication fence and must assemble exactly to the
+            # content supplied by the worker.
+            assembled = "".join(
+                checkpoint.translated_markdown or "" for checkpoint in checkpoints
             )
-            or assembled != content
-            or hashlib.sha256(assembled.encode("utf-8")).hexdigest() != content_sha256
-            or not assembled.strip()
-        ):
-            raise PersistenceConflictError(operation="publish_translation_checkpoints_changed")
+            if (
+                len(checkpoints) != len(chunks)
+                or any(
+                    checkpoint.sequence != sequence
+                    or checkpoint.chunk_id != chunks[sequence].id
+                    or checkpoint.source_content_sha256 != expected_source_content_sha256
+                    or checkpoint.provider != artifact.generator_provider
+                    or checkpoint.model != artifact.generator_model
+                    or checkpoint.prompt_version != artifact.prompt_version
+                    or checkpoint.status != "succeeded"
+                    or checkpoint.translated_markdown is None
+                    or checkpoint.content_sha256
+                    != hashlib.sha256(
+                        checkpoint.translated_markdown.encode("utf-8")
+                    ).hexdigest()
+                    for sequence, checkpoint in enumerate(checkpoints)
+                )
+                or assembled != content
+                or hashlib.sha256(assembled.encode("utf-8")).hexdigest() != content_sha256
+                or not assembled.strip()
+            ):
+                raise PersistenceConflictError(operation="publish_translation_checkpoints_changed")
+        else:
+            # Full translation is one provider request and intentionally has
+            # no per-chunk checkpoints.  Keep the chunk identity fence above,
+            # but do not mistake the first chunk's request metadata for a
+            # resumable checkpoint set.
+            if checkpoints:
+                raise PersistenceConflictError(operation="publish_translation_checkpoints_changed")
         current_head_artifact_id = await self.get_head_artifact_id(
             paper_id=job.paper_id,
             kind="translation",

@@ -183,6 +183,11 @@ class ProcessingWorkerLoopTests(unittest.IsolatedAsyncioTestCase):
         ) as fixture:
             pdf_path = fixture.database_path.parent / "paper.pdf"
             pdf_path.write_bytes(pdf_bytes)
+            settings_path = fixture.database_path.parent / "settings.json"
+            settings_path.write_text(
+                json.dumps({"translateMode": "chunked"}),
+                encoding="utf-8",
+            )
             with closing(sqlite3.connect(fixture.database_path)) as connection:
                 connection.execute(
                     "UPDATE papers SET pdf_path=? WHERE id='paper-1'",
@@ -232,6 +237,7 @@ class ProcessingWorkerLoopTests(unittest.IsolatedAsyncioTestCase):
                 required_schema_revision="20260807_03",
                 worker_id="worker-p3-translation",
                 clock=lambda: now,
+                legacy_settings_path=settings_path,
                 translation_provider_factory=lambda: provider,
                 structured_provider_factory=StructuredProvider,
                 embedding_profile=__import__(
@@ -447,6 +453,63 @@ class ProcessingWorkerLoopTests(unittest.IsolatedAsyncioTestCase):
             )
 
             self.assertFalse(await worker.run_once())
+
+    async def test_run_once_continues_after_failing_an_expired_final_attempt(self) -> None:
+        from backend.app.workers.processing_worker import ProcessingWorker
+
+        now = datetime(2026, 8, 10, 8, 2, tzinfo=timezone.utc)
+        handled: list[str] = []
+        async with p2_database_fixture(prefix="study-app-worker-expired-final-") as database:
+            exhausted = await self._enqueue_source_job(
+                database.session_factory,
+                now=now,
+                job_id="job-worker-expired-final",
+                source_id="source-worker-expired-final",
+                max_attempts=1,
+            )
+            queued = await self._enqueue_source_job(
+                database.session_factory,
+                now=now + timedelta(seconds=1),
+                job_id="job-worker-after-expired-final",
+                source_id="source-worker-after-expired-final",
+            )
+            async with SqlAlchemyUnitOfWork(database.session_factory) as work:
+                lease = await work.jobs.claim_next(
+                    worker_id="worker-that-stopped",
+                    now=now,
+                    lease_seconds=30,
+                )
+                await work.commit()
+            assert lease is not None
+            self.assertEqual(exhausted.id, lease.job.id)
+
+            async def handle(next_lease):
+                handled.append(next_lease.job.id)
+                return JobResult({"continued": True})
+
+            worker = ProcessingWorker(
+                lambda: SqlAlchemyUnitOfWork(database.session_factory),
+                handlers={"source_materialize": handle},
+                worker_id="worker-after-expired-final",
+                clock=lambda: now + timedelta(seconds=31),
+            )
+
+            self.assertTrue(await worker.run_once())
+            self.assertEqual([queued.id], handled)
+            with closing(sqlite3.connect(database.database_path)) as connection:
+                exhausted_row = connection.execute(
+                    "SELECT status,error_code FROM processing_jobs WHERE id=?",
+                    (exhausted.id,),
+                ).fetchone()
+                queued_row = connection.execute(
+                    "SELECT status FROM processing_jobs WHERE id=?",
+                    (queued.id,),
+                ).fetchone()
+            self.assertEqual(
+                ("failed", "PROCESSING_LEASE_EXPIRED"),
+                exhausted_row,
+            )
+            self.assertEqual(("succeeded",), queued_row)
 
     async def test_run_once_dispatches_canonical_type_and_cas_completes_generic_result(self) -> None:
         from backend.app.workers.processing_worker import ProcessingWorker

@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
+from datetime import datetime, timezone
+import hashlib
 import json
 import sqlite3
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 from fastapi.testclient import TestClient
+import httpx
 
 from backend.app.api.app import create_app
+import backend.app.api.routes.legacy as legacy_routes
 from backend.app.api.routes.legacy import _durable_artifact_events
-from backend.tests.support.p3_database import p3_database_fixture
+from backend.tests.support.p3_database import p3_context_fixture, p3_database_fixture
 
 
 class _FakeAgent:
@@ -97,6 +103,13 @@ class _BlockingArtifactStreams:
             yield {"type": "result", "ok": True, "markdown": "# durable result"}
         finally:
             self.closed.set()
+
+
+class _ImmediateTerminalArtifactStreams:
+    async def artifact_events(self, paper_id: str, kind: str, *, profile: str):
+        del paper_id, kind, profile
+        yield {"type": "progress", "line": "JOB::queued", "jobId": "job-1"}
+        yield {"type": "result", "ok": True, "markdown": "# durable result"}
 
 
 class _FailingSession:
@@ -187,6 +200,59 @@ class _TruncatedIngest:
 
 
 class NdjsonApiTests(unittest.TestCase):
+    def test_durable_artifact_does_not_apply_a_fixed_timeout_before_terminal(self) -> None:
+        async def scenario() -> None:
+            streams = _ImmediateTerminalArtifactStreams()
+            cancelled_jobs: list[str] = []
+
+            class ProcessingApi:
+                async def cancel_job(self, job_id: str) -> None:
+                    cancelled_jobs.append(job_id)
+
+            request = SimpleNamespace(
+                app=SimpleNamespace(
+                    state=SimpleNamespace(
+                        container=SimpleNamespace(
+                            legacy=SimpleNamespace(
+                                agent=_RejectingArtifactAgent(),
+                                processing_streams=streams,
+                            ),
+                            processing_api=ProcessingApi(),
+                        )
+                    )
+                )
+            )
+            # The old implementation consulted the loop clock between every
+            # event.  Make that clock jump past 45 seconds after the first
+            # event; a real durable terminal must still be forwarded.
+            ticks = iter((0.0, 0.0, 46.0))
+            fake_loop = SimpleNamespace(time=lambda: next(ticks))
+            with mock.patch.object(
+                legacy_routes.asyncio,
+                "get_running_loop",
+                return_value=fake_loop,
+            ):
+                events = [
+                    event
+                    async for event in _durable_artifact_events(
+                        request,
+                        "paper-1",
+                        "explainer",
+                        profile="standard",
+                        agent_command="explain",
+                    )
+                ]
+            self.assertEqual(
+                [
+                    {"type": "progress", "line": "JOB::queued", "jobId": "job-1"},
+                    {"type": "result", "ok": True, "markdown": "# durable result"},
+                ],
+                events,
+            )
+            self.assertEqual([], cancelled_jobs)
+
+        asyncio.run(scenario())
+
     def test_durable_artifact_progress_is_yielded_before_terminal_arrives(self) -> None:
         async def scenario() -> None:
             streams = _BlockingArtifactStreams()
@@ -429,6 +495,228 @@ class NdjsonApiTests(unittest.TestCase):
                     )
                 finally:
                     await container.dispose()
+
+        asyncio.run(scenario())
+
+    def test_translate_http_stream_runs_saved_full_mode_as_one_worker_request(self) -> None:
+        async def scenario() -> None:
+            from sqlalchemy import text
+
+            from backend.app.bootstrap import (
+                RolloutSettings,
+                bootstrap,
+                bootstrap_processing_worker,
+            )
+            from backend.app.config import DatabaseSettings
+            from backend.app.domain.context import ChunkingSpec, EmbeddingProfile
+
+            markdown = (
+                "# Abstract\n\nFull-mode HTTP source.\n\n"
+                "# Methods\n\nThe worker must receive this complete document once.\n"
+            )
+            translated = "# 摘要\n\n全文模式 HTTP 结果。\n"
+            pdf_bytes = b"full-mode HTTP worker fixture"
+            pdf_sha256 = hashlib.sha256(pdf_bytes).hexdigest()
+            now = datetime.now(timezone.utc)
+
+            async with p3_context_fixture(
+                prefix="study-app-full-http-worker-",
+                source_id="src_full_http_worker",
+                markdown=markdown,
+                spec=ChunkingSpec(),
+                now=now,
+                pdf_sha256=pdf_sha256,
+                options_hash="f" * 64,
+            ) as fixture:
+                pdf_path = fixture.database_path.parent / "paper.pdf"
+                pdf_path.write_bytes(pdf_bytes)
+                settings_path = fixture.database_path.parent / "settings.json"
+                settings_path.write_text(
+                    json.dumps({"translateMode": "full"}),
+                    encoding="utf-8",
+                )
+                with closing(sqlite3.connect(fixture.database_path)) as connection:
+                    connection.execute(
+                        "UPDATE papers SET pdf_path=? WHERE id='paper-1'",
+                        (str(pdf_path),),
+                    )
+                    connection.commit()
+
+                class TranslationProvider:
+                    provider_id = "full-http-translation"
+                    model_id = "full-http-model"
+                    prompt_version = "full-http-v1"
+
+                    def __init__(self) -> None:
+                        self.calls = []
+
+                    async def translate(self, request):
+                        self.calls.append(request)
+                        return translated
+
+                class StructuredProvider:
+                    provider_id = "full-http-structured"
+                    model_id = "full-http-structured-model"
+
+                    async def generate(self, _request):
+                        raise AssertionError(
+                            "translation must not call the structured provider"
+                        )
+
+                class EmbeddingProvider:
+                    provider_id = "full-http-embedding"
+
+                    async def embed(self, _request):
+                        raise AssertionError(
+                            "translation must not call the embedding provider"
+                        )
+
+                profile = EmbeddingProfile(
+                    provider="full-http-embedding",
+                    model="full-http-embedding-model",
+                    embedding_version="full-http-embedding-v1",
+                    dimensions=2,
+                )
+                provider = TranslationProvider()
+                provider_factory = lambda: provider
+                structured_factory = StructuredProvider
+                embedding_factory = lambda _profile, _credential: EmbeddingProvider()
+                database_settings = DatabaseSettings(fixture.database_path)
+                api_container = None
+                worker_container = None
+                response_task = None
+                try:
+                    api_container = bootstrap(
+                        RolloutSettings(
+                            api_backend_mode="python",
+                            document_pipeline_mode="p1",
+                            generation_pipeline_mode="p1",
+                            artifact_read_mode="prefer_new",
+                            artifact_write_mode="dual",
+                            processing_cursor_secret="s" * 32,
+                        ),
+                        database_settings,
+                        required_schema_revision="20260807_03",
+                        legacy_settings_path=settings_path,
+                        translation_provider_factory=provider_factory,
+                        structured_provider_factory=structured_factory,
+                        embedding_profile=profile,
+                        embedding_provider_factory=embedding_factory,
+                    )
+                    worker_container = bootstrap_processing_worker(
+                        database_settings,
+                        required_schema_revision="20260807_03",
+                        worker_id="full-http-worker",
+                        clock=lambda: datetime.now(timezone.utc),
+                        legacy_settings_path=settings_path,
+                        translation_provider_factory=provider_factory,
+                        structured_provider_factory=structured_factory,
+                        embedding_profile=profile,
+                        embedding_provider_factory=embedding_factory,
+                    )
+                    app = create_app(
+                        api_container,
+                        fixture.session_factory,
+                        required_schema_revision="20260807_03",
+                    )
+                    transport = httpx.ASGITransport(app=app)
+                    async with httpx.AsyncClient(
+                        transport=transport,
+                        base_url="http://testserver",
+                    ) as client:
+                        response_task = asyncio.create_task(
+                            client.post("/api/translate", json={"id": "paper-1"})
+                        )
+                        job_row = None
+                        for _ in range(200):
+                            async with fixture.session_factory() as session:
+                                job_row = (
+                                    await session.execute(
+                                        text(
+                                            "SELECT id,spec_json FROM processing_jobs "
+                                            "WHERE job_type='translate' ORDER BY created_at DESC"
+                                        )
+                                    )
+                                ).first()
+                            if job_row is not None:
+                                break
+                            await asyncio.sleep(0.01)
+                        self.assertIsNotNone(job_row, "HTTP request did not enqueue translation")
+                        assert job_row is not None
+                        self.assertEqual(
+                            "full",
+                            json.loads(job_row.spec_json)["arguments"]["mode"],
+                        )
+
+                        self.assertTrue(
+                            await worker_container.processing_worker.run_once()
+                        )
+                        response = await asyncio.wait_for(response_task, timeout=5)
+
+                    self.assertEqual(200, response.status_code, response.text)
+                    events = [json.loads(line) for line in response.text.splitlines()]
+                    stages = [
+                        event.get("progress", {}).get("stage")
+                        for event in events
+                        if isinstance(event.get("progress"), dict)
+                    ]
+                    self.assertIn("translation_full", stages)
+                    full_progress = [
+                        event["progress"]
+                        for event in events
+                        if event.get("progress", {}).get("stage")
+                        == "translation_full"
+                    ]
+                    self.assertEqual(
+                        [(0, 1), (1, 1)],
+                        [
+                            (progress["completed"], progress["total"])
+                            for progress in full_progress
+                        ],
+                    )
+                    self.assertTrue(events[-1]["ok"])
+                    self.assertEqual(translated, events[-1]["markdown"])
+                    self.assertEqual(1, len(provider.calls))
+                    self.assertEqual(markdown, provider.calls[0].markdown)
+
+                    async with fixture.session_factory() as session:
+                        artifact_row = (
+                            await session.execute(
+                                text(
+                                    "SELECT status,content FROM generated_artifacts "
+                                    "WHERE id=:artifact_id"
+                                ),
+                                {"artifact_id": events[-1]["artifactId"]},
+                            )
+                        ).first()
+                        job_status = (
+                            await session.execute(
+                                text(
+                                    "SELECT status FROM processing_jobs WHERE id=:job_id"
+                                ),
+                                {"job_id": job_row.id},
+                            )
+                        ).scalar_one()
+                        checkpoint_count = (
+                            await session.execute(
+                                text(
+                                    "SELECT count(*) FROM artifact_translation_checkpoints "
+                                    "WHERE artifact_id=:artifact_id"
+                                ),
+                                {"artifact_id": events[-1]["artifactId"]},
+                            )
+                        ).scalar_one()
+                    self.assertEqual(("ready", translated), artifact_row)
+                    self.assertEqual("succeeded", job_status)
+                    self.assertEqual(0, checkpoint_count)
+                finally:
+                    if response_task is not None and not response_task.done():
+                        response_task.cancel()
+                        await asyncio.gather(response_task, return_exceptions=True)
+                    if worker_container is not None:
+                        await worker_container.dispose()
+                    if api_container is not None:
+                        await api_container.dispose()
 
         asyncio.run(scenario())
 

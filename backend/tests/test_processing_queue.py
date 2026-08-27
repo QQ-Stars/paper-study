@@ -24,6 +24,7 @@ from backend.app.domain.processing import (
     NewProcessingJob,
     OcrJobSpecV1,
     SourceMaterializeJobSpecV1,
+    TranslateJobSpecV1,
     build_artifact_job_key,
     build_artifact_key,
     build_source_job_key,
@@ -68,6 +69,30 @@ class ProcessingDomainTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 with self.assertRaises(JobSpecValidationError):
                     decode_job_spec_v1(raw)
+
+    def test_full_translation_mode_is_frozen_in_the_job_spec(self) -> None:
+        spec = TranslateJobSpecV1(
+            paper_id="paper-1",
+            source_document_id="source-1",
+            artifact_id="artifact-1",
+            mode="full",
+        )
+
+        encoded = encode_job_spec_v1(spec)
+
+        self.assertEqual("full", json.loads(encoded)["arguments"]["mode"])
+        self.assertEqual(spec, decode_job_spec_v1(encoded))
+
+        legacy_positional = TranslateJobSpecV1(
+            "paper-1",
+            "source-1",
+            "artifact-1",
+            "ocr",
+            "translate",
+        )
+        self.assertEqual("ocr", legacy_positional.source_mode)
+        self.assertEqual("chunked", legacy_positional.mode)
+        self.assertEqual({}, json.loads(encode_job_spec_v1(legacy_positional))["arguments"])
 
     def test_job_spec_v1_rejects_sensitive_values_under_safe_keys_without_echoing_them(self) -> None:
         safe = OcrJobSpecV1(
@@ -655,6 +680,88 @@ class ProcessingEnqueueTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(before, self._counts())
 
+    async def test_cancelled_artifact_enqueue_creates_a_retry_job_instead_of_reusing_terminal_job(self) -> None:
+        source = self._source("source-translation-retry", mode="native", provider="local", model="pymupdf", pdf_sha="c" * 64)
+        artifact = GeneratedArtifact(
+            id="artifact-translation-retry", paper_id="paper-1", kind="translation",
+            source_document_id=source.id, status="queued", generator_provider="llm-test",
+            generator_model="llm-v1", prompt_version="translation-chunk-v1",
+            created_at=self.now, updated_at=self.now,
+        )
+        spec = TranslateJobSpecV1(
+            paper_id="paper-1", source_document_id=source.id,
+            artifact_id=artifact.id, source_mode="native",
+        )
+        encoded = encode_job_spec_v1(spec)
+        artifact_key = build_artifact_key(
+            kind="translation", source_document_id=source.id,
+            source_content_sha256=source.content_sha256 or "",
+            generator_provider="llm-test", generator_model="llm-v1",
+            prompt_version="translation-chunk-v1",
+            kind_specific_options={
+                "targetLanguage": "zh-CN", "chunkingVersion": "markdown-coverage-v1",
+                "contextVersion": "context-plan-v1", "promptSchemaVersion": "translation-chunk-v1",
+            },
+        )
+        job = NewProcessingJob(
+            id="translation-retry-job", spec=spec,
+            idempotency_key=build_artifact_job_key(artifact_key, hash_job_spec(encoded)),
+            created_at=self.now,
+        )
+        async with SqlAlchemyUnitOfWork(self.session_factory) as work:
+            await work.sources.add(source)
+            first = await work.artifacts.enqueue_with_job(
+                artifact, job, spec_json=encoded, spec_sha256=hash_job_spec(encoded),
+                kind_specific_options={
+                    "targetLanguage": "zh-CN", "chunkingVersion": "markdown-coverage-v1",
+                    "contextVersion": "context-plan-v1", "promptSchemaVersion": "translation-chunk-v1",
+                },
+            )
+            await work.commit()
+        self.assertFalse(first.deduplicated)
+
+        async with SqlAlchemyUnitOfWork(self.session_factory) as work:
+            cancelled = await work.jobs.cancel(first.job.id, now=self.now)
+            await work.commit()
+        self.assertEqual("cancelled", cancelled.status.value)
+
+        async with SqlAlchemyUnitOfWork(self.session_factory) as work:
+            retried = await work.artifacts.enqueue_with_job(
+                artifact, job, spec_json=encoded, spec_sha256=hash_job_spec(encoded),
+                kind_specific_options={
+                    "targetLanguage": "zh-CN", "chunkingVersion": "markdown-coverage-v1",
+                    "contextVersion": "context-plan-v1", "promptSchemaVersion": "translation-chunk-v1",
+                },
+            )
+            await work.commit()
+        self.assertFalse(retried.deduplicated)
+        self.assertNotEqual(first.job.id, retried.job.id)
+        self.assertEqual("queued", retried.job.status.value)
+        with sqlite3.connect(self.database_path) as connection:
+            self.assertEqual(
+                ("queued",), connection.execute(
+                    "SELECT status FROM generated_artifacts WHERE id=?", (artifact.id,)
+                ).fetchone(),
+            )
+
+        async with SqlAlchemyUnitOfWork(self.session_factory) as work:
+            cancelled_retry = await work.jobs.cancel(retried.job.id, now=self.now)
+            await work.commit()
+        self.assertEqual("cancelled", cancelled_retry.status.value)
+
+        async with SqlAlchemyUnitOfWork(self.session_factory) as work:
+            retried_again = await work.artifacts.enqueue_with_job(
+                artifact, job, spec_json=encoded, spec_sha256=hash_job_spec(encoded),
+                kind_specific_options={
+                    "targetLanguage": "zh-CN", "chunkingVersion": "markdown-coverage-v1",
+                    "contextVersion": "context-plan-v1", "promptSchemaVersion": "translation-chunk-v1",
+                },
+            )
+            await work.commit()
+        self.assertFalse(retried_again.deduplicated)
+        self.assertNotIn(retried_again.job.id, {first.job.id, retried.job.id})
+        self.assertEqual("queued", retried_again.job.status.value)
+
     async def test_artifact_head_compare_and_set_has_one_winner_and_cascades_on_delete(self) -> None:
         source = self._source("source-head", mode="native", provider="local", model="pymupdf", pdf_sha="f" * 64)
         first = GeneratedArtifact(
@@ -1006,6 +1113,47 @@ class ProcessingLeaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("failed", connection.execute(
                 "SELECT status FROM processing_jobs WHERE id=?", (job.id,)
             ).fetchone()[0])
+
+    async def test_expired_final_attempt_is_failed_before_the_next_job_is_claimed(self) -> None:
+        exhausted = await self._enqueue_source_job(
+            "job-expired-final", "source-expired-final", self.now, max_attempts=1,
+        )
+        queued = await self._enqueue_source_job(
+            "job-after-expired", "source-after-expired", self.now + timedelta(seconds=1),
+        )
+        async with SqlAlchemyUnitOfWork(self.session_factory) as work:
+            first = await work.jobs.claim_next(
+                worker_id="worker-crashed", now=self.now, lease_seconds=30,
+            )
+            await work.commit()
+        assert first is not None
+        self.assertEqual(exhausted.id, first.job.id)
+
+        async with SqlAlchemyUnitOfWork(self.session_factory) as work:
+            next_lease = await work.jobs.claim_next(
+                worker_id="worker-restarted",
+                now=self.now + timedelta(seconds=31),
+                lease_seconds=30,
+            )
+            await work.commit()
+
+        assert next_lease is not None
+        self.assertEqual(queued.id, next_lease.job.id)
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            self.assertEqual(
+                ("failed", 1, "PROCESSING_LEASE_EXPIRED"),
+                connection.execute(
+                    "SELECT status,attempt,error_code FROM processing_jobs WHERE id=?",
+                    (exhausted.id,),
+                ).fetchone(),
+            )
+            self.assertEqual(
+                ("failed", "PROCESSING_LEASE_EXPIRED"),
+                connection.execute(
+                    "SELECT status,error_code FROM document_sources WHERE id=?",
+                    (exhausted.spec.source_document_id,),
+                ).fetchone(),
+            )
 
     def _available_at(self, job_id: str) -> datetime:
         with closing(sqlite3.connect(self.database_path)) as connection:

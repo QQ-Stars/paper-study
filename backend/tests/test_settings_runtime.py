@@ -82,6 +82,22 @@ class SettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("saved-model", saved_runtime.model)
             self.assertEqual(2.2, saved_runtime.timeout_seconds)
 
+    async def test_translation_mode_uses_saved_setting_for_the_next_job(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="study-app-settings-translation-mode-") as temp:
+            root = Path(temp)
+            service = SettingsService(
+                settings_path=root / "settings.json",
+                root=root,
+                credential_service=_CredentialService(),
+                environment_snapshot={"TRANSLATE_MODE": "chunked"},
+            )
+
+            self.assertEqual("chunked", service.translation_mode())
+            await service.update({"translateMode": "full"})
+
+            self.assertEqual("full", service.translation_mode())
+            self.assertEqual("full", (await service.view())["translateMode"])
+
     async def test_legacy_ocr_api_base_alias_is_visible_and_used_by_profile(self) -> None:
         with tempfile.TemporaryDirectory(prefix="study-app-settings-ocr-alias-") as temp:
             root = Path(temp)

@@ -407,6 +407,7 @@ def bootstrap(
             embedding_profile=embedding_profile,
             embedding_provider_factory=embedding_provider_factory,
             query_embedding_provider_factory=query_embedding_provider_factory,
+            translation_mode_resolver=settings_service.translation_mode,
         )
         processing_api = ProcessingApiService(
             unit_of_work_factory,
@@ -716,6 +717,7 @@ def bootstrap_processing_worker(
             embedding_provider_factory=embedding_provider_factory,
             auto_export=obsidian_auto_export,
             auto_export_logger=logger,
+            translation_mode_resolver=p3_settings_service.translation_mode,
         )
         assert embedding_provider_factory is not None
         p3_context_builder = ContextBuilder(work_factory)
@@ -917,6 +919,7 @@ def _compose_p3_services(
     query_embedding_provider_factory: Callable[[EmbeddingProfile, Any], Any] | None = None,
     auto_export: Any = None,
     auto_export_logger: Callable[[dict[str, object]], None] | None = None,
+    translation_mode_resolver: Callable[[], str] | None = None,
 ) -> tuple[Any, Any, Any, Any]:
     if translation_provider_factory is None or structured_provider_factory is None:
         raise ValueError(
@@ -937,6 +940,7 @@ def _compose_p3_services(
         translation_provider=translation_provider,
         checkpoint_repository=checkpoints,
         structured_provider=structured_provider,
+        translation_mode_resolver=translation_mode_resolver,
         auto_export=auto_export,
         auto_export_logger=auto_export_logger,
     )

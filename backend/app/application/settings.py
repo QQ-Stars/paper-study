@@ -297,6 +297,16 @@ class SettingsService:
 
         return self._llm_runtime_from_document(self._read_document())
 
+    def translation_mode(self) -> str:
+        mode = _value(
+            self._read_document(),
+            "translateMode",
+            self.environment,
+            "TRANSLATE_MODE",
+            "chunked",
+        ).lower()
+        return mode if mode in {"chunked", "full"} else "chunked"
+
     def _llm_runtime_from_document(
         self,
         document: Mapping[str, object],
@@ -673,6 +683,12 @@ class SettingsService:
             "none",
             "reference",
             "copy",
+        }:
+            raise SettingsValidationError()
+        translate_mode = normalized.get("translateMode")
+        if isinstance(translate_mode, str) and translate_mode not in {
+            "chunked",
+            "full",
         }:
             raise SettingsValidationError()
         return normalized

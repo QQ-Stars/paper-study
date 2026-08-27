@@ -72,6 +72,7 @@ class DocumentArtifactService:
         translation_provider: TranslationProvider | None = None,
         checkpoint_repository: SqlAlchemyTranslationCheckpointRepository | None = None,
         structured_provider: StructuredArtifactProvider | None = None,
+        translation_mode_resolver: Callable[[], str] | None = None,
         artifact_id_factory: Callable[[], str] | None = None,
         job_id_factory: Callable[[], str] | None = None,
         auto_export: object | None = None,
@@ -82,6 +83,7 @@ class DocumentArtifactService:
         self._translation_provider = translation_provider
         self._checkpoints = checkpoint_repository
         self._structured_provider = structured_provider
+        self._translation_mode_resolver = translation_mode_resolver
         self._clock = clock
         self._artifact_id_factory = artifact_id_factory or (
             lambda: f"artifact_{uuid4().hex}"
@@ -151,12 +153,15 @@ class DocumentArtifactService:
             provider_id = provider.provider_id
             model_id = provider.model_id
             prompt_version = provider.prompt_version
+            translation_mode = self._translation_mode()
             options = {
                 "targetLanguage": "zh-CN",
                 "chunkingVersion": "markdown-coverage-v1",
                 "contextVersion": "context-plan-v1",
                 "promptSchemaVersion": prompt_version,
             }
+            if translation_mode != "chunked":
+                options["translationMode"] = translation_mode
         else:
             provider = self._structured_provider
             if provider is None:
@@ -199,6 +204,7 @@ class DocumentArtifactService:
                 paper_id=paper_id,
                 source_document_id=source.id,
                 artifact_id=artifact.id,
+                mode=translation_mode,
                 source_mode=source_mode,
             )
         else:
@@ -243,6 +249,17 @@ class DocumentArtifactService:
             job=enqueue.job,
             deduplicated=enqueue.deduplicated,
         )
+
+    def _translation_mode(self) -> str:
+        resolver = self._translation_mode_resolver
+        if callable(resolver):
+            try:
+                mode = resolver()
+                if mode in {"chunked", "full"}:
+                    return mode
+            except Exception:
+                pass
+        return "chunked"
 
     async def run(self, lease: JobLease, artifact_id: str) -> GeneratedArtifact:
         if not isinstance(lease, JobLease):
@@ -306,9 +323,19 @@ class DocumentArtifactService:
             plan.all_chunk_ids != plan.eligible_chunk_ids
             or plan.all_chunk_ids != plan.selected_chunk_ids
             or len(plan.batches) != len(plan.all_chunk_ids)
+            or not plan.batches
             or any(len(batch.chunks) != 1 for batch in plan.batches)
         ):
             raise PersistenceConflictError(operation="translation_context_coverage")
+
+        if spec.mode == "full":
+            return await self._run_full_translation(
+                lease,
+                source=source,
+                artifact=artifact,
+                plan=plan,
+                expected_head_artifact_id=expected_head_artifact_id,
+            )
 
         translated: list[str] = []
         await self._translation_progress_checkpoint(
@@ -441,6 +468,78 @@ class DocumentArtifactService:
         content = "".join(translated)
         if not content.strip():
             raise ValueError("translation assembled empty Markdown")
+        return await self._publish_translation_result(
+            lease,
+            source=source,
+            artifact=artifact,
+            plan=plan,
+            expected_head_artifact_id=expected_head_artifact_id,
+            content=content,
+            translation_mode="chunked",
+        )
+
+    async def _run_full_translation(
+        self,
+        lease: JobLease,
+        *,
+        source,
+        artifact,
+        plan,
+        expected_head_artifact_id: str | None,
+    ) -> GeneratedArtifact:
+        await self._translation_progress_checkpoint(
+            lease,
+            completed=0,
+            total=1,
+            mode="full",
+        )
+        first_chunk = plan.batches[0].chunks[0]
+        request = TranslationRequest(
+            artifact_id=artifact.id,
+            source_document_id=source.id,
+            source_content_sha256=plan.source_content_sha256,
+            chunk_id=first_chunk.id,
+            sequence=0,
+            markdown=source.markdown,
+            content_kind="text",
+        )
+        try:
+            content = await self._translation_provider.translate(request)
+        except Exception as error:
+            raise (
+                error
+                if isinstance(error, TranslationProviderRequestError)
+                else TranslationProviderRequestError(retryable=True)
+            ) from None
+        if not isinstance(content, str) or not content.strip():
+            raise ArtifactOutputInvalidError(operation="translation_output")
+        await self._translation_progress_checkpoint(
+            lease,
+            completed=1,
+            total=1,
+            mode="full",
+        )
+        return await self._publish_translation_result(
+            lease,
+            source=source,
+            artifact=artifact,
+            plan=plan,
+            expected_head_artifact_id=expected_head_artifact_id,
+            content=content,
+            translation_mode="full",
+        )
+
+    async def _publish_translation_result(
+        self,
+        lease: JobLease,
+        *,
+        source,
+        artifact,
+        plan,
+        expected_head_artifact_id: str | None,
+        content: str,
+        translation_mode: str,
+    ) -> GeneratedArtifact:
         content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
         now = _utc(self._clock())
         async with self._work_factory() as work:
@@ -460,6 +559,7 @@ class DocumentArtifactService:
                 expected_head_artifact_id=expected_head_artifact_id,
                 content=content,
                 content_sha256=content_sha256,
+                translation_mode=translation_mode,
                 updated_at=now,
             )
             await work.commit()
@@ -478,13 +578,14 @@ class DocumentArtifactService:
         *,
         completed: int,
         total: int,
+        mode: str = "chunked",
     ) -> None:
         async with self._work_factory() as work:
             await work.jobs.report_progress(
                 lease,
                 JobProgress(
                     {
-                        "stage": "translation",
+                        "stage": f"translation_{mode}",
                         "completed": completed,
                         "total": total,
                     }

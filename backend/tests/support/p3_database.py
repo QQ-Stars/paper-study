@@ -143,6 +143,7 @@ async def p3_translation_fixture(
     provider: str = "fake-translation",
     model: str = "fake-translation-model",
     prompt_version: str = "translation-chunk-v1",
+    translation_mode: str = "chunked",
 ) -> AsyncIterator[P3TranslationFixture]:
     """Create one real P3 translation target, job, lease, and optional resume state."""
 
@@ -184,8 +185,17 @@ async def p3_translation_fixture(
             paper_id="paper-1",
             source_document_id=source_id,
             artifact_id=artifact_id,
+            mode=translation_mode,
         )
         raw_spec = encode_job_spec_v1(job_spec)
+        translation_options = {
+            "targetLanguage": "zh-CN",
+            "chunkingVersion": spec.chunking_version,
+            "contextVersion": "context-plan-v1",
+            "promptSchemaVersion": "translation-chunk-v1",
+        }
+        if translation_mode != "chunked":
+            translation_options["translationMode"] = translation_mode
         artifact_key = build_artifact_key(
             kind="translation",
             source_document_id=source_id,
@@ -193,12 +203,7 @@ async def p3_translation_fixture(
             generator_provider=provider,
             generator_model=model,
             prompt_version=prompt_version,
-            kind_specific_options={
-                "targetLanguage": "zh-CN",
-                "chunkingVersion": spec.chunking_version,
-                "contextVersion": "context-plan-v1",
-                "promptSchemaVersion": "translation-chunk-v1",
-            },
+            kind_specific_options=translation_options,
         )
         job = NewProcessingJob(
             id=job_id,
@@ -216,12 +221,7 @@ async def p3_translation_fixture(
                 job,
                 spec_json=raw_spec,
                 spec_sha256=hash_job_spec(raw_spec),
-                kind_specific_options={
-                    "targetLanguage": "zh-CN",
-                    "chunkingVersion": spec.chunking_version,
-                    "contextVersion": "context-plan-v1",
-                    "promptSchemaVersion": "translation-chunk-v1",
-                },
+                kind_specific_options=translation_options,
             )
             await work.commit()
         async with context.unit_of_work_factory() as work:

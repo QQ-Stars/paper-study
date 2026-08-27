@@ -1,0 +1,54 @@
+/* 主题选择页：复用论文复现的“可选卡片”阅读方式；预览卡自带令牌，互不受当前主题影响。 */
+.theme-page { max-width: 82rem; }
+.theme-page__header { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-6); padding-bottom: var(--space-5); border-bottom: 1px solid var(--line); }
+.theme-page__header p { margin-top: var(--space-2); color: var(--ink-muted); font-size: var(--text-sm); }
+.theme-page__meta { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--seal-line); border-radius: var(--radius-pill); background: var(--seal-wash); color: var(--seal-deep); font-size: var(--text-xs); white-space: nowrap; }
+.theme-page__intro { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-5); padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--ink-muted); font-size: var(--text-xs); }
+.theme-page__intro > div { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--ink); }
+.theme-page__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); margin-top: var(--space-5); }
+.theme-card { overflow: hidden; border: 1px solid var(--preview-line); border-radius: var(--radius-xl); background: var(--preview-card); box-shadow: var(--shadow-sm); transition: border-color var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out); }
+.theme-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.theme-card--active { border-color: var(--seal); box-shadow: 0 0 0 3px var(--seal-line), var(--shadow-md); }
+.theme-card__chrome { display: flex; align-items: center; gap: var(--space-2); height: 2.25rem; padding: 0 var(--space-4); background: var(--preview-chrome); color: var(--preview-muted); font-family: var(--font-mono); font-size: 0.625rem; letter-spacing: 0.02em; }
+.theme-card__chrome-dot { width: .45rem; height: .45rem; border-radius: 50%; background: var(--preview-accent); box-shadow: 0 0 0 3px var(--preview-accent-wash); }
+.theme-card__chrome-state { margin-left: auto; color: var(--preview-accent); }
+.theme-card__canvas { display: grid; min-height: 17.5rem; grid-template-columns: 8.5rem minmax(0, 1fr); background: var(--preview-paper); color: var(--preview-ink); }
+.theme-card__mini-sidebar { display: flex; min-width: 0; flex-direction: column; gap: .42rem; padding: 1rem .7rem; border-right: 1px solid var(--preview-line); background: var(--preview-sidebar); }
+.theme-card__mini-brand { display: flex; align-items: center; gap: .4rem; margin-bottom: .8rem; color: var(--preview-ink); font-family: var(--font-display); font-size: .66rem; font-weight: 650; }
+.theme-card__mini-brand b { display: grid; width: 1.3rem; height: 1.3rem; place-items: center; border-radius: .35rem; background: var(--preview-accent); color: hsl(0 0% 100%); font-size: .68rem; }
+.theme-card__mini-nav { display: flex; align-items: center; gap: .42rem; min-height: 1.55rem; padding: 0 .45rem; border-radius: .36rem; color: var(--preview-muted); font-size: .62rem; }
+.theme-card__mini-nav i { width: .32rem; height: .32rem; border: 1px solid currentColor; border-radius: 50%; opacity: .7; }
+.theme-card__mini-nav em { margin-left: auto; color: var(--preview-faint); font-family: var(--font-mono); font-size: .52rem; font-style: normal; }
+.theme-card__mini-nav.is-active { background: var(--preview-accent-wash); color: var(--preview-accent); font-weight: 600; }
+.theme-card__mini-spacer { flex: 1; }
+.theme-card__workspace { min-width: 0; padding: 1rem 1.1rem; }
+.theme-card__topline { display: flex; justify-content: space-between; color: var(--preview-faint); font-size: .58rem; }
+.theme-card__kbd { padding: .18rem .34rem; border: 1px solid var(--preview-line); border-radius: .25rem; color: var(--preview-muted); font-family: var(--font-mono); }
+.theme-card__greeting { margin-top: 1.35rem; }
+.theme-card__greeting .eyebrow { color: var(--preview-accent); font-family: var(--font-mono); font-size: .55rem; letter-spacing: .09em; }
+.theme-card__greeting h3 { margin: .35rem 0 .18rem; color: var(--preview-ink); font-family: var(--font-display); font-size: clamp(1.15rem, 2vw, 1.65rem); font-weight: 600; letter-spacing: -.02em; }
+.theme-card__greeting p { color: var(--preview-muted); font-size: .63rem; }
+.theme-card__metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: .45rem; margin-top: 1rem; }
+.theme-card__metrics div { padding: .5rem .55rem; border: 1px solid var(--preview-line); border-radius: .45rem; background: var(--preview-card); }
+.theme-card__metrics small { display: block; color: var(--preview-faint); font-size: .52rem; }
+.theme-card__metrics strong { display: block; margin-top: .22rem; color: var(--preview-ink); font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; }
+.theme-card__paper { display: flex; align-items: center; gap: .55rem; margin-top: .65rem; padding: .58rem; border: 1px solid var(--preview-line); border-radius: .5rem; background: var(--preview-card); }
+.theme-card__paper-mark { display: grid; flex: none; width: 1.6rem; height: 1.9rem; place-items: center; border-radius: .3rem; background: var(--preview-accent-wash); color: var(--preview-accent); font-family: var(--font-display); font-size: .85rem; }
+.theme-card__paper > div:nth-child(2) { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: .16rem; }
+.theme-card__paper strong { overflow: hidden; color: var(--preview-ink); font-size: .62rem; text-overflow: ellipsis; white-space: nowrap; }
+.theme-card__paper span { overflow: hidden; color: var(--preview-muted); font-size: .53rem; text-overflow: ellipsis; white-space: nowrap; }
+.theme-card__paper button { display: inline-flex; flex: none; align-items: center; gap: .2rem; padding: .35rem .5rem; border: 1px solid var(--preview-accent); border-radius: .35rem; background: var(--preview-accent); color: hsl(0 0% 100%); font-size: .54rem; cursor: pointer; }
+.theme-card__paper button:hover { filter: brightness(1.08); }
+.theme-card__footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-top: 1px solid var(--preview-line); background: var(--preview-card); }
+.theme-card__footer h2 { color: var(--preview-ink); font-family: var(--font-display); font-size: var(--text-lg); font-weight: 620; }
+.theme-card__footer p { margin-top: .2rem; color: var(--preview-muted); font-size: var(--text-xs); }
+.theme-card__swatches { display: inline-flex; gap: .3rem; }
+.theme-card__swatches i { width: 1.15rem; height: 1.15rem; border: 1px solid var(--preview-line); border-radius: 50%; background: var(--preview-paper); }
+.theme-card__swatches i:nth-child(2) { background: var(--preview-card); }
+.theme-card__swatches i:nth-child(3) { background: var(--preview-accent); border-color: var(--preview-accent); }
+
+.theme-card[data-theme-preview='light'] { --preview-paper: hsl(40 30% 97%); --preview-sidebar: hsl(40 26% 95%); --preview-card: hsl(0 0% 100%); --preview-chrome: hsl(36 22% 93%); --preview-ink: hsl(24 14% 12%); --preview-muted: hsl(26 6% 46%); --preview-faint: hsl(28 6% 62%); --preview-line: hsl(34 16% 86%); --preview-accent: hsl(9 68% 47%); --preview-accent-wash: hsl(9 68% 47% / .1); }
+.theme-card[data-theme-preview='night'] { --preview-paper: hsl(24 12% 9%); --preview-sidebar: hsl(24 12% 7%); --preview-card: hsl(24 10% 14%); --preview-chrome: hsl(24 11% 15%); --preview-ink: hsl(36 30% 92%); --preview-muted: hsl(32 14% 74%); --preview-faint: hsl(28 8% 53%); --preview-line: hsl(24 10% 24%); --preview-accent: hsl(9 62% 54%); --preview-accent-wash: hsl(9 62% 52% / .18); }
+
+@media (max-width: 900px) { .theme-page__grid { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .theme-page__header, .theme-page__intro { align-items: flex-start; flex-direction: column; } .theme-card__canvas { grid-template-columns: 6.5rem minmax(0, 1fr); } .theme-card__mini-sidebar { padding-inline: .45rem; } .theme-card__mini-brand span { display: none; } .theme-card__workspace { padding-inline: .75rem; } .theme-card__paper button { font-size: .5rem; } }

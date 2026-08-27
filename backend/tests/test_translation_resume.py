@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 import os
 import sqlite3
 import unittest
@@ -15,6 +16,179 @@ NOW = datetime(2026, 8, 13, 10, 0, tzinfo=timezone.utc)
 
 
 class TranslationResumeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_full_mode_sends_the_complete_document_in_one_provider_request(self) -> None:
+        from sqlalchemy import text
+
+        from backend.app.application.document_artifacts import DocumentArtifactService
+        from backend.app.application.ports.translation_provider import TranslationRequest
+        from backend.app.domain.context import ChunkingSpec
+        from backend.app.repositories.translation_checkpoints import (
+            SqlAlchemyTranslationCheckpointRepository,
+        )
+        from backend.tests.support.p3_database import p3_translation_fixture
+
+        markdown = "# First section\n\nFirst body.\n\n# Second section\n\nSecond body.\n"
+        translated = "# 第一节\n\n第一段。\n\n# 第二节\n\n第二段。\n"
+        async with p3_translation_fixture(
+            prefix="study-app-p3-translation-full-",
+            markdown=markdown,
+            spec=ChunkingSpec(target_tokens=2, hard_cap_tokens=2),
+            now=NOW,
+            translation_mode="full",
+        ) as fixture:
+            class Provider:
+                provider_id = fixture.provider
+                model_id = fixture.model
+                prompt_version = fixture.prompt_version
+
+                def __init__(self) -> None:
+                    self.calls: list[TranslationRequest] = []
+
+                async def translate(self, request: TranslationRequest) -> str:
+                    self.calls.append(request)
+                    return translated
+
+            provider = Provider()
+            service = DocumentArtifactService(
+                fixture.unit_of_work_factory,
+                context_builder=fixture.builder,
+                translation_provider=provider,
+                checkpoint_repository=SqlAlchemyTranslationCheckpointRepository(
+                    fixture.session_factory,
+                    clock=lambda: NOW + timedelta(seconds=1),
+                ),
+                clock=lambda: NOW + timedelta(seconds=1),
+            )
+
+            artifact = await service.run(fixture.lease, fixture.artifact_id)
+
+            self.assertEqual(1, len(provider.calls))
+            self.assertEqual(markdown, provider.calls[0].markdown)
+            self.assertEqual(translated, artifact.content)
+            async with fixture.session_factory() as session:
+                checkpoint_count = (
+                    await session.execute(
+                        text(
+                            "SELECT count(*) FROM artifact_translation_checkpoints "
+                            "WHERE artifact_id=:artifact_id"
+                        ),
+                        {"artifact_id": fixture.artifact_id},
+                    )
+                ).scalar_one()
+                job_status = (
+                    await session.execute(
+                        text("SELECT status FROM processing_jobs WHERE id=:job_id"),
+                        {"job_id": fixture.job_id},
+                    )
+                ).scalar_one()
+            self.assertEqual(0, checkpoint_count)
+            self.assertEqual("succeeded", job_status)
+
+    async def test_full_mode_provider_failure_enters_worker_retry_without_timeout(self) -> None:
+        from sqlalchemy import text
+
+        from backend.app.application.document_artifacts import DocumentArtifactService
+        from backend.app.application.ports.translation_provider import TranslationRequest
+        from backend.app.domain import TranslationProviderRequestError
+        from backend.app.domain.context import ChunkingSpec
+        from backend.app.repositories.translation_checkpoints import (
+            SqlAlchemyTranslationCheckpointRepository,
+        )
+        from backend.app.workers.processing_worker import (
+            ProcessingHandlerOutcome,
+            ProcessingWorker,
+        )
+        from backend.tests.support.p3_database import p3_translation_fixture
+
+        markdown = "# Full retry\n\nThe complete document must be retried as one request.\n"
+        async with p3_translation_fixture(
+            prefix="study-app-p3-translation-full-retry-",
+            markdown=markdown,
+            spec=ChunkingSpec(target_tokens=2, hard_cap_tokens=2),
+            now=NOW,
+            translation_mode="full",
+        ) as fixture:
+            class FailingProvider:
+                provider_id = fixture.provider
+                model_id = fixture.model
+                prompt_version = fixture.prompt_version
+
+                def __init__(self) -> None:
+                    self.calls: list[TranslationRequest] = []
+
+                async def translate(self, request: TranslationRequest) -> str:
+                    self.calls.append(request)
+                    raise TranslationProviderRequestError(retryable=True)
+
+            provider = FailingProvider()
+            worker_now = NOW + timedelta(hours=1, seconds=1)
+            service = DocumentArtifactService(
+                fixture.unit_of_work_factory,
+                context_builder=fixture.builder,
+                translation_provider=provider,
+                checkpoint_repository=SqlAlchemyTranslationCheckpointRepository(
+                    fixture.session_factory,
+                    clock=lambda: worker_now,
+                ),
+                clock=lambda: worker_now,
+            )
+
+            async def handle_translation(lease):
+                await service.run(lease, fixture.artifact_id)
+                return ProcessingHandlerOutcome.settled()
+
+            worker = ProcessingWorker(
+                fixture.unit_of_work_factory,
+                handlers={"translate": handle_translation},
+                worker_id="translation-full-retry-worker",
+                clock=lambda: worker_now,
+                lease_seconds=3600,
+            )
+
+            self.assertTrue(await worker.run_once())
+            self.assertEqual(1, len(provider.calls))
+            self.assertEqual(markdown, provider.calls[0].markdown)
+            async with fixture.session_factory() as session:
+                job = (
+                    await session.execute(
+                        text(
+                            "SELECT status,attempt,error_code FROM processing_jobs "
+                            "WHERE id=:job_id"
+                        ),
+                        {"job_id": fixture.job_id},
+                    )
+                ).one()
+                artifact_status = (
+                    await session.execute(
+                        text(
+                            "SELECT status FROM generated_artifacts "
+                            "WHERE id=:artifact_id"
+                        ),
+                        {"artifact_id": fixture.artifact_id},
+                    )
+                ).scalar_one()
+                events = (
+                    await session.execute(
+                        text(
+                            "SELECT event_type,progress_json,error_code "
+                            "FROM processing_job_events WHERE job_id=:job_id "
+                            "ORDER BY sequence"
+                        ),
+                        {"job_id": fixture.job_id},
+                    )
+                ).all()
+            self.assertEqual(
+                ("queued", 2, "TRANSLATION_PROVIDER_REQUEST_FAILED"),
+                job,
+            )
+            self.assertEqual("queued", artifact_status)
+            self.assertIn(
+                {"stage": "translation_full", "completed": 0, "total": 1},
+                [json.loads(row.progress_json) for row in events],
+            )
+            self.assertIn("retry_scheduled", [row.event_type for row in events])
+            self.assertNotIn("PROCESSING_TIMEOUT", [row.error_code for row in events])
+
     async def test_worker_empty_provider_output_fails_checkpoint_and_job_closed(
         self,
     ) -> None:

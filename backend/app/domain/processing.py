@@ -232,10 +232,15 @@ class TranslateJobSpecV1:
     artifact_id: str
     source_mode: str = "native"
     job_type: str = "translate"
+    # Appended after the legacy fields so positional construction from older
+    # callers keeps its source_mode/job_type meaning during rollout.
+    mode: str = "chunked"
 
     def __post_init__(self) -> None:
         for name in ("paper_id", "source_document_id", "artifact_id"):
             _nonblank(getattr(self, name), name)
+        if self.mode not in {"chunked", "full"}:
+            raise JobSpecValidationError("translate mode is invalid")
         if self.source_mode not in {"native", "ocr"} or self.job_type != "translate":
             raise JobSpecValidationError("translate job binding is invalid")
 
@@ -534,7 +539,9 @@ def _payload(value: JobSpecV1) -> dict[str, object]:
             }
         )
     elif isinstance(value, TranslateJobSpecV1):
-        arguments = {}
+        # Preserve the original chunked encoding so existing queued jobs and
+        # idempotency keys remain valid across this rollout.
+        arguments = {} if value.mode == "chunked" else {"mode": value.mode}
     elif isinstance(value, (ObsidianExportJobSpecV1, ObsidianSyncJobSpecV1)):
         arguments = (
             {}
@@ -686,11 +693,17 @@ def decode_job_spec_v1(
             source_mode=_nonblank(source_mode, "sourceMode"), job_type=job_type,
         )
     elif job_type == "translate":
-        if arguments:
+        if frozenset(arguments) not in {frozenset(), frozenset({"mode"})}:
             raise JobSpecValidationError("translate arguments are invalid")
         value = TranslateJobSpecV1(
             paper_id=_nonblank(paper_id, "paperId"), source_document_id=_nonblank(source_document_id, "sourceDocumentId"),
-            artifact_id=_nonblank(artifact_id, "artifactId"), source_mode=_nonblank(source_mode, "sourceMode"), job_type=job_type,
+            artifact_id=_nonblank(artifact_id, "artifactId"),
+            mode=(
+                _nonblank(arguments["mode"], "mode")
+                if "mode" in arguments
+                else "chunked"
+            ),
+            source_mode=_nonblank(source_mode, "sourceMode"), job_type=job_type,
         )
     elif job_type == "embed":
         if artifact_id is not None:

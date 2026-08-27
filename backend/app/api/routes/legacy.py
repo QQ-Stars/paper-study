@@ -16,7 +16,6 @@ from backend.app.api.middleware.ndjson import ndjson_response
 
 
 _JSON_CONTENT_TYPE = "application/json; charset=utf-8"
-_DURABLE_STREAM_TIMEOUT_SECONDS = 45.0
 # Only storage-identity misses indicate that a paper predates the durable
 # source-document pipeline.  Provider failures must stay terminal: invoking
 # the compatibility agent after a real durable failure can duplicate an LLM
@@ -1190,9 +1189,7 @@ async def _durable_artifact_events(
     durable_error: str | None = None
     durable_terminal: dict[str, object] | None = None
     if callable(stream):
-        observed: list[dict[str, object]] = []
         iterator = stream(paper_id, kind, profile=profile).__aiter__()
-        timed_out = False
 
         async def close_iterator() -> None:
             close = getattr(iterator, "aclose", None)
@@ -1203,31 +1200,22 @@ async def _durable_artifact_events(
                     pass
 
         try:
-            deadline = (
-                asyncio.get_running_loop().time()
-                + _DURABLE_STREAM_TIMEOUT_SECONDS
-            )
             while True:
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    timed_out = True
-                    break
                 try:
-                    event = await asyncio.wait_for(
-                        iterator.__anext__(),
-                        timeout=remaining,
-                    )
+                    # A durable job may legitimately remain queued while the
+                    # worker is busy, or may spend longer than the old fixed
+                    # 45-second window in one full-document provider request.
+                    # Waiting for the durable stream itself keeps the HTTP
+                    # projection attached to the job instead of cancelling a
+                    # valid job and reporting a false PROCESSING_TIMEOUT.
+                    event = await iterator.__anext__()
                 except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
-                    timed_out = True
                     break
                 except Exception as error:
                     durable_terminal = {"ok": False, "error": _safe_error(error)}
                     break
                 if not isinstance(event, dict):
                     continue
-                observed.append(event)
                 if event.get("type") in {"done", "result"}:
                     durable_terminal = event
                     if event.get("ok"):
@@ -1242,27 +1230,6 @@ async def _durable_artifact_events(
         except asyncio.CancelledError:
             await close_iterator()
             raise
-        if timed_out:
-            await close_iterator()
-            durable_error = "PROCESSING_TIMEOUT"
-            job_ids = {
-                str(event.get("jobId"))
-                for event in observed
-                if str(event.get("jobId") or "").strip()
-            }
-            for job_id in job_ids:
-                try:
-                    await request.app.state.container.processing_api.cancel_job(job_id)
-                except Exception:
-                    pass
-            yield {"type": "progress", "line": "DURABLE::timeout，已取消"}
-            yield {
-                "type": "result",
-                "ok": False,
-                "markdown": "",
-                "error": durable_error,
-            }
-            return
         await close_iterator()
         if durable_terminal is None:
             yield {
