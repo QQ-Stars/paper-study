@@ -197,6 +197,9 @@ export interface Settings {
   ocrMarkdownDir: string;
   defaultOcrMarkdownDir: string;
   resolvedOcrMarkdownDir: string;
+  reproductionDir: string;
+  defaultReproductionDir: string;
+  resolvedReproductionDir: string;
   researchTheme: string;
   obsidianEnabled: boolean;
   obsidianVaultPath: string;

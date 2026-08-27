@@ -748,6 +748,18 @@
   justify-content: flex-end;
 }
 
+.settings-row--reproduction {
+  margin-inline: calc(var(--space-2) * -1);
+  padding-inline: var(--space-3);
+  border: 1px solid var(--seal-line);
+  border-radius: var(--radius-md);
+  background: var(--seal-wash);
+}
+
+.settings-row--reproduction .settings-row__label strong {
+  color: var(--seal-deep);
+}
+
 .settings-switch {
   appearance: none;
   flex: none;

@@ -22,9 +22,15 @@ _DURABLE_STREAM_TIMEOUT_SECONDS = 45.0
 # the compatibility agent after a real durable failure can duplicate an LLM
 # call or obscure the actionable error returned by the durable worker.
 _DURABLE_ARTIFACT_FALLBACK_ERRORS = frozenset({"SOURCE_IDENTITY_MISSING"})
-# Embedding jobs use the same compatibility boundary as artifact jobs: only
-# records that predate durable source identity may be retried through agent.
-_DURABLE_EMBEDDING_FALLBACK_ERRORS = _DURABLE_ARTIFACT_FALLBACK_ERRORS
+# Embedding jobs use the same compatibility boundary as artifact jobs, with one
+# additional pre-enqueue case: the durable P3 runtime currently supports the
+# local model2vec adapter only.  When settings select the legacy/API embedding
+# adapter, no durable job has run yet, so the established agent implementation
+# can execute the request without duplicating a provider call or hiding a worker
+# failure.
+_DURABLE_EMBEDDING_FALLBACK_ERRORS = _DURABLE_ARTIFACT_FALLBACK_ERRORS | frozenset(
+    {"EMBEDDING_PROFILE_UNAVAILABLE"}
+)
 
 
 def create_legacy_router() -> APIRouter:

@@ -275,6 +275,7 @@ def bootstrap(
             "explainerDir": repository_root / "data" / "explainers",
             "translationDir": repository_root / "data" / "translations",
             "ocrMarkdownDir": repository_root / "data" / "ocr_markdown",
+            "reproductionDir": repository_root / "data" / "reproduction-artifacts",
         },
     )
     translation_provider_factory = _bind_p3_credential_resolver(
@@ -459,7 +460,7 @@ def bootstrap(
         pdf_files=pdf_files,
         reproduction_workspace=ReproductionWorkspace(
             unit_of_work_factory,
-            artifact_root=repository_root / "data" / "reproduction-artifacts",
+            artifact_root=settings_service.resolve_directory("reproductionDir"),
         ),
     )
 
@@ -642,6 +643,7 @@ def bootstrap_processing_worker(
                 "explainerDir": repository_root / "data" / "explainers",
                 "translationDir": repository_root / "data" / "translations",
                 "ocrMarkdownDir": repository_root / "data" / "ocr_markdown",
+                "reproductionDir": repository_root / "data" / "reproduction-artifacts",
             },
         )
         settings_service = p3_settings_service

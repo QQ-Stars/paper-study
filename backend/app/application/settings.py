@@ -57,6 +57,7 @@ _STRING_FIELDS = frozenset(
         "explainerDir",
         "translationDir",
         "ocrMarkdownDir",
+        "reproductionDir",
         "researchTheme",
         "translateMode",
     }
@@ -85,6 +86,7 @@ _DIRECTORY_ENV_FIELDS = {
     "explainerDir": "EXPLAINER_DIR",
     "translationDir": "TRANSLATION_DIR",
     "ocrMarkdownDir": "OCR_MARKDOWN_DIR",
+    "reproductionDir": "REPRODUCTION_DIR",
 }
 _LLM_PRESETS = {
     "deepseek": ("https://api.deepseek.com", "deepseek-v4-flash"),
@@ -189,6 +191,11 @@ class SettingsService:
             "ocrMarkdownDir": Path(
                 (default_dirs or {}).get(
                     "ocrMarkdownDir", self.root / "data" / "ocr_markdown"
+                )
+            ).expanduser(),
+            "reproductionDir": Path(
+                (default_dirs or {}).get(
+                    "reproductionDir", self.root / "data" / "reproduction-artifacts"
                 )
             ).expanduser(),
         }
@@ -518,6 +525,17 @@ class SettingsService:
         )
         return result
 
+    def resolve_directory(self, field: str) -> Path:
+        """Resolve a configured data directory for services initialized at startup."""
+        if field not in _DIRECTORY_ENV_FIELDS:
+            raise ValueError(f"unknown directory setting: {field}")
+        document = self._read_document()
+        return _resolve_dir(
+            self.root,
+            _value(document, field, self.environment, _DIRECTORY_ENV_FIELDS[field], "")
+            or self.default_dirs[field],
+        )
+
     def _obsidian_from_document(
         self, document: Mapping[str, object]
     ) -> ObsidianSettings:
@@ -712,7 +730,13 @@ class SettingsService:
 
     def _prepare_directories(self, document: Mapping[str, object]) -> None:
         try:
-            for field in ("pdfDir", "explainerDir", "translationDir", "ocrMarkdownDir"):
+            for field in (
+                "pdfDir",
+                "explainerDir",
+                "translationDir",
+                "ocrMarkdownDir",
+                "reproductionDir",
+            ):
                 value = document.get(field)
                 if isinstance(value, str) and value.strip():
                     _resolve_dir(self.root, value).mkdir(parents=True, exist_ok=True)

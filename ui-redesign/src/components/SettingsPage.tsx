@@ -54,14 +54,18 @@ function Row({
   desc,
   children,
   isSwitch,
+  className,
 }: {
   title: string;
   desc?: string;
   children: ReactNode;
   isSwitch?: boolean;
+  className?: string;
 }) {
   return (
-    <div className={`settings-row${isSwitch ? ' settings-row--switch' : ''}`}>
+    <div
+      className={`settings-row${isSwitch ? ' settings-row--switch' : ''}${className ? ` ${className}` : ''}`}
+    >
       <span className="settings-row__label">
         <strong>{title}</strong>
         {desc && <small>{desc}</small>}
@@ -125,6 +129,7 @@ export function SettingsPage({ notify }: SettingsPageProps) {
         explainerDir: data.explainerDir,
         translationDir: data.translationDir,
         ocrMarkdownDir: data.ocrMarkdownDir,
+        reproductionDir: data.reproductionDir,
         obsidianEnabled: data.obsidianEnabled,
         obsidianVaultPath: data.obsidianVaultPath,
         obsidianRootFolder: data.obsidianRootFolder,
@@ -623,7 +628,7 @@ export function SettingsPage({ notify }: SettingsPageProps) {
             </Row>
           </Section>
 
-          <Section id="sec-dirs" title="数据目录" desc="留空使用括号中的默认相对路径">
+          <Section id="sec-dirs" title="数据目录" desc="统一管理文献产物与论文复现附件的本地存储位置">
             <Row title="PDF 目录" desc={`当前：${settings.resolvedPdfDir}`}>
               <input
                 className="input"
@@ -661,6 +666,19 @@ export function SettingsPage({ notify }: SettingsPageProps) {
                 value={String(draft.ocrMarkdownDir ?? '')}
                 placeholder={settings.defaultOcrMarkdownDir ?? 'data/ocr_markdown'}
                 onChange={(event) => set('ocrMarkdownDir')(event.target.value)}
+              />
+            </Row>
+            <Row
+              title="论文复现目录"
+              desc={`当前：${settings.resolvedReproductionDir ?? '（后端重启后生效）'} · 保存后重启后端生效 · 留空＝默认 data/reproduction-artifacts`}
+              className="settings-row--reproduction"
+            >
+              <input
+                className="input"
+                aria-label="论文复现目录"
+                value={String(draft.reproductionDir ?? '')}
+                placeholder={settings.defaultReproductionDir ?? 'data/reproduction-artifacts'}
+                onChange={(event) => set('reproductionDir')(event.target.value)}
               />
             </Row>
           </Section>

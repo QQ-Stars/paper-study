@@ -247,12 +247,14 @@ class SettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     "explainerDir": "artifacts/explainers",
                     "translationDir": "artifacts/translations",
                     "ocrMarkdownDir": "artifacts/ocr",
+                    "reproductionDir": "artifacts/reproduction",
                 }
             )
 
             self.assertTrue((root / "artifacts/explainers").is_dir())
             self.assertTrue((root / "artifacts/translations").is_dir())
             self.assertTrue((root / "artifacts/ocr").is_dir())
+            self.assertTrue((root / "artifacts/reproduction").is_dir())
 
     async def test_artifact_directories_follow_saved_then_environment_then_default_priority(self) -> None:
         with tempfile.TemporaryDirectory(prefix="study-app-settings-dir-priority-") as temp:
@@ -266,6 +268,7 @@ class SettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     "EXPLAINER_DIR": "env/explainers",
                     "TRANSLATION_DIR": "env/translations",
                     "OCR_MARKDOWN_DIR": "env/ocr",
+                    "REPRODUCTION_DIR": "env/reproduction",
                 },
             )
 
@@ -274,13 +277,29 @@ class SettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("env/explainers", environment_view["explainerDir"])
             self.assertEqual("env/translations", environment_view["translationDir"])
             self.assertEqual("env/ocr", environment_view["ocrMarkdownDir"])
+            self.assertEqual("env/reproduction", environment_view["reproductionDir"])
+            self.assertEqual(
+                (root / "env/reproduction").resolve(),
+                service.resolve_directory("reproductionDir"),
+            )
 
-            await service.update({"pdfDir": "saved/pdfs", "ocrMarkdownDir": "saved/ocr"})
+            await service.update(
+                {
+                    "pdfDir": "saved/pdfs",
+                    "ocrMarkdownDir": "saved/ocr",
+                    "reproductionDir": "saved/reproduction",
+                }
+            )
             saved_view = await service.view()
             self.assertEqual("saved/pdfs", saved_view["pdfDir"])
             self.assertEqual("env/explainers", saved_view["explainerDir"])
             self.assertEqual("env/translations", saved_view["translationDir"])
             self.assertEqual("saved/ocr", saved_view["ocrMarkdownDir"])
+            self.assertEqual("saved/reproduction", saved_view["reproductionDir"])
+            self.assertEqual(
+                (root / "saved/reproduction").resolve(),
+                service.resolve_directory("reproductionDir"),
+            )
 
     async def test_legacy_agent_directories_use_environment_when_settings_are_absent(self) -> None:
         with tempfile.TemporaryDirectory(prefix="study-app-agent-dir-priority-") as temp:

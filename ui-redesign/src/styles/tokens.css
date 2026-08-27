@@ -14,6 +14,9 @@
   --card: hsl(0 0% 100%);
   --card-hover: hsl(36 26% 98%);
   --tool-surface: hsl(36 22% 95%);
+  --editor-surface: hsl(40 34% 98%);
+  --editor-toolbar: hsl(36 22% 93%);
+  --inspector-surface: hsl(36 22% 95%);
 
   /* ── 色板：墨 ── */
   --ink: hsl(24 14% 12%);
@@ -117,6 +120,9 @@
   --card: hsl(24 10% 13%);
   --card-hover: hsl(24 11% 17%);
   --tool-surface: hsl(24 11% 16%);
+  --editor-surface: hsl(24 10% 11%);
+  --editor-toolbar: hsl(24 11% 15%);
+  --inspector-surface: hsl(24 11% 14%);
 
   /* 墨 → 暖白 */
   --ink: hsl(36 30% 92%);

@@ -280,7 +280,8 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const [statusFilter, setStatusFilter] = useState(savedListState.status);
   const [tagFilter, setTagFilter] = useState(savedListState.tag);
   const [sort, setSort] = useState<'updated' | 'created' | 'name'>(savedListState.sort);
-  const [mode, setMode] = useState<EditorMode>('split');
+  // Editing is the primary task on this page; preview and split remain one-click modes.
+  const [mode, setMode] = useState<EditorMode>('edit');
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const [runsExpanded, setRunsExpanded] = useState(false);
   const [draft, setDraft] = useState('');

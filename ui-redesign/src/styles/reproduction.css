@@ -1170,6 +1170,142 @@
   }
 }
 
+/* ── 详情页：编辑优先的研究工作台 ── */
+.reproduction-page--detail {
+  --editor-toolbar-height: 5.25rem;
+}
+
+.reproduction-page--detail .reproduction__workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 19rem);
+  gap: var(--space-5);
+}
+
+.reproduction-page--detail .reproduction__editor {
+  min-height: calc(100dvh - var(--topbar-height) - var(--space-10));
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.reproduction-page--detail .reproduction__editor-head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  min-height: var(--editor-toolbar-height);
+  padding: var(--space-4) var(--space-6);
+  background: var(--editor-toolbar);
+  border-bottom-color: var(--line-strong);
+}
+
+.reproduction-page--detail .reproduction__editor-head h1 {
+  letter-spacing: -0.015em;
+}
+
+.reproduction-page--detail .reproduction__segments {
+  padding: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+
+.reproduction-page--detail .reproduction__segments button {
+  min-height: 2.25rem;
+  padding-inline: var(--space-3);
+}
+
+.reproduction-page--detail .reproduction__editor-body {
+  background: var(--editor-surface);
+}
+
+.reproduction-page--detail .reproduction__editor-body--split {
+  grid-template-columns: minmax(20rem, 0.95fr) minmax(18rem, 1.05fr);
+}
+
+.reproduction-page--detail .reproduction__editor-body textarea {
+  min-height: calc(100dvh - 16.5rem);
+  padding: var(--space-8);
+  background: var(--editor-surface);
+  color: var(--ink);
+  font-size: var(--text-md);
+  line-height: 1.9;
+  tab-size: 2;
+}
+
+.reproduction-page--detail .reproduction__editor-body textarea:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--seal-line);
+}
+
+.reproduction-page--detail .reproduction__preview {
+  min-width: 0;
+  padding: var(--space-8);
+  background: var(--card);
+}
+
+.reproduction-page--detail .reproduction__preview .md-body {
+  max-width: 52rem;
+  margin-inline: auto;
+  padding-bottom: var(--space-8);
+  line-height: 1.8;
+}
+
+.reproduction-page--detail .reproduction__editor-foot {
+  background: var(--editor-toolbar);
+  border-top-color: var(--line-strong);
+}
+
+.reproduction-page--detail .reproduction__inspector {
+  max-height: calc(100dvh - var(--topbar-height) - var(--space-10));
+  background: var(--inspector-surface);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.reproduction-page--detail .reproduction__inspector-section {
+  padding: var(--space-4) var(--space-5);
+}
+
+.reproduction-page--detail .reproduction__inspector-section:first-child {
+  padding-top: var(--space-5);
+}
+
+.reproduction-page--detail .reproduction__section-head h2 {
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+}
+
+.reproduction-page--detail .reproduction__outline button {
+  min-height: 2.25rem;
+  padding-inline: var(--space-2);
+}
+
+@media (max-width: 1180px) {
+  .reproduction-page--detail .reproduction__editor {
+    min-height: 36rem;
+  }
+
+  .reproduction-page--detail .reproduction__inspector {
+    max-height: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .reproduction-page--detail .reproduction__editor-head {
+    position: static;
+    padding: var(--space-4);
+  }
+
+  .reproduction-page--detail .reproduction__editor-body textarea {
+    min-height: 28rem;
+    padding: var(--space-5);
+    font-size: var(--text-sm);
+  }
+
+  .reproduction-page--detail .reproduction__preview {
+    padding: var(--space-5);
+  }
+}
+
 /* ── 列表卡片：与复习页保持同一套「主题 / 标题 / 元信息 / 进度」节奏 ── */
 .reproduction-page--list .reproduction__project-list {
   grid-template-columns: repeat(auto-fill, minmax(15rem, 18rem));

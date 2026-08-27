@@ -565,11 +565,12 @@ class NdjsonApiTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_durable_embedding_failure_does_not_fallback_to_legacy_agent(self) -> None:
+    def test_durable_embedding_failure_falls_back_only_for_compatibility_errors(self) -> None:
         async def scenario() -> None:
             for durable_error, should_fallback in (
                 ("PROCESSING_JOB_FAILED", False),
                 ("SOURCE_IDENTITY_MISSING", True),
+                ("EMBEDDING_PROFILE_UNAVAILABLE", True),
             ):
                 with self.subTest(durable_error=durable_error):
                     async with p3_database_fixture(
