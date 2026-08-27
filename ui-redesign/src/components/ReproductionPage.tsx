@@ -86,6 +86,16 @@ const RUN_STATUS_LABELS: Record<ExperimentRun['status'], string> = {
   blocked: '受阻',
 };
 
+/* 复现项目没有统一的数值进度字段，使用状态阶段作为轻量视觉进度。 */
+const PROJECT_STAGE_PROGRESS: Record<ReproductionStatus, number> = {
+  planned: 12,
+  preparing: 32,
+  running: 64,
+  completed: 100,
+  blocked: 48,
+  archived: 100,
+};
+
 const RESULT_STATUS_LABELS: Record<ReproductionResultStatus, string> = {
   reproduced: '已复现',
   partial: '部分复现',
@@ -835,7 +845,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       <div className="reproduction__workspace" ref={listScrollRef}>
         <aside className="reproduction__projects" aria-label="复现项目列表">
           <div className="reproduction__projects-heading"><span className="eyebrow">PROJECTS</span><span>{projects.length}</span></div>
-          {loading ? <div className="reproduction__empty">正在加载复现项目…</div> : projects.length === 0 ? <div className="reproduction__empty"><DocumentIcon size={22} /><strong>{error ? '无法连接复现服务' : '还没有复现项目'}</strong><span>{error ? '请确认后端已启动后重试。' : '从一篇论文开始，记录你的复现过程。'}</span><button type="button" className="btn btn--primary btn--sm" onClick={() => setCreateOpen(true)}>新建项目</button></div> : <ul className="reproduction__project-list">{projects.map((project) => <li key={project.id}><button type="button" className={`reproduction__project${project.id === selectedId ? ' reproduction__project--active' : ''}`} aria-current={project.id === selectedId ? 'true' : undefined} aria-label={`打开复现项目 ${project.name}`} onClick={() => selectProject(project.id)}><span className="reproduction__project-glyph">{project.name.slice(0, 1)}</span><span className="reproduction__project-copy"><strong>{project.name}</strong><small>{project.paperTitle || '未关联论文'}{project.paperId ? ` · ${project.paperId}` : ''}</small><span><StatusBadge status={project.status} /><em>{formatDate(project.updatedAt)}</em></span><small>{project.runCount ?? 0} 次运行{project.lastRunSummary ? ` · ${project.lastRunSummary}` : ' · 尚无结果摘要'}</small>{project.tags.length > 0 && <span className="reproduction__project-tags" aria-label="项目标签">{project.tags.slice(0, 4).map((tag) => <em key={tag}>{tag}</em>)}</span>}{(project.hasFailedTask || project.hasUnsavedContent) && <small className="reproduction__project-warning">{project.hasUnsavedContent ? '有未保存内容' : '存在失败任务'}</small>}</span></button></li>)}</ul>}
+          {loading ? <div className="reproduction__empty">正在加载复现项目…</div> : projects.length === 0 ? <div className="reproduction__empty"><DocumentIcon size={22} /><strong>{error ? '无法连接复现服务' : '还没有复现项目'}</strong><span>{error ? '请确认后端已启动后重试。' : '从一篇论文开始，记录你的复现过程。'}</span><button type="button" className="btn btn--primary btn--sm" onClick={() => setCreateOpen(true)}>新建项目</button></div> : <ul className="reproduction__project-list">{projects.map((project) => { const progress = PROJECT_STAGE_PROGRESS[project.status]; return <li key={project.id}><button type="button" className={`reproduction__project${project.id === selectedId ? ' reproduction__project--active' : ''}`} aria-current={project.id === selectedId ? 'true' : undefined} aria-label={`打开复现项目 ${project.name}`} onClick={() => selectProject(project.id)}><span className="reproduction__project-glyph">{project.name.slice(0, 1)}</span><span className="reproduction__project-copy"><strong>{project.name}</strong><small>{project.paperTitle || '未关联论文'}{project.paperId ? ` · ${project.paperId}` : ''}</small><span><StatusBadge status={project.status} /><em>{formatDate(project.updatedAt)}</em></span><small>{project.runCount ?? 0} 次运行{project.lastRunSummary ? ` · ${project.lastRunSummary}` : ' · 尚无结果摘要'}</small><span className="reproduction__project-progress" aria-label={`项目阶段：${STATUS_LABELS[project.status]}`}><i style={{ width: `${progress}%` }} /><em>{STATUS_LABELS[project.status]}</em></span>{project.tags.length > 0 && <span className="reproduction__project-tags" aria-label="项目标签">{project.tags.slice(0, 4).map((tag) => <em key={tag}>{tag}</em>)}</span>}{(project.hasFailedTask || project.hasUnsavedContent) && <small className="reproduction__project-warning">{project.hasUnsavedContent ? '有未保存内容' : '存在失败任务'}</small>}</span></button></li>; })}</ul>}
         </aside>
 
         {!listOnly && !selected && !detailLoading && projects.length > 0 && <div className="reproduction__selection-empty"><DocumentIcon size={28} /><h2>选择一个复现项目</h2><p>从左侧选择项目，开始编辑复现文档或记录实验运行。</p></div>}

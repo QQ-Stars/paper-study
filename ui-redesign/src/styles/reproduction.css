@@ -1169,3 +1169,131 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── 列表卡片：与复习页保持同一套「主题 / 标题 / 元信息 / 进度」节奏 ── */
+.reproduction-page--list .reproduction__project-list {
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 18rem));
+  justify-content: start;
+  gap: var(--space-4);
+}
+
+.reproduction-page--list .reproduction__project {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start;
+  gap: var(--space-3);
+  min-height: 14rem;
+  padding: var(--space-4);
+  overflow: hidden;
+  border-color: var(--line);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.reproduction-page--list .reproduction__project::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 0.2rem;
+  background: var(--seal);
+  content: '';
+  opacity: 0.72;
+}
+
+.reproduction-page--list .reproduction__project:hover,
+.reproduction-page--list .reproduction__project:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--seal-line);
+  background: var(--card-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.reproduction-page--list .reproduction__project--active {
+  border-color: var(--seal-line);
+  background: var(--seal-wash);
+  box-shadow: var(--shadow-md);
+}
+
+.reproduction-page--list .reproduction__project-glyph {
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: var(--radius-md);
+  background: var(--paper-deep);
+  color: var(--seal-deep);
+  font-size: var(--text-lg);
+}
+
+.reproduction-page--list .reproduction__project-copy {
+  gap: var(--space-2);
+}
+
+.reproduction-page--list .reproduction__project-copy strong {
+  color: var(--ink);
+  font-size: var(--text-md);
+  line-height: 1.4;
+}
+
+.reproduction-page--list .reproduction__project-copy > span:not(.reproduction__project-tags):not(.reproduction__project-progress) {
+  margin-top: 0;
+}
+
+.reproduction-page--list .reproduction__project-copy > small {
+  line-height: 1.45;
+}
+
+.reproduction__project-progress {
+  display: block;
+  position: relative;
+  width: 100%;
+  margin-top: auto;
+  min-width: 0;
+  height: 1rem;
+  padding-right: 2.5rem;
+}
+
+.reproduction__project-progress::before {
+  position: absolute;
+  top: 0.35rem;
+  right: 2.5rem;
+  left: 0;
+  height: 0.3rem;
+  border-radius: var(--radius-pill);
+  background: var(--paper-sunken);
+  content: '';
+}
+
+.reproduction__project-progress i {
+  position: absolute;
+  top: 0.35rem;
+  left: 0;
+  height: 0.3rem;
+  border-radius: var(--radius-pill);
+  background: var(--seal);
+  z-index: 1;
+}
+
+.reproduction__project-progress em {
+  position: absolute;
+  top: 0;
+  right: 0;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-style: normal;
+}
+
+@media (max-width: 800px) {
+  .reproduction-page--list .reproduction__project-list {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+
+  .reproduction-page--list .reproduction__project {
+    min-height: 13rem;
+  }
+}
