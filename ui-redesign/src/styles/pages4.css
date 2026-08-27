@@ -1540,6 +1540,8 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-6);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: hsl(24 14% 12% / 0.42);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
@@ -1548,8 +1550,11 @@
 
 .danger-dialog {
   display: grid;
+  grid-template-rows: auto auto minmax(0, auto) auto;
   gap: var(--space-4);
   width: min(30rem, 100%);
+  max-height: calc(100dvh - (var(--space-6) * 2));
+  overflow: hidden;
   padding: var(--space-6);
   border: 1px solid var(--seal-line);
   border-radius: var(--radius-lg);
@@ -1645,4 +1650,27 @@
   color: var(--ink-faint);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
+}
+
+@media (max-width: 640px) {
+  .danger-dialog-overlay {
+    align-items: flex-end;
+    padding: var(--space-3);
+  }
+
+  .danger-dialog {
+    width: 100%;
+    max-height: calc(100dvh - (var(--space-3) * 2));
+    padding: var(--space-5);
+  }
+
+  .danger-dialog__foot,
+  .danger-dialog__foot .deep__actions {
+    width: 100%;
+  }
+
+  .danger-dialog__foot .deep__actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
 }
