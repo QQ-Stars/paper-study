@@ -41,6 +41,7 @@ export default function App() {
   const [readerPaperId, setReaderPaperId] = useState<string | null>(null);
   const [reproductionPaperId, setReproductionPaperId] = useState<string | null>(null);
   const [reproductionProjectId, setReproductionProjectId] = useState<string | null>(null);
+  const [acquireSession, setAcquireSession] = useState(0);
   const [pdfViewer, setPdfViewer] = useState<{ id: string; title: string } | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState('');
@@ -137,6 +138,14 @@ export default function App() {
     if (next !== 'reproduction-detail') setReproductionProjectId(null);
   }, []);
 
+  const startAcquire = useCallback(() => {
+    // The topbar action is also available while already on the acquisition
+    // page.  Change the key so the page gets a clean draft/stream and a second
+    // collection round does not inherit the previous candidates.
+    setAcquireSession((session) => session + 1);
+    navigate('acquire');
+  }, [navigate]);
+
   const openPaper = useCallback((id: string) => {
     setSelectedPaperId(id);
     setPage('library');
@@ -198,7 +207,7 @@ export default function App() {
           pageLabel={topbarLabel}
           pageHint={topbarHint}
           onOpenPalette={() => setPaletteOpen(true)}
-          onAcquire={() => navigate('acquire')}
+          onAcquire={startAcquire}
         />
         <main id="page-root">
           <ErrorBoundary key={page}>
@@ -230,7 +239,9 @@ export default function App() {
           {page === 'reviews' && (
             <ReviewsPage reviews={reviews} {...shared} />
           )}
-          {page === 'acquire' && <AcquirePage papers={papersReady} {...shared} />}
+          {page === 'acquire' && (
+            <AcquirePage key={`acquire-${acquireSession}`} papers={papersReady} {...shared} />
+          )}
           {page === 'jobs' && <JobsPage notify={notify} reloadPapers={reloadPapers} />}
           {page === 'insights' && <InsightsPage papers={papersReady} {...shared} />}
           {page === 'mcp' && <McpPage />}

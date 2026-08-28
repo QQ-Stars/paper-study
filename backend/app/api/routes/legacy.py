@@ -54,8 +54,9 @@ def create_legacy_router() -> APIRouter:
 
     @router.post("/api/test-llm")
     async def test_llm(request: Request) -> Response:
+        body = await _body(request)
         try:
-            result = await _settings(request).test_llm()
+            result = await _settings(request).test_llm(body)
         except Exception as error:
             return _settings_error(error)
         return _json_response(result)
@@ -625,27 +626,7 @@ def create_legacy_router() -> APIRouter:
         body = await _body(request)
         if not str(body.get("query") or "").strip() or not _valid_sources(body.get("sources")):
             return _json_response({"ok": False, "error": "缺少搜索方向或数据源"}, 400)
-        args = ["--query", str(body["query"]), "--sources", ",".join(_valid_sources(body["sources"]))]
-        # 与旧 Node 对齐：years/max/min-relevance/expand/only-a/queries 必须全部透传，
-        # 否则前端生成/编辑的检索词与高级选项会被静默丢弃。
-        years = body.get("years")
-        args.extend(("--years", str(years) if years not in (None, "") else "2024-2026"))
-        try:
-            max_candidates = min(int(body.get("max") or 10), 60)
-        except (TypeError, ValueError):
-            max_candidates = 10
-        args.extend(("--max", str(max_candidates)))
-        if body.get("minRelevance") is not None:
-            args.extend(("--min-relevance", str(body["minRelevance"])))
-        if body.get("expand"):
-            args.append("--expand")
-        if body.get("onlyA"):
-            args.append("--only-a")
-        queries = body.get("queries")
-        if isinstance(queries, list) and [item for item in queries if str(item or "").strip()]:
-            args.extend(
-                ("--queries", json.dumps([str(item) for item in queries], ensure_ascii=False))
-            )
+        args = _search_args(body)
         return ndjson_response(
             _agent_events(
                 request,
@@ -1498,6 +1479,44 @@ def _optional_args(body: dict[str, object], field: str) -> list[str]:
     return [f"--{field.replace('_', '-')}", str(value)]
 
 
+def _search_args(body: dict[str, object]) -> list[str]:
+    """Translate the collection-page search draft into agent CLI arguments.
+
+    Keep this conversion explicit and deterministic: every visible search
+    control has one corresponding argument, and custom terms are normalized
+    before they cross the legacy boundary.
+    """
+    query = str(body.get("query") or "").strip()
+    sources = _valid_sources(body.get("sources"))
+    years = str(body.get("years") or "").strip() or "2024-2026"
+    try:
+        # Keep the legacy zero/empty semantics (fall back to ten) while
+        # bounding the value accepted by the agent CLI.
+        max_candidates = min(int(body.get("max") or 10), 60)
+    except (TypeError, ValueError):
+        max_candidates = 10
+
+    args = ["--query", query, "--sources", ",".join(sources)]
+    args.extend(("--years", years, "--max", str(max_candidates)))
+    if body.get("minRelevance") is not None:
+        args.extend(("--min-relevance", str(body["minRelevance"])))
+    if body.get("expand"):
+        args.append("--expand")
+    if body.get("onlyA"):
+        args.append("--only-a")
+
+    raw_queries = body.get("queries")
+    if isinstance(raw_queries, list):
+        queries = [
+            str(item).strip()
+            for item in raw_queries
+            if str(item or "").strip()
+        ]
+        if queries:
+            args.extend(("--queries", json.dumps(queries, ensure_ascii=False)))
+    return args
+
+
 def _valid_sources(value: object, *, allowed: set[str] | None = None) -> tuple[str, ...]:
     accepted = allowed or {"semanticscholar", "arxiv", "openalex", "dblp"}
     if not isinstance(value, (list, tuple)):
@@ -1506,7 +1525,13 @@ def _valid_sources(value: object, *, allowed: set[str] | None = None) -> tuple[s
 
 
 async def _body(request: Request) -> dict[str, object]:
-    value = await request.json()
+    # Several legacy POST actions historically accepted an empty body.  Keep
+    # that compatibility while still returning dictionaries for malformed or
+    # non-object JSON payloads; individual routes perform their own validation.
+    try:
+        value = await request.json()
+    except (ValueError, TypeError):
+        return {}
     return value if isinstance(value, dict) else {}
 
 

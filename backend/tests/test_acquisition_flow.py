@@ -357,6 +357,90 @@ class AcquisitionFlowTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_search_route_applies_displayed_parameters_and_accepts_a_second_round(self) -> None:
+        async def scenario() -> None:
+            async with p3_database_fixture(prefix="study-app-acquisition-parameters-") as fixture:
+                provider = _AcquisitionProvider(fixture.session_factory)
+                ingest = LegacyIngestService(
+                    fixture.session_factory,
+                    provider=provider,
+                )
+                library_queries = LibraryQueries(
+                    lambda: SqlAlchemyUnitOfWork(fixture.session_factory),
+                    pdf_files=_NoPdfFiles(),
+                    ccf_ranks={},
+                )
+
+                class Services:
+                    schema_revision = "20260807_03"
+                    legacy = SimpleNamespace(
+                        agent=provider,
+                        legacy_ingest=ingest,
+                        library_queries=library_queries,
+                    )
+
+                    async def dispose(self) -> None:
+                        return None
+
+                app = create_app(
+                    Services(),
+                    fixture.session_factory,
+                    required_schema_revision="20260807_03",
+                )
+                with TestClient(app) as client:
+                    first = client.post(
+                        "/api/search",
+                        json={
+                            "query": "  parameter parity  ",
+                            "sources": ["arxiv"],
+                            "years": " 2024-2027 ",
+                            "max": 40,
+                            "minRelevance": 0,
+                            "expand": True,
+                            "onlyA": True,
+                            "queries": [" term one ", "", "term two"],
+                        },
+                    )
+                    self.assertEqual(200, first.status_code, first.text)
+
+                    second = client.post(
+                        "/api/search",
+                        json={
+                            "query": "second round",
+                            "sources": ["arxiv"],
+                            "years": "2024-2027",
+                            "max": 5,
+                            "minRelevance": 0.85,
+                            "expand": False,
+                            "onlyA": False,
+                            "queries": [],
+                        },
+                    )
+                    self.assertEqual(200, second.status_code, second.text)
+
+                self.assertEqual(
+                    (
+                        "--query",
+                        "parameter parity",
+                        "--sources",
+                        "arxiv",
+                        "--years",
+                        "2024-2027",
+                        "--max",
+                        "40",
+                        "--min-relevance",
+                        "0",
+                        "--expand",
+                        "--only-a",
+                        "--queries",
+                        '["term one", "term two"]',
+                    ),
+                    provider.search_calls[0],
+                )
+                self.assertEqual("second round", provider.search_calls[1][1])
+
+        asyncio.run(scenario())
+
     def test_provider_unavailable_is_a_failed_terminal_event(self) -> None:
         async def scenario() -> None:
             async with p3_database_fixture(prefix="study-app-acquisition-unavailable-") as fixture:

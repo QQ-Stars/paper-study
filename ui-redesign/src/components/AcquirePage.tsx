@@ -1,8 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import { acquireApi, jobApi } from '../api/client';
 import type { Candidate, Paper, StreamEvent } from '../api/types';
-import { decideIngestTerminal, decideSearchTerminal } from './acquisitionFlow';
+import {
+  buildAcquireJobParams,
+  buildAcquireSearchParams,
+  chooseAcquireQuery,
+  decideIngestTerminal,
+  decideSearchTerminal,
+} from './acquisitionFlow';
 import { CheckIcon, CompassIcon, DocumentIcon, PlusIcon, SearchIcon, SparkIcon } from './Icons';
 import { StreamConsole, useStream } from './StreamConsole';
 
@@ -37,9 +43,12 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
   const [downloadPdf, setDownloadPdf] = useState(true);
   const [selectedQueries, setSelectedQueries] = useState<ReadonlySet<string>>(new Set());
   const [expandWords, setExpandWords] = useState<string[]>([]);
+  const [expanding, setExpanding] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [checked, setChecked] = useState<ReadonlySet<number>>(new Set());
+  const expandRevisionRef = useRef(0);
+  const searchRunningRef = useRef(false);
   const searchStream = useStream();
   const ingestStream = useStream();
 
@@ -81,10 +90,31 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
     });
   };
 
+  const updateQuery = (value: string) => {
+    const changed = value.trim() !== query.trim();
+    setQuery(value);
+    if (changed) {
+      // Expanded terms belong to the query that produced them.  Drop them as
+      // soon as the user edits the direction so a later search cannot send a
+      // stale set of terms to the backend.
+      expandRevisionRef.current += 1;
+      setExpandWords([]);
+      setSelectedQueries(new Set());
+    }
+  };
+
   const runExpand = async () => {
-    if (!query.trim()) return;
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      notify('请先输入研究方向，再扩展检索词');
+      return;
+    }
+    if (expanding) return;
+    const revision = expandRevisionRef.current;
+    setExpanding(true);
     try {
-      const result = await acquireApi.expand(query.trim(), 6);
+      const result = await acquireApi.expand(trimmedQuery, 6);
+      if (revision !== expandRevisionRef.current) return;
       if (result.ok === false) {
         setExpandWords([]);
         setSelectedQueries(new Set());
@@ -92,7 +122,11 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
         return;
       }
       const words = Array.isArray(result.queries)
-        ? result.queries.filter((word): word is string => typeof word === 'string' && word.trim() !== '')
+        ? [...new Set(
+            result.queries
+              .map((word) => (typeof word === 'string' ? word.trim() : ''))
+              .filter((word): word is string => Boolean(word)),
+          )]
         : [];
       setExpandWords(words);
       setSelectedQueries(new Set(words));
@@ -104,33 +138,45 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
         notify(`已生成 ${words.length} 个扩展检索词（已默认全选，可点击取舍）`);
       }
     } catch (error) {
+      if (revision !== expandRevisionRef.current) return;
       notify(`扩展失败：${error instanceof Error ? error.message : error}`);
+    } finally {
+      setExpanding(false);
     }
   };
 
-  const runSearch = async (useQuery?: string) => {
+  const runSearch = async (
+    useQuery?: string,
+    querySelection: ReadonlySet<string> = selectedQueries,
+    expandOverride: boolean = expand,
+  ) => {
     const finalQuery = (useQuery ?? query).trim();
     if (!finalQuery || sources.length === 0) {
       notify('请输入研究方向并至少选择一个数据源');
       return;
     }
+    if (searchRunningRef.current) {
+      notify('检索正在进行，请等待本轮完成');
+      return;
+    }
     const anchor = searchStream.anchorRef.current + 1;
+    searchRunningRef.current = true;
     searchStream.begin();
     setCandidates([]);
     setChecked(new Set());
     let terminalFailureNotification = '';
     try {
       await acquireApi.search(
-        {
+        buildAcquireSearchParams({
           query: finalQuery,
           sources,
           years,
           max,
-          minRelevance: minRelevance > 0 ? minRelevance : undefined,
-          expand,
+          minRelevance,
+          expand: expandOverride,
           onlyA,
-          queries: selectedQueries.size > 0 ? [...selectedQueries] : undefined,
-        },
+          selectedQueries: querySelection,
+        }),
         (event: StreamEvent) => {
           searchStream.accept(anchor, event);
           const decision = decideSearchTerminal(
@@ -153,7 +199,15 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
         terminalFailureNotification ||
           `检索失败：${error instanceof Error ? error.message : String(error)}`,
       );
+    } finally {
+      searchRunningRef.current = false;
     }
+  };
+
+  const runDefaultSearch = () => {
+    const nextQuery = chooseAcquireQuery(query);
+    if (!query.trim()) updateQuery(nextQuery);
+    void runSearch(nextQuery);
   };
 
   const toggleChecked = (index: number) => {
@@ -207,22 +261,18 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
       return;
     }
     try {
-      const result = await jobApi.create({
-        query: query.trim(),
-        sources,
-        years,
-        max,
-        minRelevance: minRelevance > 0 ? minRelevance : undefined,
-        onlyA,
-        // Preserve the checkbox state through the historical JSON query field:
-        // [query] keeps automatic expansion, [] explicitly disables it.
-        queries:
-          selectedQueries.size > 0
-            ? [...selectedQueries]
-            : expand
-              ? [query.trim()]
-              : [],
-      });
+      const result = await jobApi.create(
+        buildAcquireJobParams({
+          query,
+          sources,
+          years,
+          max,
+          minRelevance,
+          expand,
+          onlyA,
+          selectedQueries,
+        }),
+      );
       notify(
         result.ok
           ? `后台采集任务已创建（#${result.id}），可在「任务」页跟踪与确认候选`
@@ -248,9 +298,12 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
             placeholder="输入研究方向，例如「检索增强生成」…"
             aria-label="检索新论文"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => updateQuery(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') void runSearch();
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void runSearch();
+              }
             }}
           />
         </label>
@@ -283,11 +336,44 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
               </option>
             ))}
           </select>
-          <button type="button" className="btn btn--sm" onClick={() => void runExpand()}>
-            <SparkIcon size={13} />
-            扩展检索词
+          <button
+            type="button"
+            className="btn btn--sm acquire__expand-button"
+            onClick={() => void runExpand()}
+            disabled={expanding || searchStream.state.running || query.trim() === ''}
+            aria-busy={expanding}
+            aria-describedby={expanding ? 'acquire-expand-status' : undefined}
+            title={query.trim() === '' ? '请先输入研究方向' : undefined}
+          >
+            {expanding ? (
+              <span className="acquire__spinner acquire__spinner--button" aria-hidden="true" />
+            ) : (
+              <SparkIcon size={13} />
+            )}
+            {expanding ? '扩展中…' : '扩展检索词'}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary btn--sm acquire__search-button"
+            onClick={() => void runSearch()}
+            disabled={searchStream.state.running || query.trim() === '' || sources.length === 0}
+            aria-busy={searchStream.state.running}
+          >
+            {searchStream.state.running ? '采集中…' : '开始采集'}
           </button>
         </div>
+        {expanding && (
+          <div
+            id="acquire-expand-status"
+            className="acquire__expand-status"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span className="acquire__spinner" aria-hidden="true" />
+            <span>正在生成扩展检索词，模型响应可能需要一些时间，请勿重复点击。</span>
+          </div>
+        )}
         <div className="acquire__options">
           <label className="acquire__check">
             <input
@@ -340,7 +426,11 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
             <span className="acquire__chips-label">
               自定义检索词（勾选后随检索下发，不勾选则只用主方向）：
             </span>
-            <button type="button" className="acquire__chip acquire__chip--root" onClick={() => void runSearch()}>
+            <button
+              type="button"
+              className="acquire__chip acquire__chip--root"
+              onClick={() => void runSearch(undefined, new Set(), false)}
+            >
               {query} · 直接检索
             </button>
             {expandWords.map((word) => (
@@ -371,10 +461,8 @@ export function AcquirePage({ papers, notify, reloadPapers }: AcquirePageProps) 
             <button
               type="button"
               className="btn"
-              onClick={() => {
-                setQuery('LLM hallucination detection and mitigation');
-                void runSearch('LLM hallucination detection and mitigation');
-              }}
+              onClick={runDefaultSearch}
+              disabled={searchStream.state.running}
             >
               以当前主题检索一次
             </button>
