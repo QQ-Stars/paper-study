@@ -326,6 +326,20 @@ class ReproductionApiContractTests(unittest.TestCase):
         self.assertEqual(200, response.status_code, response.text)
         self.assertEqual(payload, response.content)
 
+        image_payload = b"\x89PNG\r\neditor-image"
+        response = self.client.post(
+            f"/api/v2/reproductions/{project_id}/artifacts",
+            files={"file": ("figure.png", image_payload, "image/png")},
+        )
+        self.assertEqual(201, response.status_code, response.text)
+        image_artifact = response.json()
+        image_response = self.client.get(
+            f"/api/v2/reproductions/{project_id}/artifacts/{image_artifact['id']}/download"
+        )
+        self.assertEqual(200, image_response.status_code, image_response.text)
+        self.assertEqual(image_payload, image_response.content)
+        self.assertIn("inline", image_response.headers.get("content-disposition", ""))
+
         response = self.client.post(
             f"/api/v2/reproductions/{project_id}/artifacts",
             files={"file": ("../secret.md", payload, "text/markdown")},

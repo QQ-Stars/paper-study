@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from backend.app.application.credentials import CredentialService
 from backend.app.domain import (
+    Credential,
     CredentialKind,
     CredentialStatus,
     EmbeddingProfile,
@@ -248,11 +249,24 @@ class SettingsService:
             self._write_document(current)
             return await self._view_unlocked()
 
-    async def test_llm(self) -> dict[str, object]:
-        result = await self.credential_service.test_connection(
-            CredentialKind.LLM,
-            probe=self._llm_probe(),
-        )
+    async def test_llm(
+        self,
+        patch: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        document = self._read_document()
+        overrides, submitted_key = self._validate_llm_test_patch(patch)
+        document.update(overrides)
+        probe = self._llm_probe(self._llm_runtime_from_document(document))
+        if submitted_key is not None:
+            result = await (probe or SafeCredentialProbe()).test(
+                CredentialKind.LLM,
+                Credential(CredentialKind.LLM, submitted_key),
+            )
+        else:
+            result = await self.credential_service.test_connection(
+                CredentialKind.LLM,
+                probe=probe,
+            )
         return _probe_payload(result)
 
     async def test_connection(self, kind: CredentialKind | str) -> dict[str, object]:
@@ -262,12 +276,15 @@ class SettingsService:
             await self.credential_service.test_connection(normalized, probe=probe)
         )
 
-    def _llm_probe(self) -> SafeCredentialProbe | None:
+    def _llm_probe(
+        self,
+        runtime: ProviderRuntimeConfig | None = None,
+    ) -> SafeCredentialProbe | None:
         if self._llm_transport is not None:
             return SafeCredentialProbe(llm_transport=self._llm_transport)
         # Native runtime does not inject a transport; derive one from the current
         # LLM profile so "测试模型连接" works the same as the legacy Node flow.
-        runtime = self.llm_runtime_settings()
+        runtime = runtime or self.llm_runtime_settings()
         base_url = str(runtime.base_url or "").strip()
         if not base_url:
             return None
@@ -700,6 +717,26 @@ class SettingsService:
             if field in patch:
                 updates[kind] = patch[field]
         return updates
+
+    def _validate_llm_test_patch(
+        self,
+        patch: Mapping[str, object] | None,
+    ) -> tuple[dict[str, object], str | None]:
+        if patch is None:
+            return {}, None
+        if not isinstance(patch, Mapping):
+            raise SettingsValidationError()
+        allowed = {"provider", "baseUrl", "model", "llmTimeout", "apiKey"}
+        if any(key not in allowed for key in patch):
+            raise SettingsValidationError()
+        normalized = self._validate_patch(patch)
+        submitted = patch.get("apiKey")
+        if submitted is not None and not isinstance(submitted, str):
+            raise SettingsValidationError()
+        submitted_key = submitted.strip() if isinstance(submitted, str) else ""
+        if len(submitted_key) > 8192:
+            raise SettingsValidationError()
+        return normalized, submitted_key or None
 
     def _read_document(self) -> dict[str, object]:
         if not self.settings_path.exists():

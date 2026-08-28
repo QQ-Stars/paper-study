@@ -266,7 +266,7 @@ class LegacyAgentProvider:
             )
         else:
             payload.setdefault("ok", True)
-            _mark_partial_failure(payload)
+            _mark_partial_failure(payload, command=command)
             payload.setdefault("error", "")
         yield _redact_event({"type": terminal_type, **payload})
 
@@ -552,7 +552,7 @@ class LegacyAgentProvider:
             payload["error"] = _friendly_error(result, command=command)
         else:
             payload.setdefault("ok", True)
-            _mark_partial_failure(payload)
+            _mark_partial_failure(payload, command=command)
             payload.setdefault("error", "")
         yield _redact_event({"type": terminal_type, **payload})
 
@@ -876,9 +876,17 @@ def _redact_event(value: dict[str, object]) -> dict[str, object]:
     return {key: redact(item) for key, item in value.items()}
 
 
-def _mark_partial_failure(payload: dict[str, object]) -> None:
-    """Make batch failures visible to the NDJSON console instead of hiding them."""
+def _mark_partial_failure(payload: dict[str, object], *, command: str) -> None:
+    """Make real batch failures visible without relabeling coverage gaps.
+
+    ``citegraph.failed`` counts papers that Semantic Scholar could not resolve.
+    The graph is still rebuilt atomically when at least one paper resolves, so
+    those unmatched records are an expected partial-coverage result rather than
+    a failed command.
+    """
     if payload.get("ok") is not True:
+        return
+    if command == "citegraph":
         return
     failed = payload.get("failed")
     summary = payload.get("summary")

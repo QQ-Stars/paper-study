@@ -31,6 +31,110 @@ class _CredentialService:
 
 
 class SettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_llm_test_uses_unsaved_form_profile_and_key_without_persisting(self) -> None:
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+        with tempfile.TemporaryDirectory(prefix="study-app-settings-form-probe-") as temp:
+            root = Path(temp)
+            settings_path = root / "settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "provider": "saved-provider",
+                        "baseUrl": "https://saved.example/v1",
+                        "model": "saved-model",
+                        "llmTimeout": 9000,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            original = settings_path.read_bytes()
+            service = SettingsService(
+                settings_path=settings_path,
+                root=root,
+                credential_service=_CredentialService(),
+                environment_snapshot={},
+            )
+
+            with mock.patch(
+                "backend.app.application.settings.urllib.request.urlopen",
+                return_value=_Response(),
+            ) as urlopen:
+                result = await service.test_llm(
+                    {
+                        "provider": "other",
+                        "baseUrl": "https://form.example/v1",
+                        "model": "form-model",
+                        "llmTimeout": 4200,
+                        "apiKey": "form-secret",
+                    }
+                )
+
+            self.assertTrue(result["ok"])
+            request = urlopen.call_args.args[0]
+            self.assertEqual(
+                "https://form.example/v1/chat/completions",
+                request.full_url,
+            )
+            self.assertEqual("Bearer form-secret", request.get_header("Authorization"))
+            self.assertEqual("form-model", json.loads(request.data)["model"])
+            self.assertEqual(4.2, urlopen.call_args.kwargs["timeout"])
+            self.assertEqual(original, settings_path.read_bytes())
+
+    async def test_llm_test_uses_saved_key_with_unsaved_form_profile(self) -> None:
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+        class _SavedCredentialService(_CredentialService):
+            async def test_connection(self, kind, *, probe=None):
+                return await probe.test(kind, Credential(kind, "saved-secret"))
+
+        with tempfile.TemporaryDirectory(prefix="study-app-settings-saved-key-probe-") as temp:
+            root = Path(temp)
+            service = SettingsService(
+                settings_path=root / "settings.json",
+                root=root,
+                credential_service=_SavedCredentialService(),
+                environment_snapshot={},
+            )
+
+            with mock.patch(
+                "backend.app.application.settings.urllib.request.urlopen",
+                return_value=_Response(),
+            ) as urlopen:
+                result = await service.test_llm(
+                    {
+                        "provider": "other",
+                        "baseUrl": "https://form.example/v1",
+                        "model": "form-model",
+                        "llmTimeout": 0,
+                    }
+                )
+
+            self.assertTrue(result["ok"])
+            request = urlopen.call_args.args[0]
+            self.assertEqual(
+                "https://form.example/v1/chat/completions",
+                request.full_url,
+            )
+            self.assertEqual("Bearer saved-secret", request.get_header("Authorization"))
+            self.assertNotIn("timeout", urlopen.call_args.kwargs)
+
     async def test_default_llm_timeout_view_matches_runtime_sdk_default(self) -> None:
         with tempfile.TemporaryDirectory(prefix="study-app-settings-default-timeout-") as temp:
             root = Path(temp)

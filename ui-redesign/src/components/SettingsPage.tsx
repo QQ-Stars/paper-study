@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { settingsApi, v2Api } from '../api/client';
 import type { Settings } from '../api/types';
-import { formatLlmConnectionResult } from './settingsFeedback';
+import {
+  buildLlmConnectionPayload,
+  credentialPresentation,
+  formatLlmConnectionResult,
+} from './settingsFeedback';
 
 interface SettingsPageProps {
   notify: (message: string) => void;
@@ -219,7 +223,7 @@ export function SettingsPage({ notify }: SettingsPageProps) {
     try {
       const result = await settingsApi.update({ clearCredentials: [kind] });
       if (result.ok) {
-        notify(`已清除「${label}」凭据`);
+        notify(`已清除「${label}」本机保存凭据`);
         await load();
       } else {
         notify(`清除失败：${result.error ?? '未知错误'}`);
@@ -235,7 +239,9 @@ export function SettingsPage({ notify }: SettingsPageProps) {
     setTestingLlm(true);
     setLlmResult('测试中…');
     try {
-      const result = await settingsApi.testLlm();
+      const result = await settingsApi.testLlm(
+        buildLlmConnectionPayload(draft, keys.apiKey),
+      );
       setLlmResult(formatLlmConnectionResult(result));
     } catch (error: unknown) {
       setLlmResult(`失败：${error instanceof Error ? error.message : String(error)}`);
@@ -270,11 +276,62 @@ export function SettingsPage({ notify }: SettingsPageProps) {
     tail: string;
     field: keyof typeof keys;
     hint: string;
+    presentation: ReturnType<typeof credentialPresentation>;
   }> = [
-    { kind: 'llm', label: 'LLM', hasKey: settings.hasApiKey, tail: settings.apiKeyTail, field: 'apiKey', hint: '讲解 / 翻译 / 推荐' },
-    { kind: 'ocr', label: 'OCR', hasKey: settings.hasOcrKey, tail: settings.ocrKeyTail, field: 'ocrApiKey', hint: '扫描版 PDF 识别' },
-    { kind: 'embedding', label: 'Embedding', hasKey: settings.hasEmbedKey, tail: settings.embedKeyTail, field: 'embedApiKey', hint: '语义检索嵌入' },
-    { kind: 'semantic_scholar', label: 'Semantic Scholar', hasKey: settings.hasS2Key, tail: settings.s2KeyTail, field: 's2ApiKey', hint: '采集与引用数据' },
+    {
+      kind: 'llm',
+      label: 'LLM',
+      hasKey: settings.hasApiKey,
+      tail: settings.apiKeyTail,
+      field: 'apiKey',
+      hint: '讲解 / 翻译 / 推荐',
+      presentation: credentialPresentation({
+        hasKey: settings.hasApiKey,
+        keyTail: settings.apiKeyTail,
+        environmentManaged: Boolean(settings.credentialStatus?.llm?.environmentManaged),
+      }),
+    },
+    {
+      kind: 'ocr',
+      label: 'OCR',
+      hasKey: settings.hasOcrKey,
+      tail: settings.ocrKeyTail,
+      field: 'ocrApiKey',
+      hint: '扫描版 PDF 识别',
+      presentation: credentialPresentation({
+        hasKey: settings.hasOcrKey,
+        keyTail: settings.ocrKeyTail,
+        environmentManaged: Boolean(settings.credentialStatus?.ocr?.environmentManaged),
+      }),
+    },
+    {
+      kind: 'embedding',
+      label: 'Embedding',
+      hasKey: settings.hasEmbedKey,
+      tail: settings.embedKeyTail,
+      field: 'embedApiKey',
+      hint: '语义检索嵌入',
+      presentation: credentialPresentation({
+        hasKey: settings.hasEmbedKey,
+        keyTail: settings.embedKeyTail,
+        environmentManaged: Boolean(settings.credentialStatus?.embedding?.environmentManaged),
+      }),
+    },
+    {
+      kind: 'semantic_scholar',
+      label: 'Semantic Scholar',
+      hasKey: settings.hasS2Key,
+      tail: settings.s2KeyTail,
+      field: 's2ApiKey',
+      hint: '采集与引用数据',
+      presentation: credentialPresentation({
+        hasKey: settings.hasS2Key,
+        keyTail: settings.s2KeyTail,
+        environmentManaged: Boolean(
+          settings.credentialStatus?.semantic_scholar?.environmentManaged,
+        ),
+      }),
+    },
   ];
 
   return (
@@ -360,11 +417,9 @@ export function SettingsPage({ notify }: SettingsPageProps) {
                 <div className="settings__key-card" key={card.kind}>
                   <header>
                     <strong>{card.label}</strong>
-                    {card.hasKey ? (
-                      <span className="badge badge--jade">已配置 {card.tail}</span>
-                    ) : (
-                      <span className="badge badge--amber">未配置</span>
-                    )}
+                    <span className={`badge badge--${card.presentation.tone}`}>
+                      {card.presentation.label}
+                    </span>
                   </header>
                   <small>{card.hint}</small>
                   <div className="settings__key-row">
@@ -379,7 +434,7 @@ export function SettingsPage({ notify }: SettingsPageProps) {
                         setKeys((prev) => ({ ...prev, [card.field]: event.target.value }))
                       }
                     />
-                    {card.hasKey && (
+                    {card.presentation.canClear && (
                       <button
                         type="button"
                         className="btn btn--ghost btn--sm"
@@ -628,7 +683,11 @@ export function SettingsPage({ notify }: SettingsPageProps) {
             </Row>
           </Section>
 
-          <Section id="sec-dirs" title="数据目录" desc="统一管理文献产物与论文复现附件的本地存储位置">
+          <Section
+            id="sec-dirs"
+            title="数据目录"
+            desc="统一管理文献产物与论文复现附件的本地存储位置；修改后需重启后端生效"
+          >
             <Row title="PDF 目录" desc={`当前：${settings.resolvedPdfDir}`}>
               <input
                 className="input"
@@ -670,8 +729,7 @@ export function SettingsPage({ notify }: SettingsPageProps) {
             </Row>
             <Row
               title="论文复现目录"
-              desc={`当前：${settings.resolvedReproductionDir ?? '（后端重启后生效）'} · 保存后重启后端生效 · 留空＝默认 data/reproduction-artifacts`}
-              className="settings-row--reproduction"
+              desc={`当前：${settings.resolvedReproductionDir ?? '（后端重启后生效）'}，留空＝默认 data/reproduction-artifacts`}
             >
               <input
                 className="input"

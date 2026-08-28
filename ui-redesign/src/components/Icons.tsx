@@ -246,3 +246,112 @@ export function TrashIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function UploadIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 16V4" />
+      <path d="M7.5 8.5L12 4l4.5 4.5" />
+      <path d="M5 14.5v4h14v-4" />
+    </svg>
+  );
+}
+
+export function TableIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3.5" y="4" width="17" height="16" rx="1.5" />
+      <path d="M3.5 9.5h17M3.5 14.5h17M9 4v16M15 4v16" />
+    </svg>
+  );
+}
+
+export function ListIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M9 6h11M9 12h11M9 18h11" />
+      <path d="M4 5.5h.01M4 11.5h.01M4 17.5h.01" strokeWidth="3" />
+    </svg>
+  );
+}
+
+export function OrderedListIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10 6h10M10 12h10M10 18h10" />
+      <path d="M4 7V4.5l-1 1M3 7h2M3 12h2l-2 2h2M3 18h2l-2-2" />
+    </svg>
+  );
+}
+
+export function QuoteIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M5 11h5v5H5zM14 11h5v5h-5z" />
+      <path d="M5 11c0-3 1.2-4.5 3.5-5M14 11c0-3 1.2-4.5 3.5-5" />
+    </svg>
+  );
+}
+
+export function CodeIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 7l-4 5 4 5M16 7l4 5-4 5M14 4l-4 16" />
+    </svg>
+  );
+}
+
+export function StrikethroughIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 12h16M7 7.5c.7-1.5 2.1-2.3 4.2-2.3 2.2 0 3.8.9 4.6 2.5M8 16.5c.8 1.5 2.2 2.3 4.3 2.3 2.1 0 3.6-.8 4.4-2.3" />
+    </svg>
+  );
+}
+
+export function SmileIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.5 14.5c.9 1.2 2 1.8 3.5 1.8s2.6-.6 3.5-1.8M9 9.5h.01M15 9.5h.01" strokeWidth="2" />
+    </svg>
+  );
+}
+
+export function MoreIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function HeadingIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M5 5v14M19 5v14M5 12h14" />
+      <path d="M5 5h4M15 5h4M5 19h4M15 19h4" />
+    </svg>
+  );
+}
+
+export function LinkIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10 13.5l4-4" />
+      <path d="M7.5 16.5l-1.2 1.2a3.2 3.2 0 1 1-4.5-4.5l3.4-3.4a3.2 3.2 0 0 1 4.5 0" />
+      <path d="M16.5 7.5l1.2-1.2a3.2 3.2 0 1 1 4.5 4.5l-3.4 3.4a3.2 3.2 0 0 1-4.5 0" />
+    </svg>
+  );
+}
+
+export function HorizontalRuleIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 12h16" />
+      <path d="M7 8h10M7 16h10" opacity=".45" />
+    </svg>
+  );
+}

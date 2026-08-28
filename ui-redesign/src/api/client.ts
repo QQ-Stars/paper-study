@@ -452,8 +452,11 @@ export const settingsApi = {
   get: () => get<Settings>('/api/settings'),
   update: (fields: Record<string, unknown>) =>
     post<{ ok: boolean; error?: string }>('/api/settings', fields),
-  testLlm: () =>
-    post<{ ok: boolean; latencyMs?: number; output?: string; error?: string }>('/api/test-llm'),
+  testLlm: (fields: Record<string, unknown> = {}) =>
+    post<{ ok: boolean; latencyMs?: number; output?: string; error?: string }>(
+      '/api/test-llm',
+      fields,
+    ),
 };
 
 /* ── v2 durable 处理管线 ─────────────────────────── */

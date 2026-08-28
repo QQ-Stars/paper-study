@@ -355,6 +355,208 @@
   gap: var(--space-3);
 }
 
+/* Markdown 编辑工具栏：保留 textarea 的轻量链路，同时提供网站编辑器常用动作。 */
+.reproduction__editor-toolbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--editor-toolbar);
+  color: var(--ink-muted);
+}
+
+.reproduction__editor-tool-group {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.reproduction__editor-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: var(--space-2);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.reproduction__editor-mode-mark {
+  display: grid;
+  width: 1.35rem;
+  height: 1.35rem;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--seal-deep);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.reproduction__editor-tool-divider {
+  width: 1px;
+  height: 1.375rem;
+  margin-inline: var(--space-1);
+  background: var(--line);
+}
+
+.reproduction__editor-tool {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+
+.reproduction__editor-tool:hover:not(:disabled),
+.reproduction__editor-tool.is-active {
+  border-color: var(--seal-line);
+  background: var(--editor-tool-active);
+  color: var(--seal-deep);
+}
+
+.reproduction__editor-tool:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.reproduction__editor-tool:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.reproduction__editor-tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.reproduction__editor-tool strong,
+.reproduction__editor-tool em {
+  color: currentColor;
+  font-size: 1rem;
+}
+
+.reproduction__editor-more {
+  position: relative;
+}
+
+.reproduction__editor-more-menu {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  width: min(15rem, 80vw);
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+}
+
+.reproduction__editor-more-menu > button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.25rem;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  text-align: start;
+  cursor: pointer;
+}
+
+.reproduction__editor-more-menu > button:hover,
+.reproduction__editor-more-menu > button:focus-visible {
+  outline: none;
+  background: var(--editor-tool-hover);
+  color: var(--seal-deep);
+}
+
+.reproduction__editor-more-menu > button span {
+  flex: 1;
+}
+
+.reproduction__editor-more-menu kbd {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.reproduction__editor-shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-2) 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+}
+
+.reproduction__editor-shortcuts strong {
+  color: var(--ink-muted);
+  font-weight: 650;
+}
+
+.reproduction__editor-toolbar-hint,
+.reproduction__editor-upload-status {
+  overflow: hidden;
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reproduction__editor-upload-status {
+  max-width: 16rem;
+  margin-left: var(--space-2);
+  color: var(--amber);
+}
+
+.reproduction__editor-image-input {
+  display: none;
+}
+
+.reproduction__editor-tool-spinner {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2px solid var(--seal-line);
+  border-top-color: var(--seal);
+  border-radius: 50%;
+  animation: reproduction-editor-spin 0.8s linear infinite;
+}
+
+@keyframes reproduction-editor-spin {
+  to { transform: rotate(360deg); }
+}
+
 .reproduction__save {
   display: inline-flex;
   align-items: center;
@@ -442,6 +644,16 @@
   box-shadow: inset 0 0 0 2px var(--seal-line);
 }
 
+.reproduction__editor-body.is-drag-active textarea {
+  background: var(--editor-drop-wash);
+  box-shadow: inset 0 0 0 2px var(--seal);
+}
+
+.reproduction__editor-body textarea::placeholder {
+  color: var(--ink-ghost);
+  opacity: 1;
+}
+
 .reproduction__editor-body textarea:disabled {
   cursor: not-allowed;
   opacity: 0.7;
@@ -471,6 +683,14 @@
 .reproduction__preview .md-body h2 {
   margin-top: var(--space-6);
   font-size: var(--text-lg);
+}
+
+.reproduction__preview .md-body img {
+  height: auto;
+  margin: var(--space-4) 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .reproduction__editor-foot {
@@ -759,6 +979,25 @@
 
 .reproduction__artifact-list code {
   flex: none;
+}
+
+.reproduction__artifact-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.reproduction__artifact-actions .btn {
+  opacity: 0;
+  transform: translateX(2px);
+  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+
+.reproduction__artifact-list li:hover .reproduction__artifact-actions .btn,
+.reproduction__artifact-list li:focus-within .reproduction__artifact-actions .btn {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .reproduction__note-list p {
@@ -1294,6 +1533,22 @@
   .reproduction-page--detail .reproduction__editor-head {
     position: static;
     padding: var(--space-4);
+  }
+
+  .reproduction__editor-toolbar {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+    padding-inline: var(--space-3);
+    scrollbar-width: thin;
+  }
+
+  .reproduction__editor-toolbar-hint {
+    display: none;
+  }
+
+  .reproduction__editor-upload-status {
+    max-width: 10rem;
   }
 
   .reproduction-page--detail .reproduction__editor-body textarea {

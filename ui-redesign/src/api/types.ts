@@ -217,6 +217,15 @@ export interface Settings {
   embedKeyTail: string;
   hasS2Key: boolean;
   s2KeyTail: string;
+  credentialStatus?: Record<
+    string,
+    {
+      kind: string;
+      hasKey: boolean;
+      keyTail: string | null;
+      environmentManaged: boolean;
+    }
+  >;
 }
 
 export type V2JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';

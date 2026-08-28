@@ -43,6 +43,19 @@ export function formatTerminalSummary(event: StreamEvent): string {
     return `失败：${String(event.error ?? '未知错误')}`;
   }
 
+  /* Citation graph rebuilds use `failed` for external records that could not
+   * be matched in Semantic Scholar.  That is partial coverage, not a failed
+   * rebuild; keep the graph counters prominent instead of treating the event
+   * as a generic batch summary. */
+  const graphEdges = count(event.edges);
+  const graphNodes = count(event.nodes);
+  if (graphEdges !== undefined && graphNodes !== undefined) {
+    const unmatched = count(event.failed) ?? 0;
+    return `${graphEdges} 条引用边 / ${graphNodes} 个节点${
+      unmatched > 0 ? ` · ${unmatched} 篇未匹配` : ''
+    }`;
+  }
+
   const eventRecord = event as SummaryRecord;
   const nested = isRecord(eventRecord.summary) ? eventRecord.summary : undefined;
   const total = fieldValue(eventRecord, nested, 'total');

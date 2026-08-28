@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 import { reproductionApi } from '../api/client';
 import type {
@@ -25,6 +26,18 @@ import {
   TrashIcon,
 } from './Icons';
 import { MarkdownView } from './MarkdownView';
+import { MarkdownToolbar } from './MarkdownToolbar';
+import {
+  applyMarkdownCommand,
+  commandForMarkdownShortcut,
+  continueMarkdownList,
+  indentMarkdown,
+  normalizedImageFilename,
+  supportedImageMimeType,
+  type MarkdownCommand,
+  type MarkdownEditResult,
+  type MarkdownSelection,
+} from './markdownEditor';
 import { readReproductionListState, writeReproductionListState } from './reproductionState';
 
 import '../styles/reproduction.css';
@@ -77,6 +90,8 @@ const DEFAULT_DOCUMENT = `# 复现目标
 
 总结当前结论，并列出下一步实验或资料补充。
 `;
+
+const MAX_EDITOR_IMAGE_BYTES = 25 * 1024 * 1024;
 
 const RUN_STATUS_LABELS: Record<ExperimentRun['status'], string> = {
   planned: '计划中',
@@ -351,6 +366,9 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const [artifactFile, setArtifactFile] = useState<File | null>(null);
   const [artifactKind, setArtifactKind] = useState('attachment');
   const [artifactBusy, setArtifactBusy] = useState(false);
+  const [editorUploadBusy, setEditorUploadBusy] = useState(false);
+  const [editorUploadMessage, setEditorUploadMessage] = useState('');
+  const [editorDragActive, setEditorDragActive] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState('');
   const [editTags, setEditTags] = useState('');
@@ -363,6 +381,12 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const editorRef = useRef<HTMLDivElement>(null);
   const listScrollRef = useRef<HTMLDivElement>(null);
   const markdownEditorRef = useRef<HTMLTextAreaElement>(null);
+  const draftRef = useRef('');
+  const editorSelectionRef = useRef<MarkdownSelection>({ start: 0, end: 0 });
+  const editorDragDepthRef = useRef(0);
+  const selectedIdRef = useRef<string | null>(null);
+  const editorProjectRef = useRef<string | null>(null);
+  const editorUploadBusyRef = useRef(false);
   const createDialogRef = useDialogFocus(createOpen, createBusy, () => setCreateOpen(false));
   const runDialogRef = useDialogFocus(runOpen, runBusy, () => setRunOpen(false));
   const resultDialogRef = useDialogFocus(resultOpen, resultBusy, () => setResultOpen(false));
@@ -457,6 +481,8 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       setSelected(project);
       const document = documentFromProject(project);
       setDraft(document.content);
+      draftRef.current = document.content;
+      editorSelectionRef.current = { start: document.content.length, end: document.content.length };
       loadedContent.current = document.content;
       setRevision(document.revision);
       setSaveState('saved');
@@ -491,9 +517,21 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       setArtifactsExpanded(false);
       setNotesExpanded(false);
       setDraft('');
+      draftRef.current = '';
+      editorSelectionRef.current = { start: 0, end: 0 };
       loadedContent.current = '';
     }
   }, [loadDetail, selectedId]);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+    if (editorProjectRef.current !== selectedId) {
+      setEditorUploadMessage('');
+      setEditorDragActive(false);
+      editorDragDepthRef.current = 0;
+      editorProjectRef.current = selectedId;
+    }
+  }, [selectedId]);
 
   useEffect(() => {
     if (!selectedId || !selected || selected.id !== selectedId || draft === loadedContent.current || saveState === 'saving' || saveState === 'failed') return;
@@ -522,8 +560,182 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   }, [draft, revision, saveState, selected, selectedId]);
 
   const updateDraft = (value: string) => {
+    draftRef.current = value;
     setDraft(value);
     if (saveState === 'failed') setSaveState('unsaved');
+  };
+
+  const rememberEditorSelection = () => {
+    const textarea = markdownEditorRef.current;
+    if (!textarea) return editorSelectionRef.current;
+    editorSelectionRef.current = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+    };
+    return editorSelectionRef.current;
+  };
+
+  const restoreEditorResult = (result: MarkdownEditResult) => {
+    updateDraft(result.value);
+    editorSelectionRef.current = {
+      start: result.selectionStart,
+      end: result.selectionEnd,
+    };
+    window.requestAnimationFrame(() => {
+      const textarea = markdownEditorRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
+    });
+  };
+
+  const applyEditorCommand = (command: MarkdownCommand) => {
+    const selection = rememberEditorSelection();
+    restoreEditorResult(applyMarkdownCommand(draftRef.current, selection, command));
+  };
+
+  const handleEditorKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    const shortcut = commandForMarkdownShortcut(event);
+    if (shortcut) {
+      event.preventDefault();
+      applyEditorCommand(shortcut);
+      return;
+    }
+    const textarea = event.currentTarget;
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      const selection = {
+        start: textarea.selectionStart,
+        end: textarea.selectionEnd,
+      };
+      restoreEditorResult(indentMarkdown(draftRef.current, selection, event.shiftKey ? 'outdent' : 'indent'));
+      return;
+    }
+    if (event.key === 'Enter' && !event.shiftKey && textarea.selectionStart === textarea.selectionEnd) {
+      const continuation = continueMarkdownList(draftRef.current, textarea.selectionStart);
+      if (continuation) {
+        event.preventDefault();
+        restoreEditorResult(continuation);
+      }
+    }
+  };
+
+  const insertArtifactMarkdown = (
+    artifact: ReproductionArtifact,
+    selectionOverride?: MarkdownSelection,
+    draftOverride?: string,
+  ) => {
+    const source = draftOverride ?? draftRef.current;
+    const selection = selectionOverride ?? editorSelectionRef.current;
+    const url = reproductionApi.artifactUrl(artifact.projectId, artifact.id);
+    const label = artifact.filename.replace(/[\[\]]/g, '\\$&');
+    const markdown = artifact.mimeType.startsWith('image/') || artifact.kind === 'image'
+      ? `![${label}](${url})`
+      : `[${label}](${url})`;
+    const start = Math.max(0, Math.min(source.length, selection.start));
+    const end = Math.max(start, Math.min(source.length, selection.end));
+    const before = source.slice(0, start);
+    const after = source.slice(end);
+    const beforeSeparator = before && !before.endsWith('\n') ? '\n\n' : '';
+    const afterSeparator = after && !after.startsWith('\n') ? '\n\n' : after ? '\n' : '';
+    const nextDraft = `${before}${beforeSeparator}${markdown}${afterSeparator}${after}`;
+    const nextCursor = before.length + beforeSeparator.length + markdown.length;
+    restoreEditorResult({ value: nextDraft, selectionStart: nextCursor, selectionEnd: nextCursor });
+  };
+
+  const uploadImageFile = async (file: File) => {
+    if (!selected || !canEdit || detailLoading) return;
+    if (editorUploadBusyRef.current) return;
+    const mimeType = supportedImageMimeType(file);
+    if (!mimeType) {
+      setEditorUploadMessage('仅支持 PNG、JPEG 或 WebP 图片');
+      setError('图片插入失败：仅支持 PNG、JPEG 或 WebP 图片。');
+      return;
+    }
+    if (file.size > MAX_EDITOR_IMAGE_BYTES) {
+      setEditorUploadMessage('图片过大 · 最大 25 MB');
+      setError('图片插入失败：单个图片不能超过 25 MB。');
+      return;
+    }
+    const source = draftRef.current;
+    const selection = { ...rememberEditorSelection() };
+    const projectId = selected.id;
+    const filename = normalizedImageFilename(file, mimeType);
+    const normalizedFile = file.type === mimeType && file.name === filename
+      ? file
+      : new File([file], filename, { type: mimeType, lastModified: file.lastModified });
+    editorUploadBusyRef.current = true;
+    setEditorUploadBusy(true);
+    setEditorUploadMessage(`正在上传图片 · ${filename}`);
+    try {
+      const body = new FormData();
+      body.append('file', normalizedFile, filename);
+      body.append('kind', 'image');
+      const artifact = await reproductionApi.uploadArtifact(projectId, body);
+      if (selectedIdRef.current !== projectId) {
+        setEditorUploadMessage(`图片已上传到项目 ${projectId.slice(-6)}`);
+        notify('图片已上传，但原项目已切换；请回到原项目插入图片。');
+        window.setTimeout(() => setEditorUploadMessage(''), 3600);
+        return;
+      }
+      setArtifacts((current) => [artifact, ...current]);
+      /* 上传期间若用户继续编辑，则把图片插入到最新光标位置，避免覆盖新输入。 */
+      insertArtifactMarkdown(
+        artifact,
+        draftRef.current === source ? selection : rememberEditorSelection(),
+        draftRef.current === source ? source : draftRef.current,
+      );
+      setEditorUploadMessage(`图片已插入 · ${filename}`);
+      notify('图片已上传并插入文档');
+      window.setTimeout(() => setEditorUploadMessage(''), 2600);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setEditorUploadMessage(`图片上传失败 · ${message}`);
+      setError(`图片上传失败：${message}`);
+    } finally {
+      editorUploadBusyRef.current = false;
+      setEditorUploadBusy(false);
+    }
+  };
+
+  const handleEditorPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const imageItem = [...event.clipboardData.items].find((item) => item.kind === 'file' && item.type.startsWith('image/'));
+    const imageFile = imageItem?.getAsFile() ?? [...event.clipboardData.files].find((file) => file.type.startsWith('image/'));
+    if (!imageFile) return;
+    event.preventDefault();
+    void uploadImageFile(imageFile);
+  };
+
+  const handleEditorDragEnter = (event: ReactDragEvent<HTMLTextAreaElement>) => {
+    if (event.dataTransfer.types.includes('Files')) {
+      event.preventDefault();
+      editorDragDepthRef.current += 1;
+      setEditorDragActive(true);
+    }
+  };
+
+  const handleEditorDragOver = (event: ReactDragEvent<HTMLTextAreaElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleEditorDragLeave = (event: ReactDragEvent<HTMLTextAreaElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    editorDragDepthRef.current = Math.max(0, editorDragDepthRef.current - 1);
+    if (editorDragDepthRef.current === 0) setEditorDragActive(false);
+  };
+
+  const handleEditorDrop = (event: ReactDragEvent<HTMLTextAreaElement>) => {
+    if (!event.dataTransfer.files.length) return;
+    event.preventDefault();
+    editorDragDepthRef.current = 0;
+    setEditorDragActive(false);
+    const files = [...event.dataTransfer.files];
+    const file = files.find((candidate) => Boolean(supportedImageMimeType(candidate))) ?? files[0];
+    if (file) void uploadImageFile(file);
   };
 
   const retrySave = () => {
@@ -784,30 +996,6 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
     }
   };
 
-  const insertArtifactMarkdown = (artifact: ReproductionArtifact) => {
-    const url = reproductionApi.artifactUrl(artifact.projectId, artifact.id);
-    const label = artifact.filename.replace(/[\[\]]/g, '\\$&');
-    const markdown = artifact.mimeType.startsWith('image/') || artifact.kind === 'image'
-      ? `![${label}](${url})`
-      : `[${label}](${url})`;
-    const textarea = markdownEditorRef.current;
-    const start = textarea?.selectionStart ?? draft.length;
-    const end = textarea?.selectionEnd ?? start;
-    const before = draft.slice(0, start);
-    const after = draft.slice(end);
-    const beforeSeparator = before && !before.endsWith('\n') ? '\n\n' : '';
-    const afterSeparator = after && !after.startsWith('\n') ? '\n\n' : after ? '\n' : '';
-    const nextDraft = `${before}${beforeSeparator}${markdown}${afterSeparator}${after}`;
-    const nextCursor = before.length + beforeSeparator.length + markdown.length;
-    setDraft(nextDraft);
-    window.requestAnimationFrame(() => {
-      const nextTextarea = markdownEditorRef.current;
-      if (!nextTextarea) return;
-      nextTextarea.focus();
-      nextTextarea.setSelectionRange(nextCursor, nextCursor);
-    });
-  };
-
   const addArtifact = async () => {
     if (!selected || !artifactFile) return;
     setArtifactBusy(true);
@@ -898,8 +1086,28 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
         {!listOnly && selected && <>
           <section className="reproduction__editor" aria-label="复现文档编辑器" aria-busy={detailLoading}>
             <div className="reproduction__editor-head"><div className="reproduction__editor-title"><h2>{selected.name}</h2><p>{paper ? <button type="button" className="reproduction__paper-link" onClick={() => openPaper(paper.id)}>↳ {paper.title_zh || paper.title}</button> : selected.paperTitle ? `↳ ${selected.paperTitle}` : '未关联论文'}</p></div><div className="reproduction__editor-actions"><span className={`reproduction__save reproduction__save--${saveState}`} role="status"><span aria-hidden="true" />{saveState === 'unsaved' ? '未保存' : saveState === 'saving' ? '保存中' : saveState === 'failed' ? '保存失败' : '已保存'}</span><div className="reproduction__segments" role="group" aria-label="文档显示模式">{(['edit', 'preview', 'split'] as const).map((value) => <button key={value} type="button" className={mode === value ? 'is-active' : ''} aria-pressed={mode === value} onClick={() => setMode(value)}>{value === 'edit' ? '编辑' : value === 'preview' ? '预览' : '分屏'}</button>)}</div></div></div>
-            <div ref={editorRef} className={`reproduction__editor-body reproduction__editor-body--${mode}`}>
-              {(mode === 'edit' || mode === 'split') && <textarea ref={markdownEditorRef} aria-label="复现 Markdown 正文" value={draft} disabled={!canEdit || detailLoading} onChange={(event) => updateDraft(event.target.value)} />}
+            {(mode === 'edit' || mode === 'split') && <MarkdownToolbar disabled={!canEdit || detailLoading} uploading={editorUploadBusy} uploadMessage={editorUploadMessage} onCommand={applyEditorCommand} onImageFile={uploadImageFile} />}
+            <div ref={editorRef} className={`reproduction__editor-body reproduction__editor-body--${mode}${editorDragActive ? ' is-drag-active' : ''}`}>
+              {(mode === 'edit' || mode === 'split') && <textarea
+                ref={markdownEditorRef}
+                aria-label="复现 Markdown 正文"
+                value={draft}
+                disabled={!canEdit || detailLoading}
+                placeholder="在此处输入。使用工具栏或 Markdown 进行格式化。拖放或粘贴图片。"
+                spellCheck={false}
+                onChange={(event) => updateDraft(event.target.value)}
+                onSelect={rememberEditorSelection}
+                onFocus={rememberEditorSelection}
+                onClick={rememberEditorSelection}
+                onBlur={rememberEditorSelection}
+                onKeyUp={rememberEditorSelection}
+                onKeyDown={handleEditorKeyDown}
+                onPaste={handleEditorPaste}
+                onDragEnter={handleEditorDragEnter}
+                onDragOver={handleEditorDragOver}
+                onDragLeave={handleEditorDragLeave}
+                onDrop={handleEditorDrop}
+              />}
               {(mode === 'preview' || mode === 'split') && <div className="reproduction__preview"><MarkdownView source={draft} /></div>}
             </div>
             <footer className="reproduction__editor-foot"><span>Markdown · KaTeX · 自动保存 · 修订 {revision}</span><span>{draft.length.toLocaleString()} 字</span></footer>
@@ -909,7 +1117,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
             <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>文档大纲</h2></div><span>{outline.length} 节</span></div>{outline.length === 0 ? <p className="reproduction__muted">在文档中添加 Markdown 标题后会显示章节导航。</p> : <nav aria-label="复现文档大纲"><ol className="reproduction__outline">{outline.map((item) => <li key={item.id} className={`reproduction__outline-level-${item.level}${activeHeadingId === item.id ? ' is-active' : ''}`}><button type="button" aria-current={activeHeadingId === item.id ? 'location' : undefined} onClick={() => jumpToHeading(item.label, item.id)}>{item.label}<ArrowRightIcon size={12} /></button></li>)}</ol></nav>}</section>
             <section className="reproduction__inspector-section reproduction__summary"><div className="reproduction__section-head"><div><h2>项目状态</h2></div></div><div className="reproduction__summary-status"><StatusBadge status={selected.status} /><select className="input input--sm" aria-label="项目状态" value={selected.status} disabled={selected.status === 'archived'} onChange={(event) => void updateStatus(event.target.value as ReproductionStatus)}>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><p>最后更新 {formatDate(selected.updatedAt)} · 修订 {selected.revision}</p></section>
             <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>实验运行</h2></div><button type="button" className="btn btn--primary btn--sm" disabled={!canEdit} onClick={() => { setRunEditingId(null); setRunForm(EMPTY_RUN_FORM); setRunOpen(true); }}><SparkIcon size={13} /> 记录</button></div>{runs.length === 0 ? <p className="reproduction__muted">还没有实验运行记录。</p> : <ol className="reproduction__run-list">{runs.slice(0, runsExpanded ? runs.length : 4).map((run) => <li key={run.id}><span className={`reproduction__run-dot reproduction__run-dot--${run.status}`} aria-hidden="true" /><span className="reproduction__run-copy"><strong>{run.name || run.resultSummary || '实验运行'}</strong><small>{run.resultSummary && run.name ? `${run.resultSummary} · ` : ''}{run.environment || '未记录环境'} · {formatDate(run.createdAt)}</small></span><b>{RUN_STATUS_LABELS[run.status]}</b><span className="reproduction__run-actions"><button type="button" className="btn btn--ghost btn--xs" disabled={!canEdit} onClick={() => editRun(run)}>编辑</button><button type="button" className="btn btn--ghost btn--xs" disabled={!canEdit} onClick={() => copyRun(run)}>复制</button><button type="button" className="btn btn--ghost btn--xs reproduction__danger-action" disabled={!canEdit} onClick={() => void deleteRun(run)}>删除</button></span></li>)}</ol>}{runs.length > 4 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={runsExpanded} onClick={() => setRunsExpanded((expanded) => !expanded)}>{runsExpanded ? '收起运行记录' : `查看全部 ${runs.length} 次运行`} <ArrowRightIcon size={12} /></button>}</section>
-            <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>附件</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setArtifactOpen(true)}><PlusIcon size={13} /> 添加</button></div>{artifacts.length === 0 ? <p className="reproduction__muted">尚未添加附件。</p> : <ul className="reproduction__artifact-list">{artifacts.slice(0, artifactsExpanded ? artifacts.length : 4).map((artifact) => <li key={artifact.id}><span><a href={reproductionApi.artifactUrl(artifact.projectId, artifact.id)} download={artifact.filename} aria-label={`下载附件 ${artifact.filename}`}><DownloadIcon size={12} /> {artifact.filename}</a><small>{Math.ceil(artifact.sizeBytes / 1024)} KB · {artifact.mimeType}</small></span><code>{artifact.kind}</code></li>)}</ul>}{artifacts.length > 4 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={artifactsExpanded} onClick={() => setArtifactsExpanded((expanded) => !expanded)}>{artifactsExpanded ? '收起附件' : `查看全部 ${artifacts.length} 个附件`} <ArrowRightIcon size={12} /></button>}</section>
+            <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>附件</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setArtifactOpen(true)}><PlusIcon size={13} /> 添加</button></div>{artifacts.length === 0 ? <p className="reproduction__muted">尚未添加附件。</p> : <ul className="reproduction__artifact-list">{artifacts.slice(0, artifactsExpanded ? artifacts.length : 4).map((artifact) => <li key={artifact.id}><span><a href={reproductionApi.artifactUrl(artifact.projectId, artifact.id)} download={artifact.filename} aria-label={`下载附件 ${artifact.filename}`}><DownloadIcon size={12} /> {artifact.filename}</a><small>{Math.ceil(artifact.sizeBytes / 1024)} KB · {artifact.mimeType}</small></span><span className="reproduction__artifact-actions"><code>{artifact.kind}</code><button type="button" className="btn btn--ghost btn--xs" aria-label={`插入附件 ${artifact.filename}`} disabled={!canEdit} onClick={() => insertArtifactMarkdown(artifact)}>插入</button></span></li>)}</ul>}{artifacts.length > 4 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={artifactsExpanded} onClick={() => setArtifactsExpanded((expanded) => !expanded)}>{artifactsExpanded ? '收起附件' : `查看全部 ${artifacts.length} 个附件`} <ArrowRightIcon size={12} /></button>}</section>
             <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>复现笔记</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setNoteOpen(true)}>新增</button></div>{notes.length === 0 ? <p className="reproduction__muted">暂无独立笔记。</p> : <ul className="reproduction__note-list">{notes.slice(0, notesExpanded ? notes.length : 3).map((note) => <li key={note.id}><p>{note.content}</p><small>{formatDate(note.createdAt)}</small></li>)}</ul>}{notes.length > 3 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={notesExpanded} onClick={() => setNotesExpanded((expanded) => !expanded)}>{notesExpanded ? '收起笔记' : `查看全部 ${notes.length} 条笔记`} <ArrowRightIcon size={12} /></button>}</section>
             <section className="reproduction__inspector-actions"><button type="button" className="btn btn--ghost btn--sm" disabled={selected.status === 'archived'} onClick={openProjectEditor}><EditIcon size={14} /> 编辑项目</button><button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyProject()}><DocumentIcon size={14} /> 复制项目</button><button type="button" className="btn btn--ghost btn--sm" disabled={selected.status === 'archived'} onClick={() => void archiveProject()}><ArchiveIcon size={14} /> 归档项目</button><button type="button" className="btn btn--ghost btn--sm reproduction__danger-action" disabled={selected.status !== 'archived'} onClick={() => void deleteProject()}><TrashIcon size={14} /> 删除项目</button></section>
           <section className="reproduction__inspector-section reproduction__results-section"><div className="reproduction__section-head"><div><h2>结果对照</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setResultOpen(true)}><PlusIcon size={13} /> 记录指标</button></div>{results.length === 0 ? <p className="reproduction__muted">还没有原论文与复现结果的对照记录。</p> : <ul className="reproduction__result-list">{results.slice(0, 5).map((result) => <li key={result.id}><div><strong>{result.metricName}</strong><small>{result.paperValue ?? '—'} → {result.reproductionValue ?? '—'}{result.difference ? ` · ${result.difference}` : ''}</small></div><span className={`reproduction__result-status reproduction__result-status--${result.status}`}>{RESULT_STATUS_LABELS[result.status]}</span></li>)}</ul>}</section>
@@ -926,7 +1134,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       {noteOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!noteBusy && event.target === event.currentTarget) setNoteOpen(false); }}><form ref={noteDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="add-note-title" onSubmit={(event) => { event.preventDefault(); void addNote(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">REPRODUCTION NOTE</span><h2 id="add-note-title">新增复现笔记</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭新增笔记对话框" disabled={noteBusy} onClick={() => setNoteOpen(false)}><CloseIcon size={15} /></button></div><label>笔记内容<textarea className="input" autoFocus rows={6} value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="记录一个观察、偏差或下一步问题" /></label><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={noteBusy} onClick={() => setNoteOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={noteBusy || !noteDraft.trim()}>{noteBusy ? '保存中…' : '保存笔记'}</button></div></form></div>}
 
 
-      {artifactOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!artifactBusy && event.target === event.currentTarget) setArtifactOpen(false); }}><form ref={artifactDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="add-artifact-title" onSubmit={(event) => { event.preventDefault(); void addArtifact(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">REPRODUCTION ARTIFACT</span><h2 id="add-artifact-title">添加附件</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭添加附件对话框" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}><CloseIcon size={15} /></button></div><label>附件文件<input className="input" autoFocus type="file" onChange={(event) => setArtifactFile(event.target.files?.[0] ?? null)} /></label><label>附件类型<select className="input" value={artifactKind} onChange={(event) => setArtifactKind(event.target.value)}><option value="attachment">附件</option><option value="log">日志</option><option value="table">表格</option><option value="image">图片</option><option value="document">文档</option></select></label><p className="reproduction__dialog-hint">支持文本、Markdown、CSV、JSON、PDF 和常见图片，单个文件不超过 25 MB。</p><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={artifactBusy || !artifactFile}>{artifactBusy ? '上传中…' : '上传附件'}</button></div></form></div>}
+      {artifactOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!artifactBusy && event.target === event.currentTarget) setArtifactOpen(false); }}><form ref={artifactDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="add-artifact-title" onSubmit={(event) => { event.preventDefault(); void addArtifact(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">REPRODUCTION ARTIFACT</span><h2 id="add-artifact-title">添加附件</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭添加附件对话框" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}><CloseIcon size={15} /></button></div><label>附件文件<input className="input" autoFocus type="file" accept=".txt,.log,.md,.markdown,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp" onChange={(event) => setArtifactFile(event.target.files?.[0] ?? null)} /></label><label>附件类型<select className="input" value={artifactKind} onChange={(event) => setArtifactKind(event.target.value)}><option value="attachment">附件</option><option value="log">日志</option><option value="table">表格</option><option value="image">图片</option><option value="document">文档</option></select></label><p className="reproduction__dialog-hint">支持文本、Markdown、CSV、JSON、PDF、PNG、JPEG 和 WebP，单个文件不超过 25 MB。图片也可直接用工具栏上传，或拖放 / 粘贴到正文。</p><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={artifactBusy || !artifactFile}>{artifactBusy ? '上传中…' : '上传附件'}</button></div></form></div>}
       {resultOpen && (
         <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!resultBusy && event.target === event.currentTarget) setResultOpen(false); }}>
           <form ref={resultDialogRef} className="reproduction__dialog reproduction__dialog--wide" role="dialog" aria-modal="true" aria-labelledby="add-result-title" onSubmit={(event) => { event.preventDefault(); void recordResult(); }}>

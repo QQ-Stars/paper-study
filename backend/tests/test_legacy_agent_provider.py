@@ -411,6 +411,55 @@ class LegacyAgentProviderTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_citegraph_partial_unmatched_papers_remains_a_successful_rebuild(self) -> None:
+        """Missing S2 records are coverage gaps, not a failed graph rebuild."""
+        from agent import __main__ as agent_main
+        from backend.app.providers.legacy_agent import LegacyAgentProvider
+
+        async def scenario() -> None:
+            provider = LegacyAgentProvider(in_process=True, timeout_seconds=2.0)
+
+            def fake_main() -> None:
+                print(
+                    "REFERR::paper-missing::paper not found",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "edges": 486,
+                            "nodes": 250,
+                            "processed": 245,
+                            "failed": 5,
+                        }
+                    ),
+                    flush=True,
+                )
+
+            with mock.patch.object(agent_main, "main", side_effect=fake_main):
+                events = [
+                    event
+                    async for event in provider.stream_events(
+                        "citegraph",
+                        terminal_fields={"edges": 0, "nodes": 0},
+                    )
+                ]
+
+            self.assertEqual("result", events[-1]["type"])
+            self.assertTrue(events[-1]["ok"])
+            self.assertEqual(5, events[-1]["failed"])
+            self.assertEqual(486, events[-1]["edges"])
+            self.assertTrue(
+                any(
+                    event.get("line") == "REFERR::paper-missing::paper not found"
+                    for event in events
+                )
+            )
+
+        asyncio.run(scenario())
+
     def test_in_process_non_structured_invalid_json_is_failed_not_empty_success(self) -> None:
         """A malformed agent payload must not become an optimistic empty result."""
         from agent import __main__ as agent_main

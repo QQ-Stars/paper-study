@@ -32,3 +32,17 @@ test('formatTerminalSummary reports terminal errors before any counts', () => {
     '失败：provider unavailable',
   );
 });
+
+test('formatTerminalSummary treats unmatched citation records as a completed graph rebuild', () => {
+  assert.equal(
+    formatTerminalSummary({
+      type: 'result',
+      ok: true,
+      edges: 486,
+      nodes: 250,
+      processed: 245,
+      failed: 5,
+    }),
+    '486 条引用边 / 250 个节点 · 5 篇未匹配',
+  );
+});

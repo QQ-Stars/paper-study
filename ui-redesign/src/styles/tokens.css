@@ -16,6 +16,9 @@
   --tool-surface: hsl(36 22% 95%);
   --editor-surface: hsl(40 34% 98%);
   --editor-toolbar: hsl(36 22% 93%);
+  --editor-tool-hover: hsl(0 0% 100% / 0.86);
+  --editor-tool-active: hsl(9 68% 47% / 0.1);
+  --editor-drop-wash: hsl(9 68% 47% / 0.08);
   --inspector-surface: hsl(36 22% 95%);
 
   /* ── 色板：墨 ── */
@@ -122,6 +125,9 @@
   --tool-surface: hsl(24 11% 16%);
   --editor-surface: hsl(24 10% 11%);
   --editor-toolbar: hsl(24 11% 15%);
+  --editor-tool-hover: hsl(24 10% 22%);
+  --editor-tool-active: hsl(9 62% 50% / 0.18);
+  --editor-drop-wash: hsl(9 62% 50% / 0.14);
   --inspector-surface: hsl(24 11% 14%);
 
   /* 墨 → 暖白 */

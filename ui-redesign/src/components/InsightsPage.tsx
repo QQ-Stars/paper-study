@@ -69,7 +69,8 @@ export function InsightsPage({ papers, notify, reloadPapers }: InsightsPageProps
       });
       if (!terminal) throw new Error('图谱重建未返回完成状态');
       if (terminal.ok === false) {
-        throw new Error(String(terminal.error || '引用图谱重建失败'));
+        notify(`图谱重建失败：${String(terminal.error || '引用图谱重建失败')}`);
+        return;
       }
       const nextGraph = await loadGraph();
       const edgeCount = nextGraph.edgeCount ?? nextGraph.links.length;

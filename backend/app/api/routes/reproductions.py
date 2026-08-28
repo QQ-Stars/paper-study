@@ -249,7 +249,17 @@ def create_reproduction_router() -> APIRouter:
             from backend.app.domain import ReproductionNotFoundError
             raise ReproductionNotFoundError(project_id=project_id)
         from fastapi.responses import FileResponse
-        return FileResponse(path, media_type=str(artifact["mimeType"]), filename=str(artifact["filename"]))
+        mime_type = str(artifact["mimeType"])
+        return FileResponse(
+            path,
+            media_type=mime_type,
+            filename=str(artifact["filename"]),
+            # Images are embedded by the Markdown preview; other artifacts
+            # retain download semantics.
+            content_disposition_type="inline"
+            if mime_type in {"image/png", "image/jpeg", "image/webp"}
+            else "attachment",
+        )
 
     @router.post("/reproductions/{project_id}/notes", status_code=status.HTTP_201_CREATED)
     async def add_reproduction_note(request: Request, body: NoteBody, project_id: str = Path(min_length=1, max_length=100)) -> dict[str, object]:

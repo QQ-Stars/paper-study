@@ -194,10 +194,39 @@
 .acquire__spinner {
   width: 1rem;
   height: 1rem;
+  flex: 0 0 auto;
   border: 2px solid var(--line-strong);
   border-top-color: var(--seal);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+.acquire__spinner--button {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-width: 1.5px;
+}
+
+.acquire__expand-button[aria-busy='true'] {
+  border-color: var(--seal-line);
+  background: var(--seal-wash);
+  color: var(--seal-deep);
+  opacity: 1;
+}
+
+.acquire__expand-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: min(34rem, 100%);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--seal-line);
+  border-radius: var(--radius-md);
+  background: var(--seal-wash);
+  color: var(--seal-deep);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  text-align: left;
 }
 
 @keyframes spin {
