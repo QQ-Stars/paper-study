@@ -21,6 +21,24 @@ ui-redesign/dist  ── FastAPI (/workspace/)
 `ExperimentRun` 不等同于后台 `ProcessingJob`，首版不会执行浏览器或后端传入的
 任意命令。删除论文不会级联删除复现资料；项目保留论文标题快照并将关联置空。
 
+每个复现项目同时拥有以稳定 `project_id` 命名的独立目录：
+
+```text
+data/reproduction-artifacts/projects/<project-id>/
+├─ project.json
+├─ document.md
+├─ runs.json
+├─ results.json
+├─ notes.json
+└─ artifacts/
+```
+
+SQLite 仍是事务和查询的主数据源；目录内 Markdown/JSON 是原子更新的可读镜像，
+便于按项目备份、查看和维护，不会反向导入手工修改。`project.json` 保存聚合指纹；
+镜像暂时写入失败不会回滚已提交的 SQLite 事务，后续详情读取会再次尝试同步。
+旧项目在首次读取详情时自动补齐目录。新附件使用不透明文件名写入 `artifacts/`，历史附件路径继续兼容。
+复制项目时会复制实际附件并重写正文中的附件 URL，因此源项目与副本可独立删除。
+
 ## 目录职责
 
 - `ui-redesign/`：唯一前端源码。`dist/` 是随仓库提交的生产构建产物。
@@ -28,7 +46,7 @@ ui-redesign/dist  ── FastAPI (/workspace/)
 - `agent/`：Python 采集、PDF/OCR、LLM 适配器和只读 MCP stdio 服务；不是第二个 Web 服务。
 - `backend/app/application/reproductions.py`：复现项目、文档、运行、附件和笔记的深模块实现。
 - `backend/app/api/routes/reproductions.py`：仅负责 `/api/v2/reproductions` 的 HTTP 校验和适配。
-- `data/reproduction-artifacts/`：复现附件的服务端托管目录，路径使用不透明项目/附件 ID。
+- `data/reproduction-artifacts/projects/<project-id>/`：每个复现项目的独立镜像与附件目录，项目和新附件路径均使用不透明 ID。
 - `db/`：可重复执行的基础 SQLite schema。
 - `data/`：本地数据库、缓存、设置和 PDF 运行数据，默认不提交。
 - `notes/`、`data/papers.json`、`data/progress.json`：可迁移的用户资料种子，首次创建数据库时导入。

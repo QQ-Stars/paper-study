@@ -28,6 +28,11 @@ class SaveDocumentBody(_Body):
     expectedRevision: Annotated[int, Field(strict=True, ge=1)]
 
 
+class CopyProjectBody(_Body):
+    name: StrictStr | None = Field(default=None, min_length=1, max_length=200)
+    content: StrictStr | None = Field(default=None, max_length=2_000_000)
+
+
 class RunBody(_Body):
     name: StrictStr | None = Field(default=None, max_length=200)
     environment: StrictStr | None = Field(default=None, max_length=10_000)
@@ -150,6 +155,18 @@ def create_reproduction_router() -> APIRouter:
     async def archive_reproduction(request: Request, body: RevisionBody, project_id: str = Path(min_length=1, max_length=100)) -> dict[str, object]:
         return await _workspace(request).archive_project(project_id, expected_revision=body.expectedRevision)
 
+    @router.post("/reproductions/{project_id}/copy", status_code=status.HTTP_201_CREATED)
+    async def copy_reproduction(
+        request: Request,
+        body: CopyProjectBody,
+        project_id: str = Path(min_length=1, max_length=100),
+    ) -> dict[str, object]:
+        return await _workspace(request).copy_project(
+            project_id,
+            name=body.name,
+            content=body.content,
+        )
+
     @router.delete("/reproductions/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_reproduction(request: Request, body: RevisionBody, project_id: str = Path(min_length=1, max_length=100)) -> Response:
         await _workspace(request).delete_project(project_id, expected_revision=body.expectedRevision)
@@ -254,6 +271,10 @@ def create_reproduction_router() -> APIRouter:
             path,
             media_type=mime_type,
             filename=str(artifact["filename"]),
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "sandbox",
+            },
             # Images are embedded by the Markdown preview; other artifacts
             # retain download semantics.
             content_disposition_type="inline"

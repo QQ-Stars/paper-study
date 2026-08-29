@@ -1018,23 +1018,12 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   };
 
   const copyProject = async () => {
-    if (!selected || !selected.paperId) {
-      setError('该项目缺少关联论文，无法复制');
-      return;
-    }
+    if (!selected) return;
     try {
-      const copy = await reproductionApi.create({
+      const copy = await reproductionApi.copy(selected.id, {
         name: `${selected.name} 副本`,
-        paperId: selected.paperId,
-        tags: selected.tags,
+        content: draft,
       });
-      if (draft && copy.document && draft !== copy.document.content) {
-        const copiedDocument = await reproductionApi.saveDocument(copy.id, {
-          content: draft,
-          expectedRevision: copy.document.revision,
-        });
-        copy.document = copiedDocument;
-      }
       setProjects((current) => [copy, ...current]);
       setSelectedId(copy.id);
       notify('复现项目副本已创建');
@@ -1134,7 +1123,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       {noteOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!noteBusy && event.target === event.currentTarget) setNoteOpen(false); }}><form ref={noteDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="add-note-title" onSubmit={(event) => { event.preventDefault(); void addNote(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">REPRODUCTION NOTE</span><h2 id="add-note-title">新增复现笔记</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭新增笔记对话框" disabled={noteBusy} onClick={() => setNoteOpen(false)}><CloseIcon size={15} /></button></div><label>笔记内容<textarea className="input" autoFocus rows={6} value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="记录一个观察、偏差或下一步问题" /></label><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={noteBusy} onClick={() => setNoteOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={noteBusy || !noteDraft.trim()}>{noteBusy ? '保存中…' : '保存笔记'}</button></div></form></div>}
 
 
-      {artifactOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!artifactBusy && event.target === event.currentTarget) setArtifactOpen(false); }}><form ref={artifactDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="add-artifact-title" onSubmit={(event) => { event.preventDefault(); void addArtifact(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">REPRODUCTION ARTIFACT</span><h2 id="add-artifact-title">添加附件</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭添加附件对话框" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}><CloseIcon size={15} /></button></div><label>附件文件<input className="input" autoFocus type="file" accept=".txt,.log,.md,.markdown,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp" onChange={(event) => setArtifactFile(event.target.files?.[0] ?? null)} /></label><label>附件类型<select className="input" value={artifactKind} onChange={(event) => setArtifactKind(event.target.value)}><option value="attachment">附件</option><option value="log">日志</option><option value="table">表格</option><option value="image">图片</option><option value="document">文档</option></select></label><p className="reproduction__dialog-hint">支持文本、Markdown、CSV、JSON、PDF、PNG、JPEG 和 WebP，单个文件不超过 25 MB。图片也可直接用工具栏上传，或拖放 / 粘贴到正文。</p><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={artifactBusy || !artifactFile}>{artifactBusy ? '上传中…' : '上传附件'}</button></div></form></div>}
+      {artifactOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!artifactBusy && event.target === event.currentTarget) setArtifactOpen(false); }}><form ref={artifactDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="add-artifact-title" onSubmit={(event) => { event.preventDefault(); void addArtifact(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">REPRODUCTION ARTIFACT</span><h2 id="add-artifact-title">添加附件</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭添加附件对话框" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}><CloseIcon size={15} /></button></div><label>附件文件<input className="input" autoFocus type="file" accept=".txt,.log,.md,.markdown,.csv,.json,.pdf,.html,.htm,.png,.jpg,.jpeg,.webp" onChange={(event) => setArtifactFile(event.target.files?.[0] ?? null)} /></label><label>附件类型<select className="input" value={artifactKind} onChange={(event) => setArtifactKind(event.target.value)}><option value="attachment">附件</option><option value="log">日志</option><option value="table">表格</option><option value="image">图片</option><option value="document">文档</option></select></label><p className="reproduction__dialog-hint">支持文本、Markdown、CSV、JSON、PDF、HTML、PNG、JPEG 和 WebP，单个文件不超过 25 MB。HTML 作为安全下载附件保存，不会在应用内执行。图片也可直接用工具栏上传，或拖放 / 粘贴到正文。</p><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={artifactBusy || !artifactFile}>{artifactBusy ? '上传中…' : '上传附件'}</button></div></form></div>}
       {resultOpen && (
         <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!resultBusy && event.target === event.currentTarget) setResultOpen(false); }}>
           <form ref={resultDialogRef} className="reproduction__dialog reproduction__dialog--wide" role="dialog" aria-modal="true" aria-labelledby="add-result-title" onSubmit={(event) => { event.preventDefault(); void recordResult(); }}>

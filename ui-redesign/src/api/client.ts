@@ -239,6 +239,8 @@ export const reproductionApi = {
   get: (id: string) => get<ReproductionProject>(`/api/v2/reproductions/${encodeURIComponent(id)}`),
   create: (body: { paperId: string; name: string; tags?: string[] }) =>
     post<ReproductionProject>('/api/v2/reproductions', body),
+  copy: (id: string, body: { name?: string; content?: string } = {}) =>
+    post<ReproductionProject>(`/api/v2/reproductions/${encodeURIComponent(id)}/copy`, body),
   update: (id: string, body: { name?: string; status?: string; tags?: string[]; expectedRevision: number }) =>
     mutate<ReproductionProject>('PATCH', `/api/v2/reproductions/${encodeURIComponent(id)}`, body),
   archive: (id: string, expectedRevision: number) =>

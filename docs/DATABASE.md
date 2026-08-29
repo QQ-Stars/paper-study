@@ -35,11 +35,37 @@ Alembic finishes the migration. The main groups are:
   artifacts, and processing jobs. The paper relationship is nullable and uses
   `SET NULL`, retaining the project title snapshot when a paper is removed.
 
-Reproduction attachments are stored below
-`data/reproduction-artifacts/projects/<opaque-project-id>/`. The API accepts only
-server-owned opaque keys and enforces project-directory containment before
-registration or download. The first release records experiment commands and
-parameters but never executes arbitrary shell commands.
+Each reproduction project also owns an isolated maintenance directory keyed by
+its stable opaque project ID:
+
+```text
+data/reproduction-artifacts/projects/<project-id>/
+├─ project.json
+├─ document.md
+├─ runs.json
+├─ results.json
+├─ notes.json
+└─ artifacts/
+```
+
+SQLite remains the transactional source of truth. The Markdown and JSON files
+are atomically written, human-readable mirrors for backup, inspection, and
+project-level maintenance; editing them by hand does not import changes into
+SQLite, and a later API sync can overwrite those edits. `project.json` carries
+an aggregate fingerprint, so an incomplete or stale mirror is retried on a
+later detail read. A temporary mirror-write failure does not roll back an
+already committed SQLite mutation. Existing projects are backfilled the first
+time their detail endpoint is read. Legacy attachment keys
+directly below `projects/<project-id>/` remain readable, while new uploads use
+server-owned opaque names below the project's `artifacts/` directory. Copying a
+project creates new physical attachment files and rewrites document attachment
+URLs, so deleting the source project does not break its copy.
+
+The API enforces project-directory containment before attachment registration,
+copy, or download. HTML files are stored as non-executable download attachments;
+image and PDF uploads receive basic file-signature validation. The first release
+records experiment commands and parameters but never executes arbitrary shell
+commands.
 
 The database layer enables WAL mode, foreign keys, and a busy timeout for local
 concurrent API, worker, and scheduler access.
