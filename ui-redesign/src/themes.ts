@@ -16,7 +16,8 @@ export const THEMES: ThemeDefinition[] = [
   { id: 'night', label: '书斋 · 夜', description: '夜墨底 · 暖白字 · 亮朱砂' },
 ];
 
-export const DEFAULT_THEME: ThemeId = 'light';
+/* 夜墨是研究工作区的默认环境；昼间主题仍可从「主题」入口切换。 */
+export const DEFAULT_THEME: ThemeId = 'night';
 
 const STORAGE_KEY = 'paper-study-theme';
 
@@ -33,7 +34,7 @@ export function readStoredTheme(): ThemeId {
   }
 }
 
-/* light 为默认令牌（无 data-theme），其余主题设置 data-theme 覆盖 */
+/* 默认主题使用根令牌；其他主题通过 data-theme 覆盖 */
 export function applyTheme(id: ThemeId): void {
   const root = document.documentElement;
   if (id === DEFAULT_THEME) root.removeAttribute('data-theme');

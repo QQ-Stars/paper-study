@@ -1,6 +1,6 @@
 import { NAV_ITEMS, type PageId } from '../nav';
 import { THEMES, type ThemeId } from '../themes';
-import { MoonIcon } from './Icons';
+import { MoonIcon, PanelLeftIcon, PanelRightIcon } from './Icons';
 
 interface SidebarProps {
   page: PageId;
@@ -8,13 +8,15 @@ interface SidebarProps {
   libraryCount: number;
   theme: ThemeId;
   onNavigate: (page: PageId) => void;
+  collapsed: boolean;
+  onToggle: () => void;
 }
 
-export function Sidebar({ page, dueCount, libraryCount, theme, onNavigate }: SidebarProps) {
+export function Sidebar({ page, dueCount, libraryCount, theme, onNavigate, collapsed, onToggle }: SidebarProps) {
   const currentTheme = THEMES.find((item) => item.id === theme) ?? THEMES[0];
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${collapsed ? ' sidebar--collapsed' : ''}`} aria-label="Paper Study 全局导航">
       <div className="sidebar__brand">
         <span className="sidebar__seal" aria-hidden="true">
           研
@@ -23,9 +25,20 @@ export function Sidebar({ page, dueCount, libraryCount, theme, onNavigate }: Sid
           <strong>Paper Study</strong>
           <span>个人研究工作区</span>
         </span>
+        <button
+          type="button"
+          className="sidebar__collapse"
+          aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+          aria-controls="global-nav"
+          aria-expanded={!collapsed}
+          title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+          onClick={onToggle}
+        >
+          {collapsed ? <PanelRightIcon size={16} /> : <PanelLeftIcon size={16} />}
+        </button>
       </div>
 
-      <nav className="sidebar__nav" aria-label="全局导航">
+      <nav className="sidebar__nav" id="global-nav" aria-label="全局导航">
         {NAV_ITEMS.map((item) => {
           const active = item.id === page;
           const count =

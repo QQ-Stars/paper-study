@@ -1,57 +1,59 @@
 /* ============================================================
    Paper Study · 设计令牌
-   概念「书斋」：宣纸底色 + 墨色文字 + 朱砂点缀。
+   概念「研究夜航」：夜墨底色 + 暖白文字 + 朱砂行动色。
    所有组件样式只允许引用这里的令牌，禁止硬编码颜色。
    ============================================================ */
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
-  /* ── 色板：纸 ── */
-  --paper: hsl(40 30% 97%);
-  --paper-deep: hsl(36 22% 93%);
-  --paper-sunken: hsl(36 18% 90%);
-  --card: hsl(0 0% 100%);
-  --card-hover: hsl(36 26% 98%);
-  --tool-surface: hsl(36 22% 95%);
-  --editor-surface: hsl(40 34% 98%);
-  --editor-toolbar: hsl(36 22% 93%);
-  --editor-tool-hover: hsl(0 0% 100% / 0.86);
-  --editor-tool-active: hsl(9 68% 47% / 0.1);
-  --editor-drop-wash: hsl(9 68% 47% / 0.08);
-  --inspector-surface: hsl(36 22% 95%);
+  /* ── 色板：工作台 ── */
+  --paper: hsl(240 7% 7%);
+  --paper-deep: hsl(240 6% 10%);
+  --paper-sunken: hsl(240 7% 5%);
+  --card: hsl(240 6% 11%);
+  --card-hover: hsl(240 6% 14%);
+  --tool-surface: hsl(240 6% 13%);
+  --editor-surface: hsl(240 7% 8%);
+  --editor-toolbar: hsl(240 6% 12%);
+  --editor-tool-hover: hsl(240 6% 18%);
+  --editor-tool-active: hsl(5 76% 54% / 0.16);
+  --editor-drop-wash: hsl(5 76% 54% / 0.14);
+  --inspector-surface: hsl(240 6% 10%);
+  --app-background: var(--paper);
+  --overlay: hsl(240 10% 3% / 0.72);
 
-  /* ── 色板：墨 ── */
-  --ink: hsl(24 14% 12%);
-  --ink-soft: hsl(24 7% 34%);
-  --ink-muted: hsl(26 6% 46%);
-  --ink-faint: hsl(28 6% 55%);
-  --ink-ghost: hsl(30 6% 72%);
+  /* ── 色板：暖白墨 ── */
+  --ink: hsl(40 25% 94%);
+  --ink-soft: hsl(35 12% 80%);
+  --ink-muted: hsl(32 8% 64%);
+  --ink-faint: hsl(30 7% 52%);
+  --ink-ghost: hsl(28 6% 38%);
 
   /* ── 线 ── */
-  --line: hsl(34 16% 88%);
-  --line-strong: hsl(33 12% 78%);
+  --line: hsl(240 5% 20%);
+  --line-strong: hsl(240 5% 31%);
 
   /* ── 朱砂（品牌强调） ── */
-  --seal: hsl(9 68% 47%);
-  --seal-deep: hsl(9 72% 40%);
-  --seal-wash: hsl(9 68% 47% / 0.07);
-  --seal-line: hsl(9 68% 47% / 0.22);
+  --seal: hsl(5 76% 54%);
+  --seal-deep: hsl(4 82% 64%);
+  --seal-wash: hsl(5 76% 54% / 0.14);
+  --seal-line: hsl(5 76% 54% / 0.42);
 
   /* ── 语义色 ── */
-  --jade: hsl(158 38% 34%);
-  --jade-wash: hsl(158 38% 34% / 0.08);
-  --amber: hsl(32 82% 42%);
-  --amber-wash: hsl(32 82% 42% / 0.1);
-  --info: hsl(217 52% 48%);
-  --info-wash: hsl(217 52% 48% / 0.08);
+  --jade: hsl(157 54% 60%);
+  --jade-wash: hsl(157 54% 50% / 0.16);
+  --amber: hsl(35 92% 64%);
+  --amber-wash: hsl(35 92% 54% / 0.16);
+  --info: hsl(215 82% 72%);
+  --info-wash: hsl(215 82% 62% / 0.16);
 
-  /* ── 阴影（暖调、轻柔） ── */
-  --shadow-sm: 0 1px 2px hsl(30 15% 20% / 0.05);
+  /* ── 阴影（深色工作台） ── */
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.36);
   --shadow-md:
-    0 1px 2px hsl(30 15% 20% / 0.04), 0 10px 28px -14px hsl(30 15% 20% / 0.18);
+    0 1px 2px hsl(0 0% 0% / 0.34), 0 14px 28px -16px hsl(0 0% 0% / 0.72);
   --shadow-lg:
-    0 2px 6px hsl(30 15% 20% / 0.05), 0 28px 56px -18px hsl(30 15% 20% / 0.24);
+    0 2px 6px hsl(0 0% 0% / 0.42), 0 28px 56px -18px hsl(0 0% 0% / 0.82);
   --shadow-focus: 0 0 0 3px var(--seal-line);
 
   /* ── 字体 ── */
@@ -97,9 +99,9 @@
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 
   /* ── 布局 ── */
-  --sidebar-width: 14.5rem;
-  --topbar-height: 3.75rem;
-  --content-max: 76rem;
+  --sidebar-width: 15rem;
+  --topbar-height: 4.25rem;
+  --content-max: 90rem;
 
   /* ── 层级 ── */
   --z-sticky: 20;
@@ -108,58 +110,48 @@
 }
 
 /* ============================================================
-   主题：书斋 · 夜（themes.ts 注册表 id = night）
+   主题：书斋 · 昼（themes.ts 注册表 id = light）
    仅重定义同一组令牌，组件样式零改动；新增主题请仿照此块。
-   对比度：ink-soft/ink-faint 对 paper 均 ≥ 4.5:1。
    ============================================================ */
 
-[data-theme='night'] {
-  color-scheme: dark;
+[data-theme='light'] {
+  color-scheme: light;
 
-  /* 纸 → 夜墨 */
-  --paper: hsl(24 12% 9%);
-  --paper-deep: hsl(24 11% 12%);
-  --paper-sunken: hsl(24 10% 16%);
-  --card: hsl(24 10% 13%);
-  --card-hover: hsl(24 11% 17%);
-  --tool-surface: hsl(24 11% 16%);
-  --editor-surface: hsl(24 10% 11%);
-  --editor-toolbar: hsl(24 11% 15%);
-  --editor-tool-hover: hsl(24 10% 22%);
-  --editor-tool-active: hsl(9 62% 50% / 0.18);
-  --editor-drop-wash: hsl(9 62% 50% / 0.14);
-  --inspector-surface: hsl(24 11% 14%);
+  --paper: hsl(40 30% 97%);
+  --paper-deep: hsl(36 22% 93%);
+  --paper-sunken: hsl(36 18% 90%);
+  --card: hsl(0 0% 100%);
+  --card-hover: hsl(36 26% 98%);
+  --tool-surface: hsl(36 22% 95%);
+  --editor-surface: hsl(40 34% 98%);
+  --editor-toolbar: hsl(36 22% 93%);
+  --editor-tool-hover: hsl(0 0% 100% / 0.86);
+  --editor-tool-active: hsl(9 68% 47% / 0.1);
+  --editor-drop-wash: hsl(9 68% 47% / 0.08);
+  --inspector-surface: hsl(36 22% 95%);
+  --app-background: var(--paper);
+  --overlay: hsl(24 14% 12% / 0.28);
 
-  /* 墨 → 暖白 */
-  --ink: hsl(36 30% 92%);
-  --ink-soft: hsl(32 14% 80%);
-  --ink-muted: hsl(30 9% 68%);
-  --ink-faint: hsl(28 8% 60%);
-  --ink-ghost: hsl(28 6% 44%);
-
-  /* 线 */
-  --line: hsl(24 10% 22%);
-  --line-strong: hsl(24 9% 34%);
-
-  /* 朱砂 → 提亮以保证深底对比 */
-  --seal: hsl(9 62% 50%);
-  --seal-deep: hsl(9 70% 62%);
-  --seal-wash: hsl(9 62% 52% / 0.14);
-  --seal-line: hsl(9 62% 55% / 0.4);
-
-  /* 语义色提亮 */
-  --jade: hsl(158 42% 58%);
-  --jade-wash: hsl(158 42% 46% / 0.16);
-  --amber: hsl(32 88% 62%);
-  --amber-wash: hsl(32 88% 52% / 0.16);
-  --info: hsl(217 72% 70%);
-  --info-wash: hsl(217 72% 62% / 0.16);
-
-  /* 阴影 → 更深更收 */
-  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.4);
+  --ink: hsl(24 14% 12%);
+  --ink-soft: hsl(24 7% 34%);
+  --ink-muted: hsl(26 6% 46%);
+  --ink-faint: hsl(28 6% 55%);
+  --ink-ghost: hsl(30 6% 72%);
+  --line: hsl(34 16% 88%);
+  --line-strong: hsl(33 12% 78%);
+  --seal: hsl(9 68% 47%);
+  --seal-deep: hsl(9 72% 40%);
+  --seal-wash: hsl(9 68% 47% / 0.07);
+  --seal-line: hsl(9 68% 47% / 0.22);
+  --jade: hsl(158 38% 34%);
+  --jade-wash: hsl(158 38% 34% / 0.08);
+  --amber: hsl(32 82% 42%);
+  --amber-wash: hsl(32 82% 42% / 0.1);
+  --info: hsl(217 52% 48%);
+  --info-wash: hsl(217 52% 48% / 0.08);
+  --shadow-sm: 0 1px 2px hsl(30 15% 20% / 0.05);
   --shadow-md:
-    0 1px 2px hsl(0 0% 0% / 0.35), 0 10px 28px -14px hsl(0 0% 0% / 0.7);
+    0 1px 2px hsl(30 15% 20% / 0.04), 0 10px 28px -14px hsl(30 15% 20% / 0.18);
   --shadow-lg:
-    0 2px 6px hsl(0 0% 0% / 0.4), 0 28px 56px -18px hsl(0 0% 0% / 0.8);
-  --shadow-focus: 0 0 0 3px var(--seal-line);
+    0 2px 6px hsl(30 15% 20% / 0.05), 0 28px 56px -18px hsl(30 15% 20% / 0.24);
 }

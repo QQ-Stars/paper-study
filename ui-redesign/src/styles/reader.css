@@ -408,6 +408,17 @@
   font-size: var(--text-xs);
 }
 
+.pdfviewer__flow {
+  padding: 0.22rem 0.48rem;
+  border: 1px solid var(--seal-line);
+  border-radius: var(--radius-pill);
+  background: var(--seal-wash);
+  color: var(--seal-deep);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
 .pdfviewer__hint {
   margin-left: auto;
   color: var(--ink-ghost);
@@ -523,18 +534,90 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--paper-sunken);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+.pdfviewer__scroll:focus-visible {
+  outline: 2px solid var(--seal-line);
+  outline-offset: 2px;
+}
+
+.pdfviewer__pages {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  justify-items: center;
+  gap: var(--space-8);
+  padding-block: var(--space-2) var(--space-6);
+}
+
+.pdfviewer__page-shell {
+  display: grid;
+  width: fit-content;
+  max-width: none;
+  gap: var(--space-2);
+  scroll-margin-top: var(--space-3);
+  contain: layout paint style;
+}
+
+.pdfviewer__page-label {
+  justify-self: start;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.pdfviewer__page-shell--active .pdfviewer__page-label {
+  border-color: var(--seal-line);
+  background: var(--seal-wash);
+  color: var(--seal-deep);
 }
 
 .pdfviewer__page {
   position: relative;
-  width: fit-content;
-  margin-inline: auto;
+  flex: none;
+  overflow: hidden;
   background: var(--card);
   box-shadow: var(--shadow-md);
 }
 
+.pdfviewer__page-shell--active .pdfviewer__page {
+  box-shadow: 0 0 0 1px var(--seal-line), var(--shadow-md);
+}
+
 .pdfviewer__page canvas {
   display: block;
+}
+
+.pdfviewer__page-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--card);
+  color: var(--ink-ghost);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.pdfviewer__page-placeholder--error {
+  color: var(--seal-deep);
+}
+
+.pdfviewer__loading {
+  display: grid;
+  min-height: 24rem;
+  place-items: center;
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
 }
 
 /* textLayer：透明文字覆盖在 canvas 上，可被选中且选区可见。

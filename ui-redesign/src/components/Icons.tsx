@@ -355,3 +355,21 @@ export function HorizontalRuleIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function PanelLeftIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3.5" y="4" width="17" height="16" rx="1.8" />
+      <path d="M8.5 4v16M13 10l-2 2 2 2" />
+    </svg>
+  );
+}
+
+export function PanelRightIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3.5" y="4" width="17" height="16" rx="1.8" />
+      <path d="M15.5 4v16M11 10l2 2-2 2" />
+    </svg>
+  );
+}

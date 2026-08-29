@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { artifactApi, libraryApi, settingsApi } from '../api/client';
 import type { Paper, Settings, StudyStatus } from '../api/types';
-import { ArrowRightIcon, BookmarkIcon, StarIcon } from './Icons';
+import { ArrowRightIcon, BookmarkIcon, NoteIcon, PanelLeftIcon, PanelRightIcon, PdfIcon, StarIcon } from './Icons';
+import { LongMarkdownView } from './LongMarkdownView';
 import { MarkdownView } from './MarkdownView';
 import { PdfViewer } from './PdfViewer';
 import { SelectionTranslate } from './SelectionTranslate';
@@ -104,6 +105,31 @@ function splitSections(md: string): Array<{ heading: string; body: string }> {
   return sections;
 }
 
+function PaperIdentity({ paper, variant }: { paper: Paper; variant: 'rail' | 'fallback' }) {
+  return (
+    <header className={`reader__paper-head reader__paper-head--${variant}`}>
+      <span className="eyebrow">
+        {paper.venue} {paper.year}
+        {paper.ccf ? ` · CCF-${paper.ccf}` : ''} · {paper.source}
+      </span>
+      <h1 className="display-title">{paper.title_zh || paper.title}</h1>
+      {paper.title_zh && <p className="reader__origin">{paper.title}</p>}
+      <div className="reader__badges">
+        <span className={`badge ${paper.status === '已理解' ? 'badge--jade' : paper.status === '学习中' ? 'badge--amber' : 'badge--venue'}`}>
+          {paper.status}
+        </span>
+        {paper.topic && <span className="library__topic-tag">{paper.topic}</span>}
+        {paper.type && <span className="library__topic-tag">{paper.type}</span>}
+        <span className="badge badge--venue">被引 {(paper.citations ?? 0).toLocaleString()}</span>
+        <span className="badge badge--seal">
+          相关度 {((paper.relevance ?? 0) * 100).toFixed(0)}%
+        </span>
+        {paper.favorite === 1 && <span className="badge badge--amber">已收藏</span>}
+      </div>
+    </header>
+  );
+}
+
 export function ReaderPage({
   papers,
   paperId,
@@ -121,6 +147,8 @@ export function ReaderPage({
   const [fYear, setFYear] = useState('all');
   const [fFav, setFFav] = useState<'all' | 'fav'>('all');
   const [fQueue, setFQueue] = useState<'all' | 'queue'>('all');
+  const [readerRailOpen, setReaderRailOpen] = useState(true);
+  const [readerContextOpen, setReaderContextOpen] = useState(true);
   const [content, setContent] = useState({ loading: false, text: '', error: '' });
   const artifactRequestRef = useRef(0);
   const ocrRequestRef = useRef(0);
@@ -160,6 +188,11 @@ export function ReaderPage({
   const tabRefs = useRef<Partial<Record<ReaderTab, HTMLButtonElement | null>>>({});
 
   const paper = papers.find((item) => item.id === paperId) ?? null;
+
+  useEffect(() => {
+    if (!paper?.id) return;
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [paper?.id]);
 
   /* 翻译提示必须跟随持久化设置；设置接口失败时保留兼容的分块默认值，
    * 不阻断阅读页其它内容的加载。 */
@@ -567,6 +600,12 @@ export function ReaderPage({
   };
 
   const queued = readingQueueIds.includes(paper.id);
+  const statusProgress = paper.status === '已理解' ? 100 : paper.status === '学习中' ? 58 : 18;
+  const readerLayoutClass = [
+    'reader__layout',
+    !readerRailOpen && 'reader__layout--rail-collapsed',
+    !readerContextOpen && 'reader__layout--context-collapsed',
+  ].filter(Boolean).join(' ');
   const toggleReadingQueue = () => {
     updateReadingQueue(paper.id, !queued);
     notify(queued ? '已移出稍后阅读' : '已加入稍后阅读');
@@ -585,10 +624,13 @@ export function ReaderPage({
 
   return (
     <div className="page page-enter reader">
-      <header className="reader__topbar">
-        <button type="button" className="btn btn--sm" onClick={onBack}>
-          ← 返回文献库
-        </button>
+      <header className="reader__topbar reader__commandbar">
+        <div className="reader__commandbar-brand">
+          <button type="button" className="btn btn--ghost btn--sm" onClick={onBack}>
+            ← 文献库
+          </button>
+          <span className="reader__commandbar-label">精读工作区</span>
+        </div>
         <div className="reader__switch">
           <button
             type="button"
@@ -621,120 +663,141 @@ export function ReaderPage({
             下一篇 →
           </button>
         </div>
-        <div className="reader__filters">
-          <select className="input" aria-label="筛选：状态" value={fStatus} onChange={(event) => setFStatus(event.target.value as typeof fStatus)}>
-            <option value="all">全部状态</option>
-            <option value="未开始">未开始</option>
-            <option value="学习中">学习中</option>
-            <option value="已理解">已理解</option>
-          </select>
-          <select className="input" aria-label="筛选：收藏" value={fFav} onChange={(event) => setFFav(event.target.value as typeof fFav)}>
-            <option value="all">含未收藏</option>
-            <option value="fav">仅收藏</option>
-          </select>
-          <select className="input" aria-label="筛选：稍后阅读" value={fQueue} onChange={(event) => setFQueue(event.target.value as typeof fQueue)}>
-            <option value="all">全部阅读安排</option>
-            <option value="queue">仅稍后阅读</option>
-          </select>
-          <select className="input" aria-label="筛选：主题" value={fTopic} onChange={(event) => setFTopic(event.target.value)}>
-            <option value="all">全部主题</option>
-            {topics.map((topic) => (
-              <option key={topic} value={topic}>{topic}</option>
-            ))}
-          </select>
-          <select className="input" aria-label="筛选：来源" value={fSource} onChange={(event) => setFSource(event.target.value)}>
-            <option value="all">全部来源</option>
-            {sources.map((source) => (
-              <option key={source} value={source}>{source}</option>
-            ))}
-          </select>
-          <select className="input" aria-label="筛选：年份" value={fYear} onChange={(event) => setFYear(event.target.value)}>
-            <option value="all">全部年份</option>
-            {years.map((year) => (
-              <option key={year} value={year}>{year}</option>
-            ))}
-          </select>
-        </div>
+        <div className="reader__commandbar-tools">
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm reader__panel-toggle"
+            aria-controls={readerRailOpen ? 'reader-paper-rail' : undefined}
+            aria-expanded={readerRailOpen}
+            aria-label={readerRailOpen ? '收起论文信息侧栏' : '展开论文信息侧栏'}
+            title={readerRailOpen ? '收起论文信息侧栏' : '展开论文信息侧栏'}
+            onClick={() => setReaderRailOpen((open) => !open)}
+          >
+            <PanelLeftIcon size={15} />
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm reader__panel-toggle"
+            aria-controls={readerContextOpen ? 'reader-context-rail' : undefined}
+            aria-expanded={readerContextOpen}
+            aria-label={readerContextOpen ? '收起论文上下文侧栏' : '展开论文上下文侧栏'}
+            title={readerContextOpen ? '收起论文上下文侧栏' : '展开论文上下文侧栏'}
+            onClick={() => setReaderContextOpen((open) => !open)}
+          >
+            <PanelRightIcon size={15} />
+          </button>
+          <details className="reader__filter-drawer">
+            <summary>筛选</summary>
+            <div className="reader__filters">
+              <select className="input" aria-label="筛选：状态" value={fStatus} onChange={(event) => setFStatus(event.target.value as typeof fStatus)}>
+                <option value="all">全部状态</option>
+                <option value="未开始">未开始</option>
+                <option value="学习中">学习中</option>
+                <option value="已理解">已理解</option>
+              </select>
+              <select className="input" aria-label="筛选：收藏" value={fFav} onChange={(event) => setFFav(event.target.value as typeof fFav)}>
+                <option value="all">含未收藏</option>
+                <option value="fav">仅收藏</option>
+              </select>
+              <select className="input" aria-label="筛选：稍后阅读" value={fQueue} onChange={(event) => setFQueue(event.target.value as typeof fQueue)}>
+                <option value="all">全部阅读安排</option>
+                <option value="queue">仅稍后阅读</option>
+              </select>
+              <select className="input" aria-label="筛选：主题" value={fTopic} onChange={(event) => setFTopic(event.target.value)}>
+                <option value="all">全部主题</option>
+                {topics.map((topic) => (
+                  <option key={topic} value={topic}>{topic}</option>
+                ))}
+              </select>
+              <select className="input" aria-label="筛选：来源" value={fSource} onChange={(event) => setFSource(event.target.value)}>
+                <option value="all">全部来源</option>
+                {sources.map((source) => (
+                  <option key={source} value={source}>{source}</option>
+                ))}
+              </select>
+              <select className="input" aria-label="筛选：年份" value={fYear} onChange={(event) => setFYear(event.target.value)}>
+                <option value="all">全部年份</option>
+                {years.map((year) => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </div>
+          </details>
+          </div>
       </header>
 
       {scope.length === 0 ? (
-        <article className="reader__main">
-          <p className="reader__empty" role="status">
-            {fQueue === 'queue'
-              ? '稍后阅读中没有符合当前筛选条件的论文。'
-              : '没有符合当前筛选条件的论文。'}
-          </p>
-        </article>
+        <div className="reader__empty-layout">
+          <article className="reader__main">
+            <div className="reader__empty reader__empty--hero" role="status">
+              <span className="eyebrow">没有匹配结果</span>
+              <strong>{fQueue === 'queue' ? '稍后阅读中没有符合当前筛选条件的论文' : '没有符合当前筛选条件的论文'}</strong>
+              <p>调整筛选条件，或返回文献库选择另一篇论文。</p>
+            </div>
+          </article>
+          <aside className="reader__context reader__context--empty" aria-label="阅读工作区说明">
+            <section className="reader__context-card">
+              <span className="eyebrow">精读工作区</span>
+              <p>这里会保留你的论文筛选、阅读状态与划词翻译历史。</p>
+              <button type="button" className="btn btn--primary btn--sm" onClick={onBack}>返回文献库</button>
+            </section>
+          </aside>
+        </div>
       ) : (
-        <article className="reader__main">
-        <header className="reader__head">
-          <span className="eyebrow">
-            {paper.venue} {paper.year}
-            {paper.ccf ? ` · CCF-${paper.ccf}` : ''} · {paper.source}
-          </span>
-          <h1 className="display-title">{paper.title_zh || paper.title}</h1>
-          {paper.title_zh && <p className="reader__origin">{paper.title}</p>}
-          <div className="reader__badges">
-            <span className={`badge ${paper.status === '已理解' ? 'badge--jade' : paper.status === '学习中' ? 'badge--amber' : 'badge--venue'}`}>
-              {paper.status}
-            </span>
-            {paper.topic && <span className="library__topic-tag">{paper.topic}</span>}
-            {paper.type && <span className="library__topic-tag">{paper.type}</span>}
-            <span className="badge badge--venue">被引 {(paper.citations ?? 0).toLocaleString()}</span>
-            <span className="badge badge--seal">
-              相关度 {((paper.relevance ?? 0) * 100).toFixed(0)}%
-            </span>
-            {paper.favorite === 1 && <span className="badge badge--amber">已收藏</span>}
-          </div>
-          <div className="deep__actions">
-            <button type="button" className="btn btn--sm" onClick={() => void toggleFavorite()}>
-              <StarIcon size={13} />
-              {paper.favorite === 1 ? '取消收藏' : '收藏'}
-            </button>
-            <button type="button" className="btn btn--sm" onClick={toggleReadingQueue} aria-pressed={queued}>
-              <BookmarkIcon size={13} />
-              {queued ? '移出稍后阅读' : '加入稍后阅读'}
-            </button>
-            <button type="button" className="btn btn--sm" onClick={() => void advanceStatus()}>
-              状态流转 → {STATUS_CYCLE[(STATUS_CYCLE.indexOf(paper.status) + 1) % 3]}
-            </button>
-          </div>
-        </header>
+        <div className={readerLayoutClass}>
+        {readerRailOpen && <aside className="reader__rail" id="reader-paper-rail" aria-label="论文身份、阅读状态与动作">
+          <section className="reader__rail-card reader__rail-card--paper">
+            <div className="reader__rail-card-head">
+              <span className="eyebrow">PAPER</span>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm reader__panel-toggle"
+                aria-label="收起论文信息侧栏"
+                title="收起论文信息侧栏"
+                onClick={() => setReaderRailOpen(false)}
+              >
+                <PanelLeftIcon size={14} />
+              </button>
+            </div>
+            <PaperIdentity paper={paper} variant="rail" />
+          </section>
+          <section className="reader__rail-card reader__rail-card--progress">
+            <span className="eyebrow">阅读进度</span>
+            <div className="reader__rail-status">
+              <span className={`badge ${paper.status === '已理解' ? 'badge--jade' : paper.status === '学习中' ? 'badge--amber' : 'badge--venue'}`}>
+                {paper.status}
+              </span>
+              <strong>{statusProgress}%</strong>
+            </div>
+            <div className="reader__rail-meter" aria-hidden="true"><i style={{ width: `${statusProgress}%` }} /></div>
+            <p>{paper.status === '已理解' ? '这篇论文已完成一轮精读。' : paper.status === '学习中' ? '继续补齐证据、方法和结果。' : '先从摘要和核心贡献开始。'}</p>
+          </section>
 
-        <dl className="reader__meta">
-          <div className="reader__meta-authors">
-            <dt>作者</dt>
-            <dd>{authors.length > 0 ? authors.join('、') : '后端未收录该字段'}</dd>
-          </div>
-          <div>
-            <dt>入库时间</dt>
-            <dd>{paper.created_at || '—'}</dd>
-          </div>
-          <div>
-            <dt>本地 PDF</dt>
-            <dd>{pdfInfo ? (pdfInfo.hasPdf ? '就绪' : pdfInfo.canDownload ? '未下载（可补下载）' : '缺失且无来源') : pdfStatusError ? '读取失败' : '检测中…'}</dd>
-          </div>
-          <div>
-            <dt>arXiv / DOI</dt>
-            <dd>{paper.arxiv_id || paper.doi || '—'}</dd>
-          </div>
-          <div>
-            <dt>来源链接</dt>
-            <dd>
-              {paper.url ? (
-                <a href={paper.url} target="_blank" rel="noreferrer">
-                  {paper.url.slice(0, 56)}…
-                </a>
-              ) : (
-                '—'
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>数据库 ID</dt>
-            <dd title={paper.id}>{paper.id.slice(0, 32)}…</dd>
-          </div>
-        </dl>
+          <section className="reader__rail-card">
+            <span className="eyebrow">研究动作</span>
+            <div className="reader__rail-actions">
+              <button type="button" className="reader__rail-action" aria-pressed={paper.favorite === 1} onClick={() => void toggleFavorite()}>
+                <StarIcon size={15} />
+                <span>{paper.favorite === 1 ? '取消收藏' : '收藏论文'}</span>
+              </button>
+              <button type="button" className="reader__rail-action" aria-pressed={queued} onClick={toggleReadingQueue}>
+                <BookmarkIcon size={15} />
+                <span>{queued ? '移出稍后阅读' : '加入稍后阅读'}</span>
+              </button>
+              <button type="button" className="reader__rail-action" onClick={() => void advanceStatus()}>
+                <ArrowRightIcon size={15} />
+                <span>标记为 {STATUS_CYCLE[(STATUS_CYCLE.indexOf(paper.status) + 1) % 3]}</span>
+              </button>
+            </div>
+          </section>
+
+          <section className="reader__rail-card reader__rail-card--hint">
+            <span className="eyebrow">阅读提示</span>
+            <p>正文中选中一段文字，可直接调用划词翻译并保留本机历史。</p>
+          </section>
+        </aside>}
+        <article className="reader__main">
+        {!readerRailOpen && <PaperIdentity paper={paper} variant="fallback" />}
 
         <nav className="reader__tabs" role="tablist" aria-label="阅读内容" aria-orientation="horizontal">
           {TABS.map((item) => (
@@ -885,7 +948,7 @@ export function ReaderPage({
                   <p className="reader__empty reader__empty--error" role="alert">讲解加载失败：{content.error}</p>
                 ) : content.text ? (
                   <div className="doc-viewer reader__doc">
-                    <MarkdownView source={content.text} />
+                    <LongMarkdownView source={content.text} label="AI 讲解" />
                   </div>
                 ) : regen.kind !== 'explainer' ? (
                   <p className="reader__empty">尚未生成讲解：点击上方「生成讲解」按钮。</p>
@@ -1014,7 +1077,7 @@ export function ReaderPage({
                   })()
                 ) : content.text ? (
                   <div className="doc-viewer reader__doc">
-                    <MarkdownView source={content.text} />
+                    <LongMarkdownView source={content.text} label="全文翻译" />
                   </div>
                 ) : regen.kind !== 'translation' ? (
                   <p className="reader__empty">尚未生成全文翻译：点击上方「生成翻译」按钮。</p>
@@ -1048,7 +1111,7 @@ export function ReaderPage({
                     </button>
                   </header>
                   <div className="doc-viewer reader__doc">
-                    <MarkdownView source={ocr.markdown} />
+                    <LongMarkdownView source={ocr.markdown} label="OCR 全文" />
                   </div>
                 </div>
               ) : (
@@ -1086,7 +1149,7 @@ export function ReaderPage({
                 </p>
               ) : content.text ? (
                 <div className="doc-viewer reader__doc">
-                  <MarkdownView source={content.text} />
+                  <LongMarkdownView source={content.text} label="研究笔记" />
                 </div>
               ) : (
                 <p className="reader__empty">暂无研究笔记：可在文献库详情「笔记」页签记录（POST /api/note）。</p>
@@ -1128,14 +1191,72 @@ export function ReaderPage({
           </div>
         </SelectionTranslate>
 
-        {nextPaper && (
-          <button type="button" className="reader__next" onClick={() => onSwitch(nextPaper.id)}>
-            <span className="eyebrow">继续阅读 · 下一篇</span>
+        </article>
+        {readerContextOpen && <aside className="reader__context" id="reader-context-rail" aria-label="论文上下文">
+          <section className="reader__context-card reader__context-card--tools">
+            <header className="reader__context-head">
+              <span className="eyebrow">阅读工具</span>
+              <span className="reader__context-head-actions">
+                <span className="reader__context-count">{paper.hasPdf ? 'PDF READY' : 'PDF CHECK'}</span>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm reader__panel-toggle"
+                  aria-label="收起论文上下文侧栏"
+                  title="收起论文上下文侧栏"
+                  onClick={() => setReaderContextOpen(false)}
+                >
+                  <PanelRightIcon size={14} />
+                </button>
+              </span>
+            </header>
+            <div className="reader__context-actions">
+              <button type="button" className="reader__context-action" onClick={() => setTab('pdf')}>
+                <PdfIcon size={14} />
+                <span>打开 PDF 阅读</span>
+                <ArrowRightIcon size={12} />
+              </button>
+              <button type="button" className="reader__context-action" onClick={() => setTab('note')}>
+                <NoteIcon size={14} />
+                <span>查看研究笔记</span>
+                <ArrowRightIcon size={12} />
+              </button>
+            </div>
+            <dl className="reader__context-meta">
+              <div><dt>会议 / 来源</dt><dd>{paper.venue || '—'} · {paper.source || '—'}</dd></div>
+              <div><dt>本地 PDF</dt><dd>{pdfInfo ? (pdfInfo.hasPdf ? '已就绪' : pdfInfo.canDownload ? '可补下载' : '缺失') : pdfStatusError ? '读取失败' : '检测中…'}</dd></div>
+              <div><dt>引用 / 相关度</dt><dd>{(paper.citations ?? 0).toLocaleString()} · {((paper.relevance ?? 0) * 100).toFixed(0)}%</dd></div>
+              <div><dt>arXiv / DOI</dt><dd>{paper.arxiv_id || paper.doi || '—'}</dd></div>
+              <div><dt>作者</dt><dd>{authors.length > 0 ? authors.join('、') : '后端未收录该字段'}</dd></div>
+            </dl>
+            {paper.url && <a className="reader__source-link" href={paper.url} target="_blank" rel="noreferrer">打开来源链接 <ArrowRightIcon size={13} /></a>}
+          </section>
+
+          <section className="reader__context-card reader__context-card--evidence">
+            <header className="reader__context-head">
+              <span className="eyebrow">库内证据</span>
+              <span className="reader__context-count">{citeCtx.cites.length + citeCtx.citedBy.length}</span>
+            </header>
+            {citeCtx.citedBy.length === 0 && citeCtx.cites.length === 0 ? (
+              <p className="reader__context-muted">暂无库内引用关系。可在「洞察」页重建引用图谱。</p>
+            ) : (
+              <div className="reader__context-cites">
+                {[...citeCtx.citedBy, ...citeCtx.cites].slice(0, 4).map((item) => (
+                  <button key={item.id} type="button" onClick={() => onSwitch(item.id)}>
+                    <strong>{item.titleZh || item.title}</strong>
+                    <span>{item.venue} · {item.year}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {nextPaper && <button type="button" className="reader__context-next" onClick={() => onSwitch(nextPaper.id)}>
+            <span className="eyebrow">下一篇</span>
             <strong>{nextPaper.title_zh || nextPaper.title}</strong>
             <ArrowRightIcon size={15} />
-          </button>
-        )}
-        </article>
+          </button>}
+        </aside>}
+        </div>
       )}
     </div>
   );

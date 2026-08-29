@@ -1,16 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   getDocument,
   GlobalWorkerOptions,
-  TextLayer,
-  type PDFDocumentLoadingTask,
   type PDFDocumentProxy,
-  type RenderTask,
 } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-/* PDF.js 阅读视图：canvas 渲染 + textLayer 可选中文本层。
+import { PdfPageCanvas, type PdfPageSize } from './PdfPageCanvas';
+import {
+  PDF_DEFAULT_SCALE,
+  clampPdfPage,
+  clampPdfScale,
+  parseSavedPdfPosition,
+  pdfRenderWindow,
+} from './pdfViewerState';
+
+/* PDF.js 连续阅读视图：所有页面纵向排列，只渲染当前页附近的 canvas。
  * textLayer 的选中事件会冒泡到外层，供 SelectionTranslate 触发划词翻译。 */
 
 interface PdfViewerProps {
@@ -22,39 +28,28 @@ interface PdfViewerProps {
 }
 
 const PDF_POS_PREFIX = 'paper-study:pdf-pos:';
+const DEFAULT_PAGE_SIZE: PdfPageSize = { width: 612, height: 792 };
 
-function readSavedPosition(key: string | undefined): { page: number; scale: number } | null {
+function readSavedPosition(key: string | undefined) {
   if (!key) return null;
   try {
-    const raw = localStorage.getItem(PDF_POS_PREFIX + key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { page?: number; scale?: number };
-    if (typeof parsed.page !== 'number' || typeof parsed.scale !== 'number') return null;
-    return { page: parsed.page, scale: Math.min(2.2, Math.max(0.6, parsed.scale)) };
+    return parseSavedPdfPosition(localStorage.getItem(PDF_POS_PREFIX + key));
   } catch {
     return null;
   }
 }
 
-function highlightTextLayer(container: HTMLDivElement | null, query: string) {
-  if (!container) return;
-  const needle = query.trim().toLocaleLowerCase();
-  container.querySelectorAll('span').forEach((span) => {
-    const matched = !!needle && (span.textContent ?? '').toLocaleLowerCase().includes(needle);
-    span.classList.toggle('pdfviewer__hl', matched);
-  });
-}
-
 export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const textLayerRef = useRef<HTMLDivElement>(null);
-  const docRef = useRef<PDFDocumentProxy | null>(null);
-  const taskRef = useRef<PDFDocumentLoadingTask | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pageElementsRef = useRef<Array<HTMLElement | null>>([]);
   const textCacheRef = useRef<Map<number, string>>(new Map());
-  const searchQueryRef = useRef('');
+  const pendingRestoreRef = useRef<number | null>(null);
+  const previousScaleRef = useRef(PDF_DEFAULT_SCALE);
+  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
+  const [pageSize, setPageSize] = useState<PdfPageSize>(DEFAULT_PAGE_SIZE);
   const [pageCount, setPageCount] = useState(0);
   const [pageNum, setPageNum] = useState(1);
-  const [scale, setScale] = useState(1.15);
+  const [scale, setScale] = useState(PDF_DEFAULT_SCALE);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<number[]>([]);
@@ -62,54 +57,142 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
 
-  /* 加载文档 */
+  /* 加载文档并读取第一页尺寸，其他页面先以同尺寸占位、进入视口附近后再渲染。 */
   useEffect(() => {
     let cancelled = false;
+    let task: ReturnType<typeof getDocument> | null = null;
     setError('');
+    setPdfDocument(null);
+    setPageCount(0);
     setPageNum(1);
+    setScale(PDF_DEFAULT_SCALE);
+    setPageSize(DEFAULT_PAGE_SIZE);
     setSearchQuery('');
     setSearchMatches([]);
     setSearchIndex(-1);
     setSearching(false);
     setSearchError('');
+    pageElementsRef.current = [];
     textCacheRef.current.clear();
-    (async () => {
+
+    void (async () => {
       try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const bytes = new Uint8Array(await response.arrayBuffer());
         GlobalWorkerOptions.workerSrc = workerUrl;
-        const task = getDocument({ data: bytes });
+        task = getDocument({ data: bytes });
         const doc = await task.promise;
         if (cancelled) {
           await task.destroy();
           return;
         }
-        taskRef.current = task;
-        docRef.current = doc;
-        setPageCount(doc.numPages);
-        /* 恢复上次阅读位置（限幅在有效页码内） */
+
+        const firstPage = await doc.getPage(1);
+        const firstViewport = firstPage.getViewport({ scale: 1 });
+        firstPage.cleanup();
         const saved = readSavedPosition(storageKey);
-        if (saved) {
-          setPageNum(Math.min(doc.numPages, Math.max(1, saved.page)));
-          setScale(saved.scale);
-        }
+        const initialPage = clampPdfPage(saved?.page ?? 1, doc.numPages);
+        const initialScale = clampPdfScale(saved?.scale ?? PDF_DEFAULT_SCALE);
+        pendingRestoreRef.current = initialPage;
+        previousScaleRef.current = initialScale;
+        setPageSize({ width: firstViewport.width, height: firstViewport.height });
+        setScale(initialScale);
+        setPageNum(initialPage);
+        setPdfDocument(doc);
+        setPageCount(doc.numPages);
       } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : String(loadError));
-        }
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     })();
+
     return () => {
       cancelled = true;
-      void taskRef.current?.destroy();
-      taskRef.current = null;
-      docRef.current = null;
+      if (task) void task.destroy();
+      pageElementsRef.current = [];
       textCacheRef.current.clear();
     };
-  }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [url, storageKey]);
 
-  /* 位置记忆：页码/缩放变化时持久化（pageCount=0 即文档未加载时不写） */
+  const pageNumbers = useMemo(
+    () => Array.from({ length: pageCount }, (_, index) => index + 1),
+    [pageCount],
+  );
+  const renderedPages = useMemo(
+    () => new Set(pdfRenderWindow(pageNum, pageCount)),
+    [pageNum, pageCount],
+  );
+
+  const goToPage = useCallback((requestedPage: number, behavior: ScrollBehavior = 'smooth') => {
+    const nextPage = clampPdfPage(requestedPage, pageCount);
+    setPageNum(nextPage);
+    window.requestAnimationFrame(() => {
+      const root = scrollRef.current;
+      const pageElement = pageElementsRef.current[nextPage];
+      if (!root || !pageElement) return;
+      const rootRect = root.getBoundingClientRect();
+      const pageRect = pageElement.getBoundingClientRect();
+      const top = Math.max(0, root.scrollTop + pageRect.top - rootRect.top - 12);
+      root.scrollTo({ top, behavior });
+    });
+  }, [pageCount]);
+
+  /* 页面占位节点全部存在；IntersectionObserver 只更新当前页，canvas 始终限制在附近五页。 */
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || pageCount === 0) return;
+    const visible = new Map<number, IntersectionObserverEntry>();
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        const number = Number((entry.target as HTMLElement).dataset.pageNumber);
+        if (!Number.isFinite(number)) return;
+        if (entry.isIntersecting) visible.set(number, entry);
+        else visible.delete(number);
+      });
+      if (visible.size === 0) return;
+      const rootRect = root.getBoundingClientRect();
+      const focusLine = rootRect.top + Math.min(160, rootRect.height * 0.24);
+      let bestPage = 1;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      visible.forEach((entry, number) => {
+        const rect = entry.boundingClientRect;
+        const distance = rect.top <= focusLine && rect.bottom >= focusLine
+          ? 0
+          : Math.min(Math.abs(rect.top - focusLine), Math.abs(rect.bottom - focusLine));
+        if (distance < bestDistance || (distance === bestDistance && number < bestPage)) {
+          bestDistance = distance;
+          bestPage = number;
+        }
+      });
+      setPageNum((current) => current === bestPage ? current : bestPage);
+    }, {
+      root,
+      threshold: [0, 0.01, 0.1, 0.25, 0.5, 0.75],
+    });
+
+    pageElementsRef.current.slice(1, pageCount + 1).forEach((element) => {
+      if (element) observer.observe(element);
+    });
+    return () => observer.disconnect();
+  }, [pdfDocument, pageCount, scale]);
+
+  /* 恢复阅读页；缩放后把当前页重新对齐到滚动容器顶部。 */
+  useEffect(() => {
+    if (!pdfDocument || pageCount === 0 || pendingRestoreRef.current === null) return;
+    const target = pendingRestoreRef.current;
+    pendingRestoreRef.current = null;
+    const frame = window.requestAnimationFrame(() => goToPage(target, 'auto'));
+    return () => window.cancelAnimationFrame(frame);
+  }, [pdfDocument, pageCount, goToPage]);
+
+  useEffect(() => {
+    if (!pdfDocument || pageCount === 0 || previousScaleRef.current === scale) return;
+    previousScaleRef.current = scale;
+    const frame = window.requestAnimationFrame(() => goToPage(pageNum, 'auto'));
+    return () => window.cancelAnimationFrame(frame);
+  }, [pdfDocument, pageCount, pageNum, scale, goToPage]);
+
+  /* 位置记忆：滚动产生的当前页与缩放值都会持久化。 */
   useEffect(() => {
     if (!storageKey || pageCount === 0) return;
     try {
@@ -119,65 +202,13 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
     }
   }, [storageKey, pageNum, scale, pageCount]);
 
-  /* 渲染当前页（canvas + textLayer） */
+  /* 每页 textContent 只提取一次；查询命中后滚动到对应页面。 */
   useEffect(() => {
-    const doc = docRef.current;
-    if (!doc || pageCount === 0) return;
-    let cancelled = false;
-    let renderTask: RenderTask | null = null;
-    (async () => {
-      const page = await doc.getPage(pageNum);
-      if (cancelled) return;
-      const viewport = page.getViewport({ scale });
-      const canvas = canvasRef.current;
-      const textLayerEl = textLayerRef.current;
-      if (!canvas || !textLayerEl) return;
-      const outputScale = window.devicePixelRatio || 1;
-      canvas.width = Math.floor(viewport.width * outputScale);
-      canvas.height = Math.floor(viewport.height * outputScale);
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
-      renderTask = page.render({
-        canvas,
-        canvasContext: canvas.getContext('2d') as CanvasRenderingContext2D,
-        viewport,
-        transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
-      });
-      await renderTask.promise;
-      if (cancelled) return;
-      textLayerEl.innerHTML = '';
-      textLayerEl.style.width = `${Math.floor(viewport.width)}px`;
-      textLayerEl.style.height = `${Math.floor(viewport.height)}px`;
-      const textLayer = new TextLayer({
-        textContentSource: page.streamTextContent(),
-        container: textLayerEl,
-        viewport,
-      });
-      await textLayer.render();
-      if (!cancelled) highlightTextLayer(textLayerEl, searchQueryRef.current);
-    })().catch((renderError: unknown) => {
-      const name = (renderError as { name?: string })?.name;
-      if (!cancelled && name !== 'RenderingCancelledException') {
-        setError(renderError instanceof Error ? renderError.message : String(renderError));
-      }
-    });
-    return () => {
-      cancelled = true;
-      renderTask?.cancel();
-    };
-  }, [pageNum, scale, pageCount]);
-
-  /* 每页 textContent 只提取一次；查询按页命中并跳转，避免重复解析 PDF。 */
-  useEffect(() => {
-    searchQueryRef.current = searchQuery;
-    highlightTextLayer(textLayerRef.current, searchQuery);
-
-    const doc = docRef.current;
     const needle = searchQuery.trim().toLocaleLowerCase();
     setSearchMatches([]);
     setSearchIndex(-1);
     setSearchError('');
-    if (!doc || pageCount === 0 || !needle) {
+    if (!pdfDocument || pageCount === 0 || !needle) {
       setSearching(false);
       return;
     }
@@ -191,11 +222,9 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
           if (cancelled) return;
           let text = textCacheRef.current.get(number);
           if (text === undefined) {
-            const page = await doc.getPage(number);
+            const page = await pdfDocument.getPage(number);
             const textContent = await page.getTextContent();
-            text = textContent.items
-              .map((item) => ('str' in item ? item.str : ''))
-              .join(' ');
+            text = textContent.items.map((item) => ('str' in item ? item.str : '')).join(' ');
             textCacheRef.current.set(number, text);
           }
           if (text.toLocaleLowerCase().includes(needle)) matches.push(number);
@@ -204,7 +233,7 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
         setSearchMatches(matches);
         setSearchIndex(matches.length > 0 ? 0 : -1);
         setSearching(false);
-        if (matches.length > 0) setPageNum(matches[0]);
+        if (matches.length > 0) goToPage(matches[0], 'auto');
       })().catch(() => {
         if (!cancelled) {
           setSearchMatches([]);
@@ -219,7 +248,7 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [searchQuery, pageCount]);
+  }, [searchQuery, pdfDocument, pageCount, goToPage]);
 
   useEffect(() => {
     const index = searchMatches.indexOf(pageNum);
@@ -231,13 +260,11 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
     const current = searchIndex >= 0 ? searchIndex : 0;
     const next = (current + direction + searchMatches.length) % searchMatches.length;
     setSearchIndex(next);
-    setPageNum(searchMatches[next]);
+    goToPage(searchMatches[next]);
   };
 
   if (error) {
-    return (
-      <p className="reader__empty reader__empty--error">PDF 渲染失败：{error}</p>
-    );
+    return <p className="reader__empty reader__empty--error">PDF 渲染失败：{error}</p>;
   }
 
   return (
@@ -248,21 +275,20 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
             type="button"
             className="btn btn--sm"
             disabled={pageNum <= 1}
-            onClick={() => setPageNum((value) => Math.max(1, value - 1))}
+            onClick={() => goToPage(pageNum - 1)}
           >
             上一页
           </button>
-          <span className="pdfviewer__pageno">
-            {pageNum} / {pageCount || '…'}
-          </span>
+          <span className="pdfviewer__pageno">{pageNum} / {pageCount || '…'}</span>
           <button
             type="button"
             className="btn btn--sm"
             disabled={pageNum >= pageCount}
-            onClick={() => setPageNum((value) => Math.min(pageCount, value + 1))}
+            onClick={() => goToPage(pageNum + 1)}
           >
             下一页
           </button>
+          <span className="pdfviewer__flow">连续滚动</span>
         </div>
         <div className="pdfviewer__search" role="search" aria-busy={searching}>
           <input
@@ -271,6 +297,7 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
             aria-label="搜索 PDF 正文"
             placeholder="搜索 PDF 正文…"
             value={searchQuery}
+            disabled={!pdfDocument}
             onChange={(event) => setSearchQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
@@ -315,7 +342,7 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
             type="button"
             className="btn btn--sm"
             aria-label="缩小"
-            onClick={() => setScale((value) => Math.max(0.6, Number((value - 0.15).toFixed(2))))}
+            onClick={() => setScale((value) => clampPdfScale(Number((value - 0.15).toFixed(2))))}
           >
             −
           </button>
@@ -324,7 +351,7 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
             type="button"
             className="btn btn--sm"
             aria-label="放大"
-            onClick={() => setScale((value) => Math.min(2.2, Number((value + 0.15).toFixed(2))))}
+            onClick={() => setScale((value) => clampPdfScale(Number((value + 0.15).toFixed(2))))}
           >
             +
           </button>
@@ -339,13 +366,38 @@ export function PdfViewer({ url, storageKey, onConvert, converting }: PdfViewerP
             {converting ? 'OCR 进行中…' : 'PDF 转 Markdown'}
           </button>
         )}
-        <span className="pdfviewer__hint">选中正文文字即可划词翻译</span>
+        <span className="pdfviewer__hint">按需渲染附近页面 · 选中文字即可划词翻译</span>
       </header>
-      <div className="pdfviewer__scroll">
-        <div className="pdfviewer__page">
-          <canvas ref={canvasRef} />
-          <div ref={textLayerRef} className="pdfviewer__textlayer" aria-hidden="false" />
-        </div>
+      <div
+        ref={scrollRef}
+        className="pdfviewer__scroll"
+        role="region"
+        aria-label="PDF 连续阅读区域"
+        aria-busy={!pdfDocument}
+        tabIndex={0}
+      >
+        {!pdfDocument ? (
+          <p className="pdfviewer__loading" role="status">正在解析 PDF…</p>
+        ) : (
+          <div className="pdfviewer__pages">
+            {pageNumbers.map((number) => (
+              <PdfPageCanvas
+                key={`${url}-${number}`}
+                document={pdfDocument}
+                pageNumber={number}
+                pageCount={pageCount}
+                scale={scale}
+                estimatedSize={pageSize}
+                shouldRender={renderedPages.has(number)}
+                active={pageNum === number}
+                searchQuery={searchQuery}
+                onElement={(page, element) => {
+                  pageElementsRef.current[page] = element;
+                }}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

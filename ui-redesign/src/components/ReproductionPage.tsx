@@ -20,6 +20,8 @@ import {
   DownloadIcon,
   DocumentIcon,
   EditIcon,
+  PanelLeftIcon,
+  PanelRightIcon,
   PlusIcon,
   SearchIcon,
   SparkIcon,
@@ -341,6 +343,8 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const [sort, setSort] = useState<'updated' | 'created' | 'name'>(savedListState.sort);
   // Editing is the primary task on this page; preview and split remain one-click modes.
   const [mode, setMode] = useState<EditorMode>('edit');
+  const [detailRailOpen, setDetailRailOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const [runsExpanded, setRunsExpanded] = useState(false);
   const [draft, setDraft] = useState('');
@@ -1044,31 +1048,108 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   return (
     <div className={`page reproduction-page${listOnly ? ' reproduction-page--list' : ''}${detailOnly ? ' reproduction-page--detail' : ''}`}>
       {/* 列表态页头已移除：全局命令栏已承载页标题，「新建复现」并入下方工具栏 */}
-      {!listOnly && <header className="reproduction__header">
+      {!listOnly && <header className={`reproduction__header${detailOnly ? ' reproduction__header--detail' : ''}`}>
         <div>
           {detailOnly && onBack && <button type="button" className="btn btn--ghost btn--sm reproduction__back" onClick={onBack}>← 返回论文复现列表</button>}
           <h1 className="display-title">{detailOnly && selected ? selected.name : '论文复现'}</h1>
           {detailOnly && selected && <p>{`关联论文：${selected.paperTitle || '未关联论文'} · 记录实验、结果与复现笔记`}</p>}
         </div>
-        {!detailOnly && <button type="button" className="btn btn--primary" onClick={() => setCreateOpen(true)}><PlusIcon size={15} /> 新建复现</button>}
+        <div className="reproduction__header-actions">
+          {detailOnly && selected && (
+            <>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm reproduction__panel-toggle"
+                aria-controls={detailRailOpen ? 'reproduction-detail-rail' : undefined}
+                aria-expanded={detailRailOpen}
+                aria-label={detailRailOpen ? '收起项目导航' : '展开项目导航'}
+                title={detailRailOpen ? '收起项目导航' : '展开项目导航'}
+                onClick={() => setDetailRailOpen((open) => !open)}
+              >
+                <PanelLeftIcon size={15} />
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm reproduction__panel-toggle"
+                aria-controls={inspectorOpen ? 'reproduction-inspector' : undefined}
+                aria-expanded={inspectorOpen}
+                aria-label={inspectorOpen ? '收起项目检查面板' : '展开项目检查面板'}
+                title={inspectorOpen ? '收起项目检查面板' : '展开项目检查面板'}
+                onClick={() => setInspectorOpen((open) => !open)}
+              >
+                <PanelRightIcon size={15} />
+              </button>
+            </>
+          )}
+          {!detailOnly && <button type="button" className="btn btn--primary" onClick={() => setCreateOpen(true)}><PlusIcon size={15} /> 新建复现</button>}
+        </div>
       </header>}
 
       {error && <div className="reproduction__error" role="alert"><span>{error}</span><div className="reproduction__error-actions">{saveState === 'failed' && !saveConflict && <button type="button" className="btn btn--ghost btn--sm" onClick={retrySave}>重试保存</button>}{saveConflict && <button type="button" className="btn btn--ghost btn--sm" onClick={() => void reloadSelected()}>重新加载最新版本</button>}<button type="button" className="btn btn--ghost btn--sm" onClick={() => setError('')}>关闭</button></div></div>}
 
-      {listOnly && <div className="reproduction__toolbar">
+      {listOnly && <>
+      <section className="reproduction__overview-strip" aria-label="复现项目概览">
+        <div><span className="eyebrow">ACTIVE PROJECTS</span><strong>{projects.filter((project) => project.status !== 'archived').length}</strong><small>进行中的复现项目</small></div>
+        <div><span className="eyebrow">RUNS LOGGED</span><strong>{projects.reduce((total, project) => total + (project.runCount ?? 0), 0)}</strong><small>累计实验运行</small></div>
+        <div><span className="eyebrow">NEEDS ATTENTION</span><strong>{projects.filter((project) => project.hasFailedTask || project.hasUnsavedContent || project.status === 'blocked').length}</strong><small>需要处理的项目</small></div>
+        <div className="reproduction__overview-copy"><span className="eyebrow">WORKFLOW</span><p>从论文出发，记录环境、运行和结果差异，让每次复现都留下可追溯证据。</p></div>
+      </section>
+      <div className="reproduction__toolbar">
         <label className="reproduction__search"><SearchIcon size={15} /><span className="sr-only">搜索复现项目</span><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索项目或论文…" /></label>
         <label className="reproduction__filter"><span className="sr-only">项目状态</span><select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">全部状态</option>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label className="reproduction__filter"><span className="sr-only">项目标签</span><select className="input" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}><option value="">全部标签</option>{availableTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select></label>
         <label className="reproduction__filter"><span className="sr-only">项目排序</span><select className="input" value={sort} onChange={(event) => setSort(event.target.value as 'updated' | 'created' | 'name')}><option value="updated">最近更新</option><option value="created">创建时间</option><option value="name">项目名称</option></select></label>
         <span className="reproduction__count">{loading ? '正在加载…' : `${projects.length} 个项目`}</span>
         <button type="button" className="btn btn--primary reproduction__toolbar-create" onClick={() => setCreateOpen(true)}><PlusIcon size={15} /> 新建复现</button>
-      </div>}
+      </div>
+      </>}
 
-      <div className="reproduction__workspace" ref={listScrollRef}>
+      <div
+        className={`reproduction__workspace${detailRailOpen ? '' : ' reproduction__workspace--rail-collapsed'}${inspectorOpen ? '' : ' reproduction__workspace--inspector-collapsed'}`}
+        ref={listScrollRef}
+      >
         <aside className="reproduction__projects" aria-label="复现项目列表">
           <div className="reproduction__projects-heading"><span className="eyebrow">PROJECTS</span><span>{projects.length}</span></div>
           {loading ? <div className="reproduction__empty">正在加载复现项目…</div> : projects.length === 0 ? <div className="reproduction__empty"><DocumentIcon size={22} /><strong>{error ? '无法连接复现服务' : '还没有复现项目'}</strong><span>{error ? '请确认后端已启动后重试。' : '从一篇论文开始，记录你的复现过程。'}</span><button type="button" className="btn btn--primary btn--sm" onClick={() => setCreateOpen(true)}>新建项目</button></div> : <ul className="reproduction__project-list">{projects.map((project) => <ReproductionProjectCard key={project.id} project={project} active={project.id === selectedId} onSelect={selectProject} />)}</ul>}
-        </aside>
+         </aside>
+
+        {!listOnly && selected && detailRailOpen && <aside className="reproduction__detail-rail" id="reproduction-detail-rail" aria-label="复现项目导航">
+          <div className="reproduction__detail-rail-head">
+            <span className="eyebrow">REPRODUCTION</span>
+            <div className="reproduction__detail-rail-head-actions">
+              <StatusBadge status={selected.status} />
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm reproduction__panel-toggle"
+                aria-label="收起项目导航"
+                title="收起项目导航"
+                onClick={() => setDetailRailOpen(false)}
+              >
+                <PanelLeftIcon size={14} />
+              </button>
+            </div>
+          </div>
+          <h2>{selected.name}</h2>
+          <p className="reproduction__detail-rail-paper">
+            {paper ? <button type="button" onClick={() => openPaper(paper.id)}>{paper.title_zh || paper.title}</button> : selected.paperTitle || '未关联论文'}
+          </p>
+          <div className="reproduction__detail-rail-progress">
+            <div><span>阶段进度</span><strong>{PROJECT_STAGE_PROGRESS[selected.status]}%</strong></div>
+            <span aria-hidden="true"><i style={{ width: `${PROJECT_STAGE_PROGRESS[selected.status]}%` }} /></span>
+          </div>
+          <nav className="reproduction__detail-rail-nav" aria-label="复现文档章节">
+            <span className="eyebrow">DOCUMENT</span>
+            {outline.length === 0 ? <p>暂无章节</p> : outline.map((item) => (
+              <button key={item.id} type="button" className={activeHeadingId === item.id ? 'is-active' : ''} onClick={() => jumpToHeading(item.label, item.id)}>
+                <span>{item.label}</span><ArrowRightIcon size={12} />
+              </button>
+            ))}
+          </nav>
+          <div className="reproduction__detail-rail-foot">
+            <span className="eyebrow">LOCAL DATA</span>
+            <p>修订 {selected.revision} · {formatDate(selected.updatedAt)}</p>
+          </div>
+        </aside>}
 
         {!listOnly && !selected && !detailLoading && projects.length > 0 && <div className="reproduction__selection-empty"><DocumentIcon size={28} /><h2>选择一个复现项目</h2><p>从左侧选择项目，开始编辑复现文档或记录实验运行。</p></div>}
 
@@ -1102,15 +1183,26 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
             <footer className="reproduction__editor-foot"><span>Markdown · KaTeX · 自动保存 · 修订 {revision}</span><span>{draft.length.toLocaleString()} 字</span></footer>
           </section>
 
-          <aside className="reproduction__inspector" aria-label="复现项目大纲与摘要" aria-busy={detailLoading}>
-            <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>文档大纲</h2></div><span>{outline.length} 节</span></div>{outline.length === 0 ? <p className="reproduction__muted">在文档中添加 Markdown 标题后会显示章节导航。</p> : <nav aria-label="复现文档大纲"><ol className="reproduction__outline">{outline.map((item) => <li key={item.id} className={`reproduction__outline-level-${item.level}${activeHeadingId === item.id ? ' is-active' : ''}`}><button type="button" aria-current={activeHeadingId === item.id ? 'location' : undefined} onClick={() => jumpToHeading(item.label, item.id)}>{item.label}<ArrowRightIcon size={12} /></button></li>)}</ol></nav>}</section>
+          {inspectorOpen && <aside className="reproduction__inspector" id="reproduction-inspector" aria-label="实验、结果与附件" aria-busy={detailLoading}>
+            <div className="reproduction__inspector-head">
+              <span className="eyebrow">INSPECTOR</span>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm reproduction__panel-toggle"
+                aria-label="收起项目检查面板"
+                title="收起项目检查面板"
+                onClick={() => setInspectorOpen(false)}
+              >
+                <PanelRightIcon size={14} />
+              </button>
+            </div>
             <section className="reproduction__inspector-section reproduction__summary"><div className="reproduction__section-head"><div><h2>项目状态</h2></div></div><div className="reproduction__summary-status"><StatusBadge status={selected.status} /><select className="input input--sm" aria-label="项目状态" value={selected.status} disabled={selected.status === 'archived'} onChange={(event) => void updateStatus(event.target.value as ReproductionStatus)}>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><p>最后更新 {formatDate(selected.updatedAt)} · 修订 {selected.revision}</p></section>
             <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>实验运行</h2></div><button type="button" className="btn btn--primary btn--sm" disabled={!canEdit} onClick={() => { setRunEditingId(null); setRunForm(EMPTY_RUN_FORM); setRunOpen(true); }}><SparkIcon size={13} /> 记录</button></div>{runs.length === 0 ? <p className="reproduction__muted">还没有实验运行记录。</p> : <ol className="reproduction__run-list">{runs.slice(0, runsExpanded ? runs.length : 4).map((run) => <li key={run.id}><span className={`reproduction__run-dot reproduction__run-dot--${run.status}`} aria-hidden="true" /><span className="reproduction__run-copy"><strong>{run.name || run.resultSummary || '实验运行'}</strong><small>{run.resultSummary && run.name ? `${run.resultSummary} · ` : ''}{run.environment || '未记录环境'} · {formatDate(run.createdAt)}</small></span><b>{RUN_STATUS_LABELS[run.status]}</b><span className="reproduction__run-actions"><button type="button" className="btn btn--ghost btn--xs" disabled={!canEdit} onClick={() => editRun(run)}>编辑</button><button type="button" className="btn btn--ghost btn--xs" disabled={!canEdit} onClick={() => copyRun(run)}>复制</button><button type="button" className="btn btn--ghost btn--xs reproduction__danger-action" disabled={!canEdit} onClick={() => void deleteRun(run)}>删除</button></span></li>)}</ol>}{runs.length > 4 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={runsExpanded} onClick={() => setRunsExpanded((expanded) => !expanded)}>{runsExpanded ? '收起运行记录' : `查看全部 ${runs.length} 次运行`} <ArrowRightIcon size={12} /></button>}</section>
             <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>附件</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setArtifactOpen(true)}><PlusIcon size={13} /> 添加</button></div>{artifacts.length === 0 ? <p className="reproduction__muted">尚未添加附件。</p> : <ul className="reproduction__artifact-list">{artifacts.slice(0, artifactsExpanded ? artifacts.length : 4).map((artifact) => <li key={artifact.id}><span><a href={reproductionApi.artifactUrl(artifact.projectId, artifact.id)} download={artifact.filename} aria-label={`下载附件 ${artifact.filename}`}><DownloadIcon size={12} /> {artifact.filename}</a><small>{Math.ceil(artifact.sizeBytes / 1024)} KB · {artifact.mimeType}</small></span><span className="reproduction__artifact-actions"><code>{artifact.kind}</code><button type="button" className="btn btn--ghost btn--xs" aria-label={`插入附件 ${artifact.filename}`} disabled={!canEdit} onClick={() => insertArtifactMarkdown(artifact)}>插入</button></span></li>)}</ul>}{artifacts.length > 4 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={artifactsExpanded} onClick={() => setArtifactsExpanded((expanded) => !expanded)}>{artifactsExpanded ? '收起附件' : `查看全部 ${artifacts.length} 个附件`} <ArrowRightIcon size={12} /></button>}</section>
             <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>复现笔记</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setNoteOpen(true)}>新增</button></div>{notes.length === 0 ? <p className="reproduction__muted">暂无独立笔记。</p> : <ul className="reproduction__note-list">{notes.slice(0, notesExpanded ? notes.length : 3).map((note) => <li key={note.id}><p>{note.content}</p><small>{formatDate(note.createdAt)}</small></li>)}</ul>}{notes.length > 3 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={notesExpanded} onClick={() => setNotesExpanded((expanded) => !expanded)}>{notesExpanded ? '收起笔记' : `查看全部 ${notes.length} 条笔记`} <ArrowRightIcon size={12} /></button>}</section>
             <section className="reproduction__inspector-actions"><button type="button" className="btn btn--ghost btn--sm" disabled={selected.status === 'archived'} onClick={openProjectEditor}><EditIcon size={14} /> 编辑项目</button><button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyProject()}><DocumentIcon size={14} /> 复制项目</button><button type="button" className="btn btn--ghost btn--sm" disabled={selected.status === 'archived'} onClick={() => void archiveProject()}><ArchiveIcon size={14} /> 归档项目</button><button type="button" className="btn btn--ghost btn--sm reproduction__danger-action" disabled={selected.status !== 'archived'} onClick={() => void deleteProject()}><TrashIcon size={14} /> 删除项目</button></section>
           <section className="reproduction__inspector-section reproduction__results-section"><div className="reproduction__section-head"><div><h2>结果对照</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setResultOpen(true)}><PlusIcon size={13} /> 记录指标</button></div>{results.length === 0 ? <p className="reproduction__muted">还没有原论文与复现结果的对照记录。</p> : <ul className="reproduction__result-list">{results.slice(0, 5).map((result) => <li key={result.id}><div><strong>{result.metricName}</strong><small>{result.paperValue ?? '—'} → {result.reproductionValue ?? '—'}{result.difference ? ` · ${result.difference}` : ''}</small></div><span className={`reproduction__result-status reproduction__result-status--${result.status}`}>{RESULT_STATUS_LABELS[result.status]}</span></li>)}</ul>}</section>
-          </aside>
+          </aside>}
         </>}
       </div>
 

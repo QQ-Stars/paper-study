@@ -6,18 +6,18 @@
     <meta name="description" content="Paper Study — 本地运行的个人学术研究工作台" />
     <title>Paper Study · 研究工作区</title>
     <script>
-      /* 首帧前应用已存主题，避免夜晚主题闪白；主题注册表见 src/themes.ts */
+      /* 首帧前应用已存主题，避免主题闪烁；主题注册表见 src/themes.ts */
       (function () {
         try {
           var theme = localStorage.getItem('paper-study-theme');
-          if (theme && theme !== 'light') {
+          if (theme === 'light') {
             document.documentElement.setAttribute('data-theme', theme);
           }
         } catch (error) {}
       })();
     </script>
-    <script type="module" crossorigin src="/workspace/assets/index-BH9AWPjo.js"></script>
-    <link rel="stylesheet" crossorigin href="/workspace/assets/index-vkmSaX1O.css">
+    <script type="module" crossorigin src="/workspace/assets/index-DFMwAEcZ.js"></script>
+    <link rel="stylesheet" crossorigin href="/workspace/assets/index-DVByWItn.css">
   </head>
   <body>
     <div id="root"></div>

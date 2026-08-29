@@ -28,9 +28,21 @@ import { ThemePage } from './components/ThemePage';
 import { NAV_ITEMS, type PageId } from './nav';
 import { applyTheme, readStoredTheme, type ThemeId } from './themes';
 
+const SIDEBAR_COLLAPSED_KEY = 'paper-study:sidebar-collapsed';
+
+function readSidebarCollapsed(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const [page, setPage] = useState<PageId>('overview');
   const [theme, setTheme] = useState<ThemeId>(() => readStoredTheme());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const [papers, setPapers] = useState<Paper[] | null>(null);
   const [readingQueueIds, setReadingQueueIds] = useState<string[]>(readReadingQueue);
   const [papersError, setPapersError] = useState('');
@@ -131,6 +143,19 @@ export default function App() {
     applyTheme(theme);
   }, [theme]);
 
+  useEffect(() => {
+    if (page !== 'reader' && page !== 'reproduction-detail') return;
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [page]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? '1' : '0');
+    } catch {
+      /* 隐私模式等场景下忽略布局偏好的持久化失败。 */
+    }
+  }, [sidebarCollapsed]);
+
   const navigate = useCallback((next: PageId) => {
     setPage(next);
     if (next !== 'library') setSelectedPaperId(null);
@@ -194,13 +219,15 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app${sidebarCollapsed ? ' app--sidebar-collapsed' : ''}`}>
       <Sidebar
         page={page === 'reproduction-detail' ? 'reproduction' : page}
         theme={theme}
         dueCount={dueCount}
         libraryCount={papers?.length ?? 0}
         onNavigate={navigate}
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed((current) => !current)}
       />
       <div className="main">
         <Topbar
