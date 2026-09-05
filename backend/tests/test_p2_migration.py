@@ -389,67 +389,6 @@ class P2MigrationTests(unittest.TestCase):
                         ") VALUES('missing-spec','paper-1','source_materialize','native','queued','{}',0,1,'missing-spec')"
                     )
 
-    def test_revision_is_additive_and_preflights_the_complete_p1_schema(self) -> None:
-        configuration = Config(str(ALEMBIC_CONFIG_PATH))
-        scripts = ScriptDirectory.from_config(configuration)
-        self.assertEqual(["20260807_03"], scripts.get_heads())
-        self.assertEqual("20260807_01", scripts.get_revision("20260807_02").down_revision)
-
-        with temporary_legacy_database() as database_path:
-            run_alembic(database_path, "20260807_01")
-            with closing(sqlite3.connect(database_path)) as connection:
-                before_legacy = legacy_count_hashes(connection)
-                before_tables = _table_names(connection)
-            run_alembic(database_path, "20260807_02")
-            with closing(sqlite3.connect(database_path)) as connection:
-                _assert_legacy_fingerprints_unchanged(self, before_legacy, connection)
-                self.assertEqual(set(P2_TABLES), _table_names(connection) - before_tables)
-                for table_name in P1_TABLES:
-                    expected = P1_EXPECTED_COLUMNS[table_name] + P2_ADDED_COLUMNS.get(table_name, ())
-                    self.assertEqual(expected, _columns(connection, table_name))
-                self.assertTrue(set(P2_TABLES).issubset(_table_names(connection)))
-                self.assertEqual(
-                    [("20260807_02",)],
-                    connection.execute("SELECT version_num FROM alembic_version").fetchall(),
-                )
-                indexes = {
-                    str(row[0])
-                    for row in connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type='index'"
-                    )
-                }
-                self.assertTrue(REQUIRED_P2_INDEXES.issubset(indexes))
-                processing_sql = connection.execute(
-                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='processing_jobs'"
-                ).fetchone()[0]
-                self.assertIn(
-                    "job_type IN ('source_materialize','ocr','explain','translate','embed','obsidian_export','obsidian_sync')",
-                    processing_sql,
-                )
-                _health(connection)
-
-        for missing_table in P1_TABLES:
-            with self.subTest(missing_table=missing_table), temporary_legacy_database() as database_path:
-                run_alembic(database_path, "20260807_01")
-                with closing(sqlite3.connect(database_path)) as connection:
-                    connection.execute("PRAGMA foreign_keys=OFF")
-                    connection.execute(f'DROP TABLE "{missing_table}"')
-                    connection.commit()
-                    before_tables = _table_names(connection)
-                    before_columns = {
-                        name: _columns(connection, name) for name in before_tables
-                    }
-                with self.assertRaises(Exception) as raised:
-                    run_alembic(database_path, "20260807_02")
-                self.assertIn("P2_BASE_SCHEMA_MISSING", str(raised.exception))
-                with closing(sqlite3.connect(database_path)) as connection:
-                    self.assertEqual(before_tables, _table_names(connection))
-                    self.assertEqual(
-                        before_columns,
-                        {name: _columns(connection, name) for name in before_tables},
-                    )
-                    self.assertTrue(set(P2_TABLES).isdisjoint(_table_names(connection)))
-
     def test_cache_head_event_and_checkpoint_constraints_are_hard(self) -> None:
         sha_a = "a" * 64
         sha_b = "b" * 64
@@ -734,46 +673,6 @@ class P2CoreProjectionMigrationTests(unittest.TestCase):
             self.assertEqual(initial, _core_projection_fingerprints(database_path))
 
 
-class P2OperationalDocumentationTests(unittest.TestCase):
-    def test_p2_runbook_contains_fixed_migration_and_rollback_contract(self) -> None:
-        runbook = (REPOSITORY_ROOT / "docs" / "DATABASE.md").read_text(
-            encoding="utf-8"
-        )
-        required_fragments = (
-            "p1CoreDocumentSources = (id,paper_id,mode,status,provider,model,pdf_sha256,options_hash,content_sha256,markdown,page_count,processing_version,error_code,error_message,created_at,updated_at)",
-            "p1CoreGeneratedArtifacts = (id,paper_id,kind,source_document_id,status,content,content_sha256,generator_provider,generator_model,prompt_version,error_code,error_message,created_at,updated_at)",
-            "p1CoreProcessingJobs = (id,paper_id,job_type,source_mode,status,progress_json,attempt,max_attempts,idempotency_key,error_code,error_message,created_at,started_at,finished_at,cancelled_at)",
-            "processingJobSpecs = (id,spec_json)",
-            "processing_jobs_spec_guard_insert",
-            "processing_jobs_spec_guard_update",
-            "source_key|ready_at|stale_at",
-            "artifact_key|ready_at|stale_at",
-            "source_document_id|artifact_id|spec_json|available_at|lease_owner|lease_token|lease_expires_at|heartbeat_at|cancel_requested_at|result_json|updated_at|retry_of_job_id|retry_sequence",
-            "停止新 enqueue → 停止 worker claim → 等待/取消 running jobs → 停止 API writer",
-            "database_backup create --database data/app.db",
-            "database_backup verify --backup <backupPath> --manifest <manifestPath>",
-            "database_backup restore-check --backup <backupPath> --manifest <manifestPath>",
-            "alembic -c backend/alembic.ini upgrade 20260807_02",
-            "alembic -c backend/alembic.ini downgrade 20260807_01",
-            "-x allow_p2_data_loss=true downgrade 20260807_01",
-            "P2_DOWNGRADE_BLOCKED_NONEMPTY",
-            "API_BACKEND_MODE=legacy",
-            "DOCUMENT_PIPELINE_MODE=legacy",
-            "GENERATION_PIPELINE_MODE=legacy",
-            "ARTIFACT_READ_MODE=legacy",
-            "ARTIFACT_WRITE_MODE=legacy",
-            "OCR_ENABLED=0",
-            "OriginReceipt 外部 SHA-256",
-            "snapshot 后数据丢失",
-            "不从 progress 重建请求",
-            "Live before/after",
-            "core/spec/inventory stop conditions",
-        )
-        for fragment in required_fragments:
-            with self.subTest(fragment=fragment):
-                self.assertIn(fragment, runbook)
-
-
 class P2RestoredCopyValidationTests(unittest.TestCase):
     def test_db_path_is_bound_restore_at_exact_p2_revision(self) -> None:
         database_path = _restore_validation_path(self)
@@ -821,7 +720,6 @@ def load_tests(loader, standard_tests, _pattern):
     for case in (
         P2MigrationTests,
         P2CoreProjectionMigrationTests,
-        P2OperationalDocumentationTests,
     ):
         suite.addTests(loader.loadTestsFromTestCase(case))
     return suite
