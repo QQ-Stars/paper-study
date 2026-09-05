@@ -4,6 +4,7 @@ export type ReproductionListState = {
   query: string;
   status: string;
   tag: string;
+  kind: '' | 'reproduction' | 'article';
   sort: 'updated' | 'created' | 'name';
   scrollTop: number;
 };
@@ -12,12 +13,17 @@ export const DEFAULT_REPRODUCTION_LIST_STATE: ReproductionListState = {
   query: '',
   status: '',
   tag: '',
+  kind: '',
   sort: 'updated',
   scrollTop: 0,
 };
 
 function isSort(value: unknown): value is ReproductionListState['sort'] {
   return value === 'updated' || value === 'created' || value === 'name';
+}
+
+function isKind(value: unknown): value is ReproductionListState['kind'] {
+  return value === '' || value === 'reproduction' || value === 'article';
 }
 
 export function readReproductionListState(storage: Pick<Storage, 'getItem'> | null | undefined): ReproductionListState {
@@ -36,6 +42,7 @@ export function readReproductionListState(storage: Pick<Storage, 'getItem'> | nu
       query: typeof value.query === 'string' ? value.query : '',
       status: typeof value.status === 'string' ? value.status : '',
       tag: typeof value.tag === 'string' ? value.tag : '',
+      kind: isKind(value.kind) ? value.kind : '',
       sort: isSort(value.sort) ? value.sort : 'updated',
       scrollTop,
     };
@@ -53,6 +60,7 @@ export function writeReproductionListState(
     query: state.query.trim(),
     status: state.status,
     tag: state.tag,
+    kind: isKind(state.kind) ? state.kind : '',
     sort: isSort(state.sort) ? state.sort : 'updated',
     scrollTop: Number.isFinite(state.scrollTop) && state.scrollTop > 0 ? Math.round(state.scrollTop) : 0,
   };

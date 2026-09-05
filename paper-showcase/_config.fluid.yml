@@ -1,0 +1,34 @@
+# Only site-specific values live here. All visual styles and layouts come
+# from the installed official hexo-theme-fluid defaults.
+
+navbar:
+  blog_title: Paper Reproduction Atlas
+  menu:
+    - { key: "home", link: "/", icon: "iconfont icon-home-fill" }
+    - { key: "archive", link: "/archives/", icon: "iconfont icon-archive-fill" }
+    - { name: "论文复现", link: "/categories/论文复现/", icon: "iconfont icon-archive-fill" }
+    - { name: "文章 / 博客", link: "/categories/文章/", icon: "iconfont icon-edit-fill" }
+    - { key: "category", link: "/categories/", icon: "iconfont icon-category-fill" }
+    - { key: "tag", link: "/tags/", icon: "iconfont icon-tags-fill" }
+    - { key: "about", link: "/about/", icon: "iconfont icon-user-fill" }
+
+index:
+  slogan:
+    enable: true
+    text: ''
+
+about:
+  name: Paper Study
+  intro: 公开研究复现与研究文章
+  icons: []
+
+post:
+  math:
+    enable: true
+    specific: false
+    engine: katex
+  mermaid:
+    enable: true
+    specific: false
+    options:
+      theme: default

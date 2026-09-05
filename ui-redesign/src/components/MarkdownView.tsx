@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import katex from 'katex';
-import { marked } from 'marked';
+import { marked, Renderer } from 'marked';
 
 import 'katex/dist/katex.min.css';
 
@@ -27,6 +27,81 @@ function renderKatex(tex: string, displayMode: boolean): string {
   }
 }
 
+let mermaidSequence = 0;
+let mermaidInitialized = false;
+type MermaidApi = (typeof import('mermaid'))['default'];
+let mermaidPromise: Promise<MermaidApi> | null = null;
+
+async function loadMermaid(): Promise<MermaidApi> {
+  mermaidPromise ??= import('mermaid').then((module) => module.default);
+  const api = await mermaidPromise;
+  setupMermaid(api);
+  return api;
+}
+
+function setupMermaid(api: MermaidApi): void {
+  if (mermaidInitialized) return;
+  api.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#1b1d24',
+      primaryTextColor: '#f4f0eb',
+      primaryBorderColor: '#4a4d57',
+      lineColor: '#c9535b',
+      secondaryColor: '#20232c',
+      tertiaryColor: '#15171d',
+    },
+  });
+  mermaidInitialized = true;
+}
+
+function renderVisibleMermaid(root: HTMLElement): () => void {
+  const blocks = [...root.querySelectorAll<HTMLElement>('[data-mermaid-source]')];
+  if (blocks.length === 0) return () => undefined;
+  let disposed = false;
+  const render = async (block: HTMLElement) => {
+    if (block.dataset.mermaidRendered || disposed) return;
+    const source = block.textContent ?? '';
+    if (!source.trim() || source.length > 50_000) {
+      block.dataset.mermaidRendered = 'failed';
+      block.setAttribute('aria-label', 'Mermaid 图表内容无效或过长');
+      return;
+    }
+    block.dataset.mermaidRendered = 'pending';
+    try {
+      const api = await loadMermaid();
+      const id = `research-mermaid-${++mermaidSequence}`;
+      const { svg, bindFunctions } = await api.render(id, source, block);
+      if (disposed || !block.isConnected) return;
+      block.innerHTML = svg;
+      bindFunctions?.(block);
+      block.dataset.mermaidRendered = 'done';
+    } catch {
+      if (disposed || !block.isConnected) return;
+      block.dataset.mermaidRendered = 'failed';
+      block.setAttribute('aria-label', 'Mermaid 图表语法无效');
+    }
+  };
+  if (typeof IntersectionObserver === 'undefined') {
+    blocks.forEach((block) => void render(block));
+    return () => { disposed = true; };
+  }
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      observer.unobserve(entry.target);
+      void render(entry.target as HTMLElement);
+    });
+  }, { rootMargin: '480px 0px' });
+  blocks.forEach((block) => observer.observe(block));
+  return () => {
+    disposed = true;
+    observer.disconnect();
+  };
+}
+
 function renderMathAndMarkdown(source: string): string {
   const blocks: string[] = [];
   const placeholder = (index: number) => `\u0000KATEX${index}\u0000`;
@@ -48,7 +123,17 @@ function renderMathAndMarkdown(source: string): string {
       (_match, prefix: string, tex: string) => `${prefix}${protect(tex, false)}`,
     );
 
-  const html = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
+  const renderer = new Renderer();
+  renderer.code = ({ text: code, lang }) => {
+    const language = (lang ?? '').trim().toLowerCase();
+    if (language === 'mermaid') {
+      return `<pre class="md-mermaid" data-mermaid-source="true"><code>${escapeHtml(code)}</code></pre>`;
+    }
+    const safeLanguage = language.replace(/[^a-z0-9_-]/g, '') || 'text';
+    return `<pre class="md-code"><code class="language-${safeLanguage}">${escapeHtml(code)}</code></pre>`;
+  };
+  renderer.html = ({ text: html }) => `<code class="md-escaped-html">${escapeHtml(html)}</code>`;
+  const html = marked.parse(text, { async: false, gfm: true, breaks: true, renderer }) as string;
   return html.replace(/\u0000KATEX(\d+)\u0000/g, (_match, index: string) => {
     return blocks[Number(index)] ?? '';
   });
@@ -56,5 +141,12 @@ function renderMathAndMarkdown(source: string): string {
 
 export function MarkdownView({ source }: { source: string }) {
   const html = useMemo(() => renderMathAndMarkdown(source), [source]);
-  return <div className="md-body" dangerouslySetInnerHTML={{ __html: html }} />;
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!rootRef.current) return;
+    return renderVisibleMermaid(rootRef.current);
+  }, [html]);
+
+  return <div ref={rootRef} className="md-body" dangerouslySetInnerHTML={{ __html: html }} />;
 }

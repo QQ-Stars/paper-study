@@ -10,6 +10,7 @@ import {
   MoreIcon,
   OrderedListIcon,
   QuoteIcon,
+  SparkIcon,
   SmileIcon,
   StrikethroughIcon,
   TableIcon,
@@ -130,6 +131,7 @@ export function MarkdownToolbar({
           </button>
           {moreOpen && <div className="reproduction__editor-more-menu" role="menu" aria-label="更多 Markdown 工具">
             <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('code')}><CodeIcon size={15} /><span>代码块</span><kbd>⌘/Ctrl `</kbd></button>
+            <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('mermaid')}><SparkIcon size={15} /><span>Mermaid 图表</span></button>
             <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('strike')}><StrikethroughIcon size={15} /><span>删除线</span><kbd>⌘/Ctrl ⇧ X</kbd></button>
             <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('emoji')}><SmileIcon size={15} /><span>插入符号</span></button>
             <div className="reproduction__editor-shortcuts" role="note">

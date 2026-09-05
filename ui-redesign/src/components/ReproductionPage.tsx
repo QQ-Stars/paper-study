@@ -8,7 +8,11 @@ import type {
   ReproductionArtifact,
   ReproductionDocument,
   ReproductionNote,
+  PublicationValidationResponse,
+  ReproductionConclusion,
+  ReproductionPublication,
   ReproductionProject,
+  ReproductionProjectKind,
   ReproductionResult,
   ReproductionResultStatus,
   ReproductionStatus,
@@ -26,6 +30,7 @@ import {
   SearchIcon,
   SparkIcon,
   TrashIcon,
+  UploadIcon,
 } from './Icons';
 import { MarkdownView } from './MarkdownView';
 import { MarkdownToolbar } from './MarkdownToolbar';
@@ -41,6 +46,14 @@ import {
   type MarkdownSelection,
 } from './markdownEditor';
 import { readReproductionListState, writeReproductionListState } from './reproductionState';
+import { ProjectPaperPicker } from './ProjectPaperPicker';
+import { findReproductionProjectForPaper } from './projectCreation';
+import {
+  CONCLUSION_LABELS,
+  PublicationDialog,
+  publicationDraftFrom,
+  type PublicationDraft,
+} from './PublicationDialog';
 
 import '../styles/reproduction.css';
 
@@ -93,6 +106,16 @@ const DEFAULT_DOCUMENT = `# 复现目标
 总结当前结论，并列出下一步实验或资料补充。
 `;
 
+const ARTIFACT_ACCEPT = '.txt,.log,.md,.markdown,.csv,.json,.pdf,.html,.htm,.png,.jpg,.jpeg,.webp';
+const ARTIFACT_ACCEPT_LABEL = 'TXT · LOG · MD · CSV · JSON · PDF · HTML · PNG · JPG · WEBP';
+const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
+
+function formatArtifactSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
 const MAX_EDITOR_IMAGE_BYTES = 25 * 1024 * 1024;
 
 const RUN_STATUS_LABELS: Record<ExperimentRun['status'], string> = {
@@ -118,6 +141,26 @@ const RESULT_STATUS_LABELS: Record<ReproductionResultStatus, string> = {
   partial: '部分复现',
   not_reproduced: '未复现',
   inconsistent: '结果不一致',
+};
+
+const PUBLICATION_STATUS_LABELS: Record<ReproductionPublication['status'], string> = {
+  draft: '公开草稿',
+  published: '已公开',
+  stale: '待重新发布',
+  failed: '公开校验失败',
+  revoked: '已撤回',
+};
+
+const EMPTY_PUBLICATION_DRAFT: PublicationDraft = {
+  decision: 'draft',
+  stableSlug: '',
+  publicTitle: '',
+  publicSummary: '',
+  aggregateConclusion: '',
+  paperUrl: '',
+  codeUrl: '',
+  datasetUrlsText: '',
+  publicArtifactIds: [],
 };
 
 type RunFormState = {
@@ -180,6 +223,19 @@ function StatusBadge({ status }: { status: ReproductionStatus }) {
   );
 }
 
+function PublicationBadge({ published }: { published: boolean }) {
+  const label = published ? '已公布' : '未公布';
+  return (
+    <span
+      className={`reproduction__publication-status reproduction__publication-status--card reproduction__publication-status--${published ? 'published' : 'unpublished'}`}
+      title={published ? '公开页面当前存在' : '尚未生成公开页面'}
+    >
+      <span className="reproduction__status-dot" aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
 function ReproductionProjectCard({
   project,
   active,
@@ -190,24 +246,29 @@ function ReproductionProjectCard({
   onSelect: (id: string) => void;
 }) {
   const progress = PROJECT_STAGE_PROGRESS[project.status];
+  const isArticle = project.projectKind === 'article';
+  const kindLabel = isArticle ? '文章 / 博客' : '论文复现';
+  const publicationLabel = project.isPublished ? '已公布' : '未公布';
   return (
     <li>
       <button
         type="button"
         className={`reproduction__project${active ? ' reproduction__project--active' : ''}`}
         aria-current={active ? 'true' : undefined}
-        aria-label={`打开复现项目 ${project.name}`}
+        aria-label={`打开${kindLabel}：${project.name}，${publicationLabel}`}
         onClick={() => onSelect(project.id)}
       >
         <span className="reproduction__project-head">
           <span className="reproduction__project-glyph">{project.name.slice(0, 1)}</span>
           <span className="reproduction__project-identity">
             <strong>{project.name}</strong>
-            <small>{project.paperTitle || '未关联论文'}{project.paperId ? ` · ${project.paperId}` : ''}</small>
+            <small>{isArticle ? (project.paperTitle || '独立写作项目') : (project.paperTitle || '未关联论文')}{project.paperId ? ` · ${project.paperId}` : ''}</small>
           </span>
         </span>
         <span className="reproduction__project-meta">
+          <em className="reproduction__project-kind">{kindLabel}</em>
           <StatusBadge status={project.status} />
+          <PublicationBadge published={project.isPublished} />
           <em>{formatDate(project.updatedAt)}</em>
         </span>
         <span className="reproduction__project-runs">
@@ -340,6 +401,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const [query, setQuery] = useState(savedListState.query);
   const [statusFilter, setStatusFilter] = useState(savedListState.status);
   const [tagFilter, setTagFilter] = useState(savedListState.tag);
+  const [kindFilter, setKindFilter] = useState(savedListState.kind);
   const [sort, setSort] = useState<'updated' | 'created' | 'name'>(savedListState.sort);
   // Editing is the primary task on this page; preview and split remain one-click modes.
   const [mode, setMode] = useState<EditorMode>('edit');
@@ -351,8 +413,11 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const [revision, setRevision] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [createOpen, setCreateOpen] = useState(false);
+  const [createProjectKind, setCreateProjectKind] = useState<ReproductionProjectKind>('reproduction');
   const [createName, setCreateName] = useState('');
   const [createPaperId, setCreatePaperId] = useState('');
+  const [createPaperQuery, setCreatePaperQuery] = useState('');
+  const [createPaperActiveIndex, setCreatePaperActiveIndex] = useState(0);
   const [createTags, setCreateTags] = useState('');
   const [createBusy, setCreateBusy] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
@@ -369,6 +434,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const [artifactOpen, setArtifactOpen] = useState(false);
   const [artifactFile, setArtifactFile] = useState<File | null>(null);
   const [artifactKind, setArtifactKind] = useState('attachment');
+  const [artifactDragActive, setArtifactDragActive] = useState(false);
   const [artifactBusy, setArtifactBusy] = useState(false);
   const [editorUploadBusy, setEditorUploadBusy] = useState(false);
   const [editorUploadMessage, setEditorUploadMessage] = useState('');
@@ -379,6 +445,11 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const [editBusy, setEditBusy] = useState(false);
   const [artifactsExpanded, setArtifactsExpanded] = useState(false);
   const [notesExpanded, setNotesExpanded] = useState(false);
+  const [publication, setPublication] = useState<ReproductionPublication | null>(null);
+  const [publicationDraft, setPublicationDraft] = useState<PublicationDraft>(EMPTY_PUBLICATION_DRAFT);
+  const [publicationOpen, setPublicationOpen] = useState(false);
+  const [publicationBusy, setPublicationBusy] = useState(false);
+  const [publicationValidation, setPublicationValidation] = useState<PublicationValidationResponse | null>(null);
   const loadedContent = useRef('');
   const initialPaperHandled = useRef(false);
   const dirtyDocumentRef = useRef(false);
@@ -397,6 +468,11 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const noteDialogRef = useDialogFocus(noteOpen, noteBusy, () => setNoteOpen(false));
   const artifactDialogRef = useDialogFocus(artifactOpen, artifactBusy, () => setArtifactOpen(false));
   const editDialogRef = useDialogFocus(editOpen, editBusy, () => setEditOpen(false));
+  const publicationDialogRef = useDialogFocus(
+    publicationOpen,
+    publicationBusy,
+    () => setPublicationOpen(false),
+  );
 
   useEffect(() => {
     initialPaperHandled.current = false;
@@ -408,10 +484,11 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       query,
       status: statusFilter,
       tag: tagFilter,
+      kind: kindFilter,
       sort,
       scrollTop: typeof window === 'undefined' ? 0 : window.scrollY,
     });
-  }, [listOnly, query, statusFilter, tagFilter, sort]);
+  }, [listOnly, query, statusFilter, tagFilter, kindFilter, sort]);
 
   useEffect(() => {
     if (!listOnly || typeof window === 'undefined') return;
@@ -419,7 +496,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
     const timer = window.setTimeout(restore, 0);
     const handleScroll = () => {
       writeReproductionListState(safeLocalStorage(), {
-        query, status: statusFilter, tag: tagFilter, sort, scrollTop: window.scrollY,
+        query, status: statusFilter, tag: tagFilter, kind: kindFilter, sort, scrollTop: window.scrollY,
       });
     };
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -427,7 +504,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       window.clearTimeout(timer);
       window.removeEventListener('scroll', handleScroll);
     };
-  }, [listOnly, query, statusFilter, tagFilter, sort, savedListState.scrollTop]);
+  }, [listOnly, query, statusFilter, tagFilter, kindFilter, sort, savedListState.scrollTop]);
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -436,31 +513,49 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
         q: query.trim() || undefined,
         status: statusFilter || undefined,
         tag: tagFilter || undefined,
+        kind: kindFilter || undefined,
         sort,
         limit: 100,
       });
-      setProjects(response.items ?? []);
+      const items = response.items ?? [];
+      setProjects(items);
       setError('');
-      if (listOnly) {
-        setSelectedId(null);
-      } else if (initialProjectId) {
-        setSelectedId(response.items.some((item) => item.id === initialProjectId) ? initialProjectId : null);
+      if (initialProjectId) {
+        setSelectedId(initialProjectId);
       } else if (initialPaperId && !initialPaperHandled.current) {
         initialPaperHandled.current = true;
-        const existing = response.items.find((item) => item.paperId === initialPaperId);
+        let existing = findReproductionProjectForPaper(items, initialPaperId);
+        if (!existing) {
+          const linked = await reproductionApi.list({
+            paperId: initialPaperId,
+            kind: 'reproduction',
+            sort: 'updated',
+            limit: 1,
+          });
+          existing = findReproductionProjectForPaper(linked.items ?? [], initialPaperId);
+        }
         if (existing) {
           setCreateOpen(false);
+          if (listOnly && onOpenProject) {
+            onOpenProject(existing.id);
+            return;
+          }
           setSelectedId(existing.id);
         } else {
+          setCreateProjectKind('reproduction');
           setCreatePaperId(initialPaperId);
+          setCreatePaperQuery('');
+          setCreatePaperActiveIndex(0);
           setCreateOpen(true);
-          setSelectedId((current) => current && response.items.some((item) => item.id === current) ? current : null);
+          setSelectedId((current) => current && items.some((item) => item.id === current) ? current : null);
         }
+      } else if (listOnly) {
+        setSelectedId(null);
       } else {
         setSelectedId((current) => {
-          if (current && response.items.some((item) => item.id === current)) return current;
-          if (current && dirtyDocumentRef.current && !window.confirm('当前复现文档尚未保存，切换筛选会离开编辑内容。继续吗？')) return current;
-          return response.items[0]?.id ?? null;
+          if (current && items.some((item) => item.id === current)) return current;
+          if (current && dirtyDocumentRef.current && !window.confirm('当前项目文档尚未保存，切换筛选会离开编辑内容。继续吗？')) return current;
+          return items[0]?.id ?? null;
         });
       }
     } catch (reason) {
@@ -470,12 +565,40 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
     } finally {
       setLoading(false);
     }
-  }, [initialPaperId, initialProjectId, listOnly, query, statusFilter, tagFilter, sort]);
+  }, [initialPaperId, initialProjectId, listOnly, onOpenProject, query, statusFilter, tagFilter, kindFilter, sort]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadProjects(), 180);
     return () => window.clearTimeout(timer);
   }, [loadProjects]);
+
+  const syncProjectPublication = useCallback((projectId: string, isPublished: boolean) => {
+    setProjects((current) => current.map((project) => (
+      project.id === projectId ? { ...project, isPublished } : project
+    )));
+    setSelected((current) => (
+      current?.id === projectId ? { ...current, isPublished } : current
+    ));
+  }, []);
+
+  const refreshPublication = useCallback(async (projectId: string) => {
+    try {
+      const publicState = await reproductionApi.getPublication(projectId);
+      syncProjectPublication(projectId, Boolean(publicState.contentHash));
+      if (selectedIdRef.current !== projectId) return null;
+      setPublication(publicState);
+      setPublicationDraft(publicationDraftFrom(publicState));
+      setPublicationValidation(null);
+      return publicState;
+    } catch {
+      if (selectedIdRef.current === projectId) {
+        setPublication(null);
+        setPublicationDraft(EMPTY_PUBLICATION_DRAFT);
+        setPublicationValidation(null);
+      }
+      return null;
+    }
+  }, [syncProjectPublication]);
 
   const loadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -496,6 +619,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       setArtifacts(project.artifacts ?? []);
       setNotes(project.notes ?? []);
       setResults(project.results ?? []);
+      await refreshPublication(id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setSelected(null);
@@ -504,10 +628,13 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       setArtifacts([]);
       setNotes([]);
       setResults([]);
+      setPublication(null);
+      setPublicationDraft(EMPTY_PUBLICATION_DRAFT);
+      setPublicationValidation(null);
     } finally {
       setDetailLoading(false);
     }
-  }, []);
+  }, [refreshPublication]);
 
   useEffect(() => {
     if (selectedId) void loadDetail(selectedId);
@@ -518,6 +645,9 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       setArtifacts([]);
       setNotes([]);
       setResults([]);
+      setPublication(null);
+      setPublicationDraft(EMPTY_PUBLICATION_DRAFT);
+      setPublicationValidation(null);
       setArtifactsExpanded(false);
       setNotesExpanded(false);
       setDraft('');
@@ -554,6 +684,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
           updatedAt: saved.updatedAt,
           document: saved,
         } : current);
+        void refreshPublication(selectedId);
       } catch (reason) {
         setSaveState('failed');
         setSaveConflict(reason instanceof Error && (reason.message.includes('409') || reason.message.includes('REPRODUCTION_CONFLICT')));
@@ -561,7 +692,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       }
     }, 850);
     return () => window.clearTimeout(timer);
-  }, [draft, revision, saveState, selected, selectedId]);
+  }, [draft, revision, saveState, selected, selectedId, refreshPublication]);
 
   const updateDraft = (value: string) => {
     draftRef.current = value;
@@ -684,6 +815,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
         return;
       }
       setArtifacts((current) => [artifact, ...current]);
+      void refreshPublication(projectId);
       /* 上传期间若用户继续编辑，则把图片插入到最新光标位置，避免覆盖新输入。 */
       insertArtifactMarkdown(
         artifact,
@@ -772,7 +904,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       return;
     }
     if (id === selectedId) return;
-    if (hasPendingDocumentChanges && !window.confirm('当前复现文档尚未保存，确定要切换项目吗？')) return;
+    if (hasPendingDocumentChanges && !window.confirm('当前项目文档尚未保存，确定要切换项目吗？')) return;
     setSelectedId(id);
   };
 
@@ -796,20 +928,29 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   const createProject = async () => {
     const name = createName.trim();
     if (!name) return;
+    if (createProjectKind === 'reproduction' && !createPaperId) {
+      setError('请选择要关联的论文');
+      return;
+    }
     setCreateBusy(true);
     try {
-      if (!createPaperId) {
-        setError('请选择要关联的论文');
-        return;
-      }
-      const project = await reproductionApi.create({ name, paperId: createPaperId, tags: parseTags(createTags) });
+      const project = await reproductionApi.create({
+        projectKind: createProjectKind,
+        paperId: createPaperId || null,
+        name,
+        tags: parseTags(createTags),
+      });
       setCreateOpen(false);
+      setCreateProjectKind('reproduction');
       setCreateName('');
       setCreatePaperId('');
+      setCreatePaperQuery('');
+      setCreatePaperActiveIndex(0);
       setCreateTags('');
       setProjects((current) => [project, ...current]);
-      setSelectedId(project.id);
-      notify('复现项目已创建');
+      if (listOnly && onOpenProject) onOpenProject(project.id);
+      else setSelectedId(project.id);
+      notify(createProjectKind === 'article' ? '文章项目已创建' : '复现项目已创建');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -823,6 +964,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       const project = await reproductionApi.update(selected.id, { status, expectedRevision: selected.revision });
       setSelected(project);
       setProjects((current) => current.map((item) => item.id === project.id ? project : item));
+      void refreshPublication(project.id);
       notify(`项目状态已更新为“${STATUS_LABELS[status]}”`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -849,8 +991,9 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       });
       setSelected(project);
       setProjects((current) => current.map((item) => item.id === project.id ? project : item));
+      void refreshPublication(project.id);
       setEditOpen(false);
-      notify('复现项目信息已更新');
+      notify(selected.projectKind === 'article' ? '文章项目信息已更新' : '复现项目信息已更新');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -864,6 +1007,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       const project = await reproductionApi.archive(selected.id, selected.revision);
       setSelected(project);
       setProjects((current) => current.map((item) => item.id === project.id ? project : item));
+      void refreshPublication(project.id);
       notify('项目已归档');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -877,14 +1021,14 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       await reproductionApi.remove(selected.id, selected.revision);
       setSelectedId(null);
       await loadProjects();
-      notify('复现项目已删除');
+      notify(selected.projectKind === 'article' ? '文章项目已删除' : '复现项目已删除');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
 
   const recordRun = async () => {
-    if (!selected) return;
+    if (!selected || selected.projectKind === 'article') return;
     setRunBusy(true);
     try {
       let parameters: Record<string, unknown> = {};
@@ -921,6 +1065,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
         ? await reproductionApi.updateRun(selected.id, runEditingId, payload)
         : await reproductionApi.createRun(selected.id, payload);
       setRuns((current) => runEditingId ? current.map((item) => item.id === run.id ? run : item) : [run, ...current]);
+      void refreshPublication(selected.id);
       setRunOpen(false);
       setRunEditingId(null);
       setRunForm(EMPTY_RUN_FORM);
@@ -959,6 +1104,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
     try {
       await reproductionApi.deleteRun(selected.id, run.id);
       setRuns((current) => current.filter((item) => item.id !== run.id));
+      void refreshPublication(selected.id);
       notify('实验运行已删除');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -966,7 +1112,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
   };
 
   const recordResult = async () => {
-    if (!selected || !resultForm.metricName.trim()) return;
+    if (!selected || selected.projectKind === 'article' || !resultForm.metricName.trim()) return;
     setResultBusy(true);
     try {
       const result = await reproductionApi.createResult(selected.id, {
@@ -974,6 +1120,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
         metricName: resultForm.metricName.trim(),
       });
       setResults((current) => [result, ...current]);
+      void refreshPublication(selected.id);
       setResultForm({ metricName: '', paperValue: '', reproductionValue: '', difference: '', differencePercent: '', datasetSettings: '', source: '', status: 'not_reproduced', notes: '' });
       setResultOpen(false);
       notify('结果对照已保存');
@@ -992,7 +1139,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       setNotes((current) => [note, ...current]);
       setNoteDraft('');
       setNoteOpen(false);
-      notify('复现笔记已添加');
+      notify(selected.projectKind === 'article' ? '写作笔记已添加' : '复现笔记已添加');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -1009,6 +1156,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       body.append('kind', artifactKind.trim() || 'attachment');
       const artifact = await reproductionApi.uploadArtifact(selected.id, body);
       setArtifacts((current) => [artifact, ...current]);
+      void refreshPublication(selected.id);
       insertArtifactMarkdown(artifact);
       setArtifactFile(null);
       setArtifactKind('attachment');
@@ -1030,14 +1178,154 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       });
       setProjects((current) => [copy, ...current]);
       setSelectedId(copy.id);
-      notify('复现项目副本已创建');
+      notify(selected.projectKind === 'article' ? '文章项目副本已创建' : '复现项目副本已创建');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
 
+  const chooseArtifactFile = (file: File | null) => {
+    if (!file) return;
+    if (file.size > MAX_ARTIFACT_BYTES) {
+      setError('附件选择失败：单个文件不能超过 25 MB。');
+      return;
+    }
+    setArtifactFile(file);
+  };
+
+  const handleArtifactDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files') || artifactBusy) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setArtifactDragActive(true);
+  };
+
+  const handleArtifactDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    setArtifactDragActive(false);
+  };
+
+  const handleArtifactDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.files.length || artifactBusy) return;
+    event.preventDefault();
+    setArtifactDragActive(false);
+    chooseArtifactFile(event.dataTransfer.files[0] ?? null);
+  };
+
+  const publicationPayload = () => ({
+    decision: publicationDraft.decision,
+    stableSlug: publicationDraft.stableSlug.trim(),
+    publicTitle: publicationDraft.publicTitle.trim(),
+    publicSummary: publicationDraft.publicSummary.trim(),
+    aggregateConclusion: publicationDraft.aggregateConclusion || null,
+    paperUrl: publicationDraft.paperUrl.trim() || null,
+    codeUrl: publicationDraft.codeUrl.trim() || null,
+    datasetUrls: [...new Set(publicationDraft.datasetUrlsText
+      .split(/\r?\n|[,，]/)
+      .map((value) => value.trim())
+      .filter(Boolean))],
+    publicArtifactIds: publicationDraft.publicArtifactIds,
+  });
+
+  const savePublication = async (): Promise<ReproductionPublication | null> => {
+    if (!selected || !publication) return null;
+    setPublicationBusy(true);
+    try {
+      const saved = await reproductionApi.savePublication(selected.id, {
+        ...publicationPayload(),
+        expectedRevision: publication.revision,
+      });
+      setPublication(saved);
+      setPublicationDraft(publicationDraftFrom(saved));
+      setPublicationValidation(null);
+      syncProjectPublication(selected.id, Boolean(saved.contentHash));
+      notify('公开信息已保存');
+      return saved;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      return null;
+    } finally {
+      setPublicationBusy(false);
+    }
+  };
+
+  const validatePublication = async () => {
+    if (!selected || !publication) return;
+    const saved = await savePublication();
+    if (!saved) return;
+    setPublicationBusy(true);
+    try {
+      const checked = await reproductionApi.validatePublication(selected.id);
+      setPublication(checked.publication);
+      setPublicationDraft(publicationDraftFrom(checked.publication));
+      setPublicationValidation(checked);
+      syncProjectPublication(selected.id, Boolean(checked.publication.contentHash));
+      notify(checked.valid ? '公开内容校验通过' : '公开内容仍需修正');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setPublicationBusy(false);
+    }
+  };
+
+  const publishPublication = async () => {
+    if (!selected || !publication) return;
+    const saved = await savePublication();
+    if (!saved) return;
+    setPublicationBusy(true);
+    try {
+      const published = await reproductionApi.publishPublication(selected.id, saved.revision);
+      setPublication(published.publication);
+      setPublicationDraft(publicationDraftFrom(published.publication));
+      setPublicationValidation(null);
+      syncProjectPublication(selected.id, Boolean(published.publication.contentHash));
+      notify(`已导出公开页面：${published.url}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setPublicationBusy(false);
+    }
+  };
+
+  const revokePublication = async () => {
+    if (!selected || !publication || !window.confirm('撤回这个公开页面？静态站点中的文章和资源会被移除。')) return;
+    setPublicationBusy(true);
+    try {
+      const revoked = await reproductionApi.revokePublication(selected.id, publication.revision);
+      setPublication(revoked.publication);
+      setPublicationDraft(publicationDraftFrom(revoked.publication));
+      setPublicationValidation(null);
+      syncProjectPublication(selected.id, Boolean(revoked.publication.contentHash));
+      notify('公开页面已撤回');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setPublicationBusy(false);
+    }
+  };
+
+  const openPublication = async () => {
+    if (!selected) return;
+    setPublicationBusy(true);
+    try {
+      const fresh = await refreshPublication(selected.id);
+      if (!fresh) {
+        setError('公开发布信息加载失败');
+        return;
+      }
+      setPublicationDraft(publicationDraftFrom(fresh));
+      setPublicationValidation(null);
+      setPublicationOpen(true);
+    } finally {
+      setPublicationBusy(false);
+    }
+  };
+
   const canEdit = selected?.status !== 'archived';
   const paper = selected?.paperId ? papers.find((item) => item.id === selected.paperId) : undefined;
+  const selectedIsArticle = selected?.projectKind === 'article';
   const reloadSelected = async () => {
     if (!selectedId) return;
     await loadDetail(selectedId);
@@ -1050,9 +1338,11 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
       {/* 列表态页头已移除：全局命令栏已承载页标题，「新建复现」并入下方工具栏 */}
       {!listOnly && <header className={`reproduction__header${detailOnly ? ' reproduction__header--detail' : ''}`}>
         <div>
-          {detailOnly && onBack && <button type="button" className="btn btn--ghost btn--sm reproduction__back" onClick={onBack}>← 返回论文复现列表</button>}
-          <h1 className="display-title">{detailOnly && selected ? selected.name : '论文复现'}</h1>
-          {detailOnly && selected && <p>{`关联论文：${selected.paperTitle || '未关联论文'} · 记录实验、结果与复现笔记`}</p>}
+          {detailOnly && onBack && <button type="button" className="btn btn--ghost btn--sm reproduction__back" onClick={onBack}>← 返回研究项目列表</button>}
+          <h1 className="display-title">{detailOnly && selected ? selected.name : '研究项目'}</h1>
+          {detailOnly && selected && <p>{selected.projectKind === 'article'
+            ? '文章 / 博客 · 管理正文、素材与公开发布'
+            : `关联论文：${selected.paperTitle || '未关联论文'} · 记录实验、结果与复现笔记`}</p>}
         </div>
         <div className="reproduction__header-actions">
           {detailOnly && selected && (
@@ -1079,28 +1369,37 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
               >
                 <PanelRightIcon size={15} />
               </button>
+              {publication && <button
+                type="button"
+                className={`btn btn--sm reproduction__publish-trigger reproduction__publish-trigger--${publication.status}`}
+                title="配置公开展示、校验并导出到 Hexo Fluid"
+                onClick={() => void openPublication()}
+              >
+                <UploadIcon size={14} /> {PUBLICATION_STATUS_LABELS[publication.status]}
+              </button>}
             </>
           )}
-          {!detailOnly && <button type="button" className="btn btn--primary" onClick={() => setCreateOpen(true)}><PlusIcon size={15} /> 新建复现</button>}
+          {!detailOnly && <button type="button" className="btn btn--primary" onClick={() => setCreateOpen(true)}><PlusIcon size={15} /> 新建项目</button>}
         </div>
       </header>}
 
       {error && <div className="reproduction__error" role="alert"><span>{error}</span><div className="reproduction__error-actions">{saveState === 'failed' && !saveConflict && <button type="button" className="btn btn--ghost btn--sm" onClick={retrySave}>重试保存</button>}{saveConflict && <button type="button" className="btn btn--ghost btn--sm" onClick={() => void reloadSelected()}>重新加载最新版本</button>}<button type="button" className="btn btn--ghost btn--sm" onClick={() => setError('')}>关闭</button></div></div>}
 
       {listOnly && <>
-      <section className="reproduction__overview-strip" aria-label="复现项目概览">
-        <div><span className="eyebrow">ACTIVE PROJECTS</span><strong>{projects.filter((project) => project.status !== 'archived').length}</strong><small>进行中的复现项目</small></div>
+      <section className="reproduction__overview-strip" aria-label="研究项目概览">
+        <div><span className="eyebrow">ACTIVE PROJECTS</span><strong>{projects.filter((project) => project.status !== 'archived').length}</strong><small>进行中的研究项目</small></div>
         <div><span className="eyebrow">RUNS LOGGED</span><strong>{projects.reduce((total, project) => total + (project.runCount ?? 0), 0)}</strong><small>累计实验运行</small></div>
         <div><span className="eyebrow">NEEDS ATTENTION</span><strong>{projects.filter((project) => project.hasFailedTask || project.hasUnsavedContent || project.status === 'blocked').length}</strong><small>需要处理的项目</small></div>
-        <div className="reproduction__overview-copy"><span className="eyebrow">WORKFLOW</span><p>从论文出发，记录环境、运行和结果差异，让每次复现都留下可追溯证据。</p></div>
+        <div className="reproduction__overview-copy"><span className="eyebrow">WORKFLOW</span><p>从论文复现到独立文章，用结构化项目沉淀证据、观点与可公开成果。</p></div>
       </section>
       <div className="reproduction__toolbar">
-        <label className="reproduction__search"><SearchIcon size={15} /><span className="sr-only">搜索复现项目</span><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索项目或论文…" /></label>
+        <label className="reproduction__search"><SearchIcon size={15} /><span className="sr-only">搜索研究项目</span><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索项目或论文…" /></label>
+        <label className="reproduction__filter"><span className="sr-only">项目类型</span><select className="input" value={kindFilter} onChange={(event) => setKindFilter(event.target.value as typeof kindFilter)}><option value="">全部类型</option><option value="reproduction">论文复现</option><option value="article">文章 / 博客</option></select></label>
         <label className="reproduction__filter"><span className="sr-only">项目状态</span><select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">全部状态</option>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label className="reproduction__filter"><span className="sr-only">项目标签</span><select className="input" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}><option value="">全部标签</option>{availableTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select></label>
         <label className="reproduction__filter"><span className="sr-only">项目排序</span><select className="input" value={sort} onChange={(event) => setSort(event.target.value as 'updated' | 'created' | 'name')}><option value="updated">最近更新</option><option value="created">创建时间</option><option value="name">项目名称</option></select></label>
         <span className="reproduction__count">{loading ? '正在加载…' : `${projects.length} 个项目`}</span>
-        <button type="button" className="btn btn--primary reproduction__toolbar-create" onClick={() => setCreateOpen(true)}><PlusIcon size={15} /> 新建复现</button>
+        <button type="button" className="btn btn--primary reproduction__toolbar-create" onClick={() => setCreateOpen(true)}><PlusIcon size={15} /> 新建项目</button>
       </div>
       </>}
 
@@ -1108,14 +1407,14 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
         className={`reproduction__workspace${detailRailOpen ? '' : ' reproduction__workspace--rail-collapsed'}${inspectorOpen ? '' : ' reproduction__workspace--inspector-collapsed'}`}
         ref={listScrollRef}
       >
-        <aside className="reproduction__projects" aria-label="复现项目列表">
+        <aside className="reproduction__projects" aria-label="研究项目列表">
           <div className="reproduction__projects-heading"><span className="eyebrow">PROJECTS</span><span>{projects.length}</span></div>
-          {loading ? <div className="reproduction__empty">正在加载复现项目…</div> : projects.length === 0 ? <div className="reproduction__empty"><DocumentIcon size={22} /><strong>{error ? '无法连接复现服务' : '还没有复现项目'}</strong><span>{error ? '请确认后端已启动后重试。' : '从一篇论文开始，记录你的复现过程。'}</span><button type="button" className="btn btn--primary btn--sm" onClick={() => setCreateOpen(true)}>新建项目</button></div> : <ul className="reproduction__project-list">{projects.map((project) => <ReproductionProjectCard key={project.id} project={project} active={project.id === selectedId} onSelect={selectProject} />)}</ul>}
+          {loading ? <div className="reproduction__empty">正在加载项目…</div> : projects.length === 0 ? <div className="reproduction__empty"><DocumentIcon size={22} /><strong>{error ? '无法连接项目服务' : '还没有项目'}</strong><span>{error ? '请确认后端已启动后重试。' : '从一篇论文复现或一篇文章开始。'}</span><button type="button" className="btn btn--primary btn--sm" onClick={() => setCreateOpen(true)}>新建项目</button></div> : <ul className="reproduction__project-list">{projects.map((project) => <ReproductionProjectCard key={project.id} project={project} active={project.id === selectedId} onSelect={selectProject} />)}</ul>}
          </aside>
 
-        {!listOnly && selected && detailRailOpen && <aside className="reproduction__detail-rail" id="reproduction-detail-rail" aria-label="复现项目导航">
+        {!listOnly && selected && detailRailOpen && <aside className="reproduction__detail-rail" id="reproduction-detail-rail" aria-label="研究项目导航">
           <div className="reproduction__detail-rail-head">
-            <span className="eyebrow">REPRODUCTION</span>
+            <span className="eyebrow">{selectedIsArticle ? 'ARTICLE' : 'REPRODUCTION'}</span>
             <div className="reproduction__detail-rail-head-actions">
               <StatusBadge status={selected.status} />
               <button
@@ -1137,7 +1436,7 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
             <div><span>阶段进度</span><strong>{PROJECT_STAGE_PROGRESS[selected.status]}%</strong></div>
             <span aria-hidden="true"><i style={{ width: `${PROJECT_STAGE_PROGRESS[selected.status]}%` }} /></span>
           </div>
-          <nav className="reproduction__detail-rail-nav" aria-label="复现文档章节">
+          <nav className="reproduction__detail-rail-nav" aria-label={selectedIsArticle ? '文章章节' : '复现文档章节'}>
             <span className="eyebrow">DOCUMENT</span>
             {outline.length === 0 ? <p>暂无章节</p> : outline.map((item) => (
               <button key={item.id} type="button" className={activeHeadingId === item.id ? 'is-active' : ''} onClick={() => jumpToHeading(item.label, item.id)}>
@@ -1151,19 +1450,19 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
           </div>
         </aside>}
 
-        {!listOnly && !selected && !detailLoading && projects.length > 0 && <div className="reproduction__selection-empty"><DocumentIcon size={28} /><h2>选择一个复现项目</h2><p>从左侧选择项目，开始编辑复现文档或记录实验运行。</p></div>}
+        {!listOnly && !selected && !detailLoading && projects.length > 0 && <div className="reproduction__selection-empty"><DocumentIcon size={28} /><h2>选择一个项目</h2><p>从左侧选择项目，开始编辑{selectedIsArticle ? '文章正文' : '复现文档'}。</p></div>}
 
         {!listOnly && selected && <>
-          <section className="reproduction__editor" aria-label="复现文档编辑器" aria-busy={detailLoading}>
+          <section className="reproduction__editor" aria-label={selectedIsArticle ? '文章编辑器' : '复现文档编辑器'} aria-busy={detailLoading}>
             <div className="reproduction__editor-head"><div className="reproduction__editor-title"><h2>{selected.name}</h2><p>{paper ? <button type="button" className="reproduction__paper-link" onClick={() => openPaper(paper.id)}>↳ {paper.title_zh || paper.title}</button> : selected.paperTitle ? `↳ ${selected.paperTitle}` : '未关联论文'}</p></div><div className="reproduction__editor-actions"><span className={`reproduction__save reproduction__save--${saveState}`} role="status"><span aria-hidden="true" />{saveState === 'unsaved' ? '未保存' : saveState === 'saving' ? '保存中' : saveState === 'failed' ? '保存失败' : '已保存'}</span><div className="reproduction__segments" role="group" aria-label="文档显示模式">{(['edit', 'preview', 'split'] as const).map((value) => <button key={value} type="button" className={mode === value ? 'is-active' : ''} aria-pressed={mode === value} onClick={() => setMode(value)}>{value === 'edit' ? '编辑' : value === 'preview' ? '预览' : '分屏'}</button>)}</div></div></div>
             {(mode === 'edit' || mode === 'split') && <MarkdownToolbar disabled={!canEdit || detailLoading} uploading={editorUploadBusy} uploadMessage={editorUploadMessage} onCommand={applyEditorCommand} onImageFile={uploadImageFile} />}
             <div ref={editorRef} className={`reproduction__editor-body reproduction__editor-body--${mode}${editorDragActive ? ' is-drag-active' : ''}`}>
               {(mode === 'edit' || mode === 'split') && <textarea
                 ref={markdownEditorRef}
-                aria-label="复现 Markdown 正文"
+                aria-label={selectedIsArticle ? '文章 Markdown 正文' : '复现 Markdown 正文'}
                 value={draft}
                 disabled={!canEdit || detailLoading}
-                placeholder="在此处输入。使用工具栏或 Markdown 进行格式化。拖放或粘贴图片。"
+                placeholder={selectedIsArticle ? '在此处写作。使用工具栏或 Markdown 进行格式化。拖放或粘贴图片。' : '在此处输入。使用工具栏或 Markdown 进行格式化。拖放或粘贴图片。'}
                 spellCheck={false}
                 onChange={(event) => updateDraft(event.target.value)}
                 onSelect={rememberEditorSelection}
@@ -1178,12 +1477,15 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
                 onDragLeave={handleEditorDragLeave}
                 onDrop={handleEditorDrop}
               />}
-              {(mode === 'preview' || mode === 'split') && <div className="reproduction__preview"><MarkdownView source={draft} /></div>}
+              {(mode === 'preview' || mode === 'split') && <div className="reproduction__preview reproduction__preview--fluid">
+                {publication && <header className="reproduction__fluid-preview-head"><span>{selectedIsArticle ? 'ARTICLE PREVIEW' : `FLUID PREVIEW · ${publication.aggregateConclusion ? CONCLUSION_LABELS[publication.aggregateConclusion as ReproductionConclusion] : '未选择结论'}`}</span><h3>{publication.publicTitle || selected.name}</h3>{publication.publicSummary && <p>{publication.publicSummary}</p>}</header>}
+                <MarkdownView source={draft} />
+              </div>}
             </div>
             <footer className="reproduction__editor-foot"><span>Markdown · KaTeX · 自动保存 · 修订 {revision}</span><span>{draft.length.toLocaleString()} 字</span></footer>
           </section>
 
-          {inspectorOpen && <aside className="reproduction__inspector" id="reproduction-inspector" aria-label="实验、结果与附件" aria-busy={detailLoading}>
+          {inspectorOpen && <aside className="reproduction__inspector" id="reproduction-inspector" aria-label={selectedIsArticle ? '文章素材与公开发布' : '实验、结果与附件'} aria-busy={detailLoading}>
             <div className="reproduction__inspector-head">
               <span className="eyebrow">INSPECTOR</span>
               <button
@@ -1197,25 +1499,68 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
               </button>
             </div>
             <section className="reproduction__inspector-section reproduction__summary"><div className="reproduction__section-head"><div><h2>项目状态</h2></div></div><div className="reproduction__summary-status"><StatusBadge status={selected.status} /><select className="input input--sm" aria-label="项目状态" value={selected.status} disabled={selected.status === 'archived'} onChange={(event) => void updateStatus(event.target.value as ReproductionStatus)}>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><p>最后更新 {formatDate(selected.updatedAt)} · 修订 {selected.revision}</p></section>
-            <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>实验运行</h2></div><button type="button" className="btn btn--primary btn--sm" disabled={!canEdit} onClick={() => { setRunEditingId(null); setRunForm(EMPTY_RUN_FORM); setRunOpen(true); }}><SparkIcon size={13} /> 记录</button></div>{runs.length === 0 ? <p className="reproduction__muted">还没有实验运行记录。</p> : <ol className="reproduction__run-list">{runs.slice(0, runsExpanded ? runs.length : 4).map((run) => <li key={run.id}><span className={`reproduction__run-dot reproduction__run-dot--${run.status}`} aria-hidden="true" /><span className="reproduction__run-copy"><strong>{run.name || run.resultSummary || '实验运行'}</strong><small>{run.resultSummary && run.name ? `${run.resultSummary} · ` : ''}{run.environment || '未记录环境'} · {formatDate(run.createdAt)}</small></span><b>{RUN_STATUS_LABELS[run.status]}</b><span className="reproduction__run-actions"><button type="button" className="btn btn--ghost btn--xs" disabled={!canEdit} onClick={() => editRun(run)}>编辑</button><button type="button" className="btn btn--ghost btn--xs" disabled={!canEdit} onClick={() => copyRun(run)}>复制</button><button type="button" className="btn btn--ghost btn--xs reproduction__danger-action" disabled={!canEdit} onClick={() => void deleteRun(run)}>删除</button></span></li>)}</ol>}{runs.length > 4 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={runsExpanded} onClick={() => setRunsExpanded((expanded) => !expanded)}>{runsExpanded ? '收起运行记录' : `查看全部 ${runs.length} 次运行`} <ArrowRightIcon size={12} /></button>}</section>
+            {!selectedIsArticle && <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>实验运行</h2></div><button type="button" className="btn btn--primary btn--sm" disabled={!canEdit} onClick={() => { setRunEditingId(null); setRunForm(EMPTY_RUN_FORM); setRunOpen(true); }}><SparkIcon size={13} /> 记录</button></div>{runs.length === 0 ? <p className="reproduction__muted">还没有实验运行记录。</p> : <ol className="reproduction__run-list">{runs.slice(0, runsExpanded ? runs.length : 4).map((run) => <li key={run.id}><span className={`reproduction__run-dot reproduction__run-dot--${run.status}`} aria-hidden="true" /><span className="reproduction__run-copy"><strong>{run.name || run.resultSummary || '实验运行'}</strong><small>{run.resultSummary && run.name ? `${run.resultSummary} · ` : ''}{run.environment || '未记录环境'} · {formatDate(run.createdAt)}</small></span><b>{RUN_STATUS_LABELS[run.status]}</b><span className="reproduction__run-actions"><button type="button" className="btn btn--ghost btn--xs" disabled={!canEdit} onClick={() => editRun(run)}>编辑</button><button type="button" className="btn btn--ghost btn--xs" disabled={!canEdit} onClick={() => copyRun(run)}>复制</button><button type="button" className="btn btn--ghost btn--xs reproduction__danger-action" disabled={!canEdit} onClick={() => void deleteRun(run)}>删除</button></span></li>)}</ol>}{runs.length > 4 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={runsExpanded} onClick={() => setRunsExpanded((expanded) => !expanded)}>{runsExpanded ? '收起运行记录' : `查看全部 ${runs.length} 次运行`} <ArrowRightIcon size={12} /></button>}</section>}
             <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>附件</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setArtifactOpen(true)}><PlusIcon size={13} /> 添加</button></div>{artifacts.length === 0 ? <p className="reproduction__muted">尚未添加附件。</p> : <ul className="reproduction__artifact-list">{artifacts.slice(0, artifactsExpanded ? artifacts.length : 4).map((artifact) => <li key={artifact.id}><span><a href={reproductionApi.artifactUrl(artifact.projectId, artifact.id)} download={artifact.filename} aria-label={`下载附件 ${artifact.filename}`}><DownloadIcon size={12} /> {artifact.filename}</a><small>{Math.ceil(artifact.sizeBytes / 1024)} KB · {artifact.mimeType}</small></span><span className="reproduction__artifact-actions"><code>{artifact.kind}</code><button type="button" className="btn btn--ghost btn--xs" aria-label={`插入附件 ${artifact.filename}`} disabled={!canEdit} onClick={() => insertArtifactMarkdown(artifact)}>插入</button></span></li>)}</ul>}{artifacts.length > 4 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={artifactsExpanded} onClick={() => setArtifactsExpanded((expanded) => !expanded)}>{artifactsExpanded ? '收起附件' : `查看全部 ${artifacts.length} 个附件`} <ArrowRightIcon size={12} /></button>}</section>
-            <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>复现笔记</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setNoteOpen(true)}>新增</button></div>{notes.length === 0 ? <p className="reproduction__muted">暂无独立笔记。</p> : <ul className="reproduction__note-list">{notes.slice(0, notesExpanded ? notes.length : 3).map((note) => <li key={note.id}><p>{note.content}</p><small>{formatDate(note.createdAt)}</small></li>)}</ul>}{notes.length > 3 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={notesExpanded} onClick={() => setNotesExpanded((expanded) => !expanded)}>{notesExpanded ? '收起笔记' : `查看全部 ${notes.length} 条笔记`} <ArrowRightIcon size={12} /></button>}</section>
+            <section className="reproduction__inspector-section"><div className="reproduction__section-head"><div><h2>{selectedIsArticle ? '写作笔记' : '复现笔记'}</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setNoteOpen(true)}>新增</button></div>{notes.length === 0 ? <p className="reproduction__muted">暂无独立笔记。</p> : <ul className="reproduction__note-list">{notes.slice(0, notesExpanded ? notes.length : 3).map((note) => <li key={note.id}><p>{note.content}</p><small>{formatDate(note.createdAt)}</small></li>)}</ul>}{notes.length > 3 && <button type="button" className="btn btn--ghost btn--sm reproduction__full-link" aria-expanded={notesExpanded} onClick={() => setNotesExpanded((expanded) => !expanded)}>{notesExpanded ? '收起笔记' : `查看全部 ${notes.length} 条笔记`} <ArrowRightIcon size={12} /></button>}</section>
+            <section className="reproduction__inspector-section reproduction__publication-summary"><div className="reproduction__section-head"><div><h2>公开展示</h2></div>{publication && <span className={`reproduction__publication-status reproduction__publication-status--${publication.status}`}>{PUBLICATION_STATUS_LABELS[publication.status]}</span>}</div>{publication ? <><p>{publication.publicSummary || '补充公开标题、摘要、结论和附件后即可校验。'}</p><button type="button" className="btn btn--primary btn--sm reproduction__full-link" onClick={() => void openPublication()}><UploadIcon size={13} /> 管理公开发布</button></> : <p className="reproduction__muted">公开发布信息尚未加载。</p>}</section>
             <section className="reproduction__inspector-actions"><button type="button" className="btn btn--ghost btn--sm" disabled={selected.status === 'archived'} onClick={openProjectEditor}><EditIcon size={14} /> 编辑项目</button><button type="button" className="btn btn--ghost btn--sm" onClick={() => void copyProject()}><DocumentIcon size={14} /> 复制项目</button><button type="button" className="btn btn--ghost btn--sm" disabled={selected.status === 'archived'} onClick={() => void archiveProject()}><ArchiveIcon size={14} /> 归档项目</button><button type="button" className="btn btn--ghost btn--sm reproduction__danger-action" disabled={selected.status !== 'archived'} onClick={() => void deleteProject()}><TrashIcon size={14} /> 删除项目</button></section>
-          <section className="reproduction__inspector-section reproduction__results-section"><div className="reproduction__section-head"><div><h2>结果对照</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setResultOpen(true)}><PlusIcon size={13} /> 记录指标</button></div>{results.length === 0 ? <p className="reproduction__muted">还没有原论文与复现结果的对照记录。</p> : <ul className="reproduction__result-list">{results.slice(0, 5).map((result) => <li key={result.id}><div><strong>{result.metricName}</strong><small>{result.paperValue ?? '—'} → {result.reproductionValue ?? '—'}{result.difference ? ` · ${result.difference}` : ''}</small></div><span className={`reproduction__result-status reproduction__result-status--${result.status}`}>{RESULT_STATUS_LABELS[result.status]}</span></li>)}</ul>}</section>
+          {!selectedIsArticle && <section className="reproduction__inspector-section reproduction__results-section"><div className="reproduction__section-head"><div><h2>结果对照</h2></div><button type="button" className="btn btn--ghost btn--sm" disabled={!canEdit} onClick={() => setResultOpen(true)}><PlusIcon size={13} /> 记录指标</button></div>{results.length === 0 ? <p className="reproduction__muted">还没有原论文与复现结果的对照记录。</p> : <ul className="reproduction__result-list">{results.slice(0, 5).map((result) => <li key={result.id}><div><strong>{result.metricName}</strong><small>{result.paperValue ?? '—'} → {result.reproductionValue ?? '—'}{result.difference ? ` · ${result.difference}` : ''}</small></div><span className={`reproduction__result-status reproduction__result-status--${result.status}`}>{RESULT_STATUS_LABELS[result.status]}</span></li>)}</ul>}</section>}
           </aside>}
         </>}
       </div>
 
-      {createOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!createBusy && event.target === event.currentTarget) setCreateOpen(false); }}><form ref={createDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="create-reproduction-title" onSubmit={(event) => { event.preventDefault(); void createProject(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">NEW PROJECT</span><h2 id="create-reproduction-title">新建论文复现</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭新建复现对话框" disabled={createBusy} onClick={() => setCreateOpen(false)}><CloseIcon size={15} /></button></div><label>项目名称<input className="input" autoFocus required value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder="例如：ViT 分阶段训练复现" /></label><label>关联论文（必选）<select className="input" required value={createPaperId} onChange={(event) => setCreatePaperId(event.target.value)}><option value="">请选择论文</option>{papers.map((item) => <option key={item.id} value={item.id}>{item.title_zh || item.title}</option>)}</select></label><label>标签（可选）<input className="input" value={createTags} onChange={(event) => setCreateTags(event.target.value)} placeholder="用逗号分隔，例如：视觉, 基线" /></label><p className="reproduction__dialog-hint">每个复现项目必须关联库内论文；创建后只生成空白模板，不会伪造实验内容。</p><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={createBusy} onClick={() => setCreateOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={createBusy || !createName.trim() || !createPaperId}>{createBusy ? '创建中…' : '创建项目'}</button></div></form></div>}
+      {createOpen && (
+        <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!createBusy && event.target === event.currentTarget) setCreateOpen(false); }}>
+          <form ref={createDialogRef} className="reproduction__dialog reproduction__dialog--create" role="dialog" aria-modal="true" aria-labelledby="create-reproduction-title" onSubmit={(event) => { event.preventDefault(); void createProject(); }}>
+            <div className="reproduction__dialog-head">
+              <div>
+                <span className="eyebrow">NEW PROJECT</span>
+                <h2 id="create-reproduction-title">新建研究项目</h2>
+                <p className="reproduction__dialog-subtitle">先选项目类型，再从库中快速定位内容。</p>
+              </div>
+              <button type="button" className="btn btn--ghost btn--sm" aria-label="关闭新建项目对话框" disabled={createBusy} onClick={() => setCreateOpen(false)}><CloseIcon size={15} /></button>
+            </div>
+            <div className="project-kind-switch" role="tablist" aria-label="项目类型">
+              <button type="button" role="tab" aria-selected={createProjectKind === 'reproduction'} className={createProjectKind === 'reproduction' ? 'is-active' : ''} onClick={() => setCreateProjectKind('reproduction')}>
+                <span className="project-kind-switch__mark">R</span>
+                <span><strong>论文复现</strong><small>关联论文，记录实验与结果</small></span>
+              </button>
+              <button type="button" role="tab" aria-selected={createProjectKind === 'article'} className={createProjectKind === 'article' ? 'is-active' : ''} onClick={() => setCreateProjectKind('article')}>
+                <span className="project-kind-switch__mark">A</span>
+                <span><strong>文章 / 博客</strong><small>独立写作，也可关联论文</small></span>
+              </button>
+            </div>
+            <label>项目名称<input className="input" autoFocus required value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder={createProjectKind === 'article' ? '例如：读论文：视觉语言模型的缩放规律' : '例如：ViT 分阶段训练复现'} /></label>
+            <label>{createProjectKind === 'reproduction' ? '关联论文（必选）' : '关联论文（可选）'}
+              <ProjectPaperPicker
+                papers={papers}
+                value={createPaperId}
+                query={createPaperQuery}
+                activeIndex={createPaperActiveIndex}
+                onChange={setCreatePaperId}
+                onQueryChange={setCreatePaperQuery}
+                onActiveIndexChange={setCreatePaperActiveIndex}
+                optional={createProjectKind === 'article'}
+              />
+            </label>
+            <label>标签（可选）<input className="input" value={createTags} onChange={(event) => setCreateTags(event.target.value)} placeholder="用逗号分隔，例如：视觉, 基线" /></label>
+            <p className="reproduction__dialog-hint">{createProjectKind === 'article' ? '文章项目使用独立写作模板；关联论文只作为上下文，不会要求实验结论。' : '每个复现项目必须关联库内论文；创建后生成可编辑的复现模板。'}</p>
+            <div className="reproduction__dialog-actions">
+              <button type="button" className="btn btn--ghost" disabled={createBusy} onClick={() => setCreateOpen(false)}>取消</button>
+              <button type="submit" className="btn btn--primary" disabled={createBusy || !createName.trim() || (createProjectKind === 'reproduction' && !createPaperId)}>{createBusy ? '创建中…' : createProjectKind === 'article' ? '创建文章项目' : '创建复现项目'}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
-      {editOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!editBusy && event.target === event.currentTarget) setEditOpen(false); }}><form ref={editDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="edit-reproduction-title" onSubmit={(event) => { event.preventDefault(); void updateProjectDetails(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">EDIT PROJECT</span><h2 id="edit-reproduction-title">编辑复现项目</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭编辑复现对话框" disabled={editBusy} onClick={() => setEditOpen(false)}><CloseIcon size={15} /></button></div><label>项目名称<input className="input" autoFocus required value={editName} onChange={(event) => setEditName(event.target.value)} /></label><label>标签（可选）<input className="input" value={editTags} onChange={(event) => setEditTags(event.target.value)} placeholder="用逗号分隔" /></label><p className="reproduction__dialog-hint">状态和正文在工作区中单独更新，归档项目不可编辑。</p><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={editBusy} onClick={() => setEditOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={editBusy || !editName.trim()}>{editBusy ? '保存中…' : '保存修改'}</button></div></form></div>}
+      {editOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!editBusy && event.target === event.currentTarget) setEditOpen(false); }}><form ref={editDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="edit-reproduction-title" onSubmit={(event) => { event.preventDefault(); void updateProjectDetails(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">EDIT PROJECT</span><h2 id="edit-reproduction-title">{selectedIsArticle ? '编辑文章项目' : '编辑复现项目'}</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label={selectedIsArticle ? '关闭编辑文章对话框' : '关闭编辑复现对话框'} disabled={editBusy} onClick={() => setEditOpen(false)}><CloseIcon size={15} /></button></div><label>项目名称<input className="input" autoFocus required value={editName} onChange={(event) => setEditName(event.target.value)} /></label><label>标签（可选）<input className="input" value={editTags} onChange={(event) => setEditTags(event.target.value)} placeholder="用逗号分隔" /></label><p className="reproduction__dialog-hint">状态和正文在工作区中单独更新，归档项目不可编辑。</p><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={editBusy} onClick={() => setEditOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={editBusy || !editName.trim()}>{editBusy ? '保存中…' : '保存修改'}</button></div></form></div>}
 
       {runOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!runBusy && event.target === event.currentTarget) setRunOpen(false); }}><form ref={runDialogRef} className="reproduction__dialog reproduction__dialog--wide" role="dialog" aria-modal="true" aria-labelledby="record-run-title" onSubmit={(event) => { event.preventDefault(); void recordRun(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">EXPERIMENT RUN</span><h2 id="record-run-title">{runEditingId ? '编辑实验运行' : '记录实验运行'}</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭记录运行对话框" disabled={runBusy} onClick={() => setRunOpen(false)}><CloseIcon size={15} /></button></div><div className="reproduction__form-grid">{([['name', '实验名称'], ['environment', '运行环境'], ['command', '命令'], ['dataVersion', '数据集版本'], ['codeRevision', '代码仓库 / commit'], ['seed', '随机种子'], ['startedAt', '开始时间'], ['finishedAt', '结束时间'], ['runtimeVersions', 'Python / CUDA / 依赖'], ['dataset', '数据集'], ['preprocessing', '预处理方式'], ['repositoryUrl', '代码仓库 URL']] as const).map(([key, label]) => <label key={key}>{label}<input className="input" autoFocus={key === 'name'} value={runForm[key]} onChange={(event) => setRunForm((current) => ({ ...current, [key]: event.target.value }))} /></label>)}<label>状态<select className="input" value={runForm.status} onChange={(event) => setRunForm((current) => ({ ...current, status: event.target.value as ExperimentRun['status'] }))}>{Object.entries(RUN_STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>指标 JSON<textarea className="input" rows={3} value={runForm.metrics} onChange={(event) => setRunForm((current) => ({ ...current, metrics: event.target.value }))} placeholder='{"accuracy": 0.81}' /></label><label>参数 JSON<textarea className="input" rows={3} value={runForm.parameters} onChange={(event) => setRunForm((current) => ({ ...current, parameters: event.target.value }))} placeholder='{"epochs": 10}' /></label><label className="reproduction__form-wide">配置文件 / 超参数<textarea className="input" rows={3} value={runForm.config} onChange={(event) => setRunForm((current) => ({ ...current, config: event.target.value }))} /></label><label className="reproduction__form-wide">结果摘要<textarea className="input" rows={3} value={runForm.resultSummary} onChange={(event) => setRunForm((current) => ({ ...current, resultSummary: event.target.value }))} /></label><label className="reproduction__form-wide">异常、偏差和问题<textarea className="input" rows={3} value={runForm.issues} onChange={(event) => setRunForm((current) => ({ ...current, issues: event.target.value }))} /></label></div><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={runBusy} onClick={() => setRunOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={runBusy}>{runBusy ? '保存中…' : runEditingId ? '保存修改' : '保存运行'}</button></div></form></div>}
 
-      {noteOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!noteBusy && event.target === event.currentTarget) setNoteOpen(false); }}><form ref={noteDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="add-note-title" onSubmit={(event) => { event.preventDefault(); void addNote(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">REPRODUCTION NOTE</span><h2 id="add-note-title">新增复现笔记</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭新增笔记对话框" disabled={noteBusy} onClick={() => setNoteOpen(false)}><CloseIcon size={15} /></button></div><label>笔记内容<textarea className="input" autoFocus rows={6} value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="记录一个观察、偏差或下一步问题" /></label><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={noteBusy} onClick={() => setNoteOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={noteBusy || !noteDraft.trim()}>{noteBusy ? '保存中…' : '保存笔记'}</button></div></form></div>}
+      {noteOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!noteBusy && event.target === event.currentTarget) setNoteOpen(false); }}><form ref={noteDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="add-note-title" onSubmit={(event) => { event.preventDefault(); void addNote(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">{selectedIsArticle ? 'WRITING NOTE' : 'REPRODUCTION NOTE'}</span><h2 id="add-note-title">{selectedIsArticle ? '新增写作笔记' : '新增复现笔记'}</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭新增笔记对话框" disabled={noteBusy} onClick={() => setNoteOpen(false)}><CloseIcon size={15} /></button></div><label>笔记内容<textarea className="input" autoFocus rows={6} value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder={selectedIsArticle ? '记录一个论点、素材来源或下一步写作任务' : '记录一个观察、偏差或下一步问题'} /></label><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={noteBusy} onClick={() => setNoteOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={noteBusy || !noteDraft.trim()}>{noteBusy ? '保存中…' : '保存笔记'}</button></div></form></div>}
 
 
-      {artifactOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!artifactBusy && event.target === event.currentTarget) setArtifactOpen(false); }}><form ref={artifactDialogRef} className="reproduction__dialog" role="dialog" aria-modal="true" aria-labelledby="add-artifact-title" onSubmit={(event) => { event.preventDefault(); void addArtifact(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">REPRODUCTION ARTIFACT</span><h2 id="add-artifact-title">添加附件</h2></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭添加附件对话框" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}><CloseIcon size={15} /></button></div><label>附件文件<input className="input" autoFocus type="file" accept=".txt,.log,.md,.markdown,.csv,.json,.pdf,.html,.htm,.png,.jpg,.jpeg,.webp" onChange={(event) => setArtifactFile(event.target.files?.[0] ?? null)} /></label><label>附件类型<select className="input" value={artifactKind} onChange={(event) => setArtifactKind(event.target.value)}><option value="attachment">附件</option><option value="log">日志</option><option value="table">表格</option><option value="image">图片</option><option value="document">文档</option></select></label><p className="reproduction__dialog-hint">支持文本、Markdown、CSV、JSON、PDF、HTML、PNG、JPEG 和 WebP，单个文件不超过 25 MB。HTML 作为安全下载附件保存，不会在应用内执行。图片也可直接用工具栏上传，或拖放 / 粘贴到正文。</p><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={artifactBusy || !artifactFile}>{artifactBusy ? '上传中…' : '上传附件'}</button></div></form></div>}
+      {artifactOpen && <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!artifactBusy && event.target === event.currentTarget) setArtifactOpen(false); }}><form ref={artifactDialogRef} className="reproduction__dialog reproduction__dialog--artifact" role="dialog" aria-modal="true" aria-labelledby="add-artifact-title" onSubmit={(event) => { event.preventDefault(); void addArtifact(); }}><div className="reproduction__dialog-head"><div><span className="eyebrow">PROJECT ARTIFACT</span><h2 id="add-artifact-title">添加附件</h2><p className="reproduction__dialog-subtitle">将研究证据保存到当前项目</p></div><button type="button" className="btn btn--ghost btn--sm" aria-label="关闭添加附件对话框" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}><CloseIcon size={15} /></button></div><div className="reproduction__artifact-field"><div className="reproduction__field-label"><span>附件文件</span><span className="reproduction__field-required">必选</span></div><div className={`reproduction__artifact-picker${artifactDragActive ? ' is-drag-active' : ''}${artifactFile ? ' has-file' : ''}`} onDragOver={handleArtifactDragOver} onDragLeave={handleArtifactDragLeave} onDrop={handleArtifactDrop}><input id="artifact-file" className="reproduction__artifact-input" autoFocus={!artifactFile} type="file" accept={ARTIFACT_ACCEPT} onChange={(event) => { chooseArtifactFile(event.target.files?.[0] ?? null); event.currentTarget.value = ''; }} /><label className="reproduction__artifact-picker-action" htmlFor="artifact-file"><span className="reproduction__artifact-picker-icon" aria-hidden="true"><UploadIcon size={18} /></span><span><strong>{artifactFile ? '更换附件' : '选择附件'}</strong><small>或将文件拖放到此处</small></span></label>{artifactFile ? <div className="reproduction__artifact-file"><span className="reproduction__artifact-file-icon" aria-hidden="true"><DocumentIcon size={17} /></span><span className="reproduction__artifact-file-copy"><strong title={artifactFile.name}>{artifactFile.name}</strong><small>{formatArtifactSize(artifactFile.size)} · {artifactFile.type || '自动识别类型'}</small></span><button type="button" className="reproduction__artifact-file-remove" aria-label={`移除 ${artifactFile.name}`} disabled={artifactBusy} onClick={() => setArtifactFile(null)}><CloseIcon size={14} /></button></div> : <span className="reproduction__artifact-picker-empty">支持单个文件不超过 25 MB</span>}</div><div className="reproduction__artifact-accept"><span>{ARTIFACT_ACCEPT_LABEL}</span><span>最大 25 MB</span></div></div><label>附件类型<select className="input" value={artifactKind} onChange={(event) => setArtifactKind(event.target.value)}><option value="attachment">附件</option><option value="log">日志</option><option value="table">表格</option><option value="image">图片</option><option value="document">文档</option></select></label><p className="reproduction__dialog-hint">HTML 作为安全下载附件保存，不会在应用内执行。图片也可直接用工具栏上传，或拖放 / 粘贴到正文。</p><div className="reproduction__dialog-actions"><button type="button" className="btn btn--ghost" disabled={artifactBusy} onClick={() => setArtifactOpen(false)}>取消</button><button type="submit" className="btn btn--primary" disabled={artifactBusy || !artifactFile}>{artifactBusy ? '上传中…' : '上传附件'}</button></div></form></div>}
       {resultOpen && (
         <div className="reproduction__dialog-backdrop" role="presentation" onClick={(event) => { if (!resultBusy && event.target === event.currentTarget) setResultOpen(false); }}>
           <form ref={resultDialogRef} className="reproduction__dialog reproduction__dialog--wide" role="dialog" aria-modal="true" aria-labelledby="add-result-title" onSubmit={(event) => { event.preventDefault(); void recordResult(); }}>
@@ -1230,6 +1575,29 @@ export function ReproductionPage({ papers, notify, openPaper, initialPaperId, in
           </form>
         </div>
       )}
+      <PublicationDialog
+        open={publicationOpen}
+        dialogRef={publicationDialogRef}
+        publication={publication}
+        draft={publicationDraft}
+        artifacts={artifacts}
+        projectStatus={selected?.status ?? 'planned'}
+        projectKind={selected?.projectKind ?? 'reproduction'}
+        busy={publicationBusy}
+        validation={publicationValidation}
+        artifactUrl={reproductionApi.artifactUrl}
+        onClose={() => setPublicationOpen(false)}
+        onChange={(change) => setPublicationDraft((current) => ({ ...current, ...change }))}
+        onSave={() => void savePublication()}
+        onValidate={() => void validatePublication()}
+        onPreview={() => {
+          setPublicationOpen(false);
+          setMode('preview');
+          window.requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+        }}
+        onPublish={() => void publishPublication()}
+        onRevoke={() => void revokePublication()}
+      />
     </div>
   );
 }

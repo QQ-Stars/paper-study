@@ -22,6 +22,8 @@ class SqlAlchemyReproductionRepository:
         query: str | None,
         status: str | None,
         tag: str | None,
+        paper_id: str | None,
+        project_kind: str | None,
         sort: str,
         limit: int,
         offset: int,
@@ -37,6 +39,12 @@ class SqlAlchemyReproductionRepository:
         if tag:
             clauses.append("EXISTS (SELECT 1 FROM json_each(p.tags_json) WHERE value = :tag)")
             params["tag"] = tag
+        if paper_id:
+            clauses.append("p.paper_id = :paper_id")
+            params["paper_id"] = paper_id
+        if project_kind:
+            clauses.append("p.project_kind = :project_kind")
+            params["project_kind"] = project_kind
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         try:
             total = int((await self._session.execute(
@@ -50,15 +58,17 @@ class SqlAlchemyReproductionRepository:
                 else "p.updated_at DESC,p.id DESC"
             )
             rows = (await self._session.execute(text(
-                "SELECT p.id,p.paper_id,p.paper_title,p.name,p.status,p.tags_json,p.revision,"
+                "SELECT p.id,p.project_kind,p.paper_id,p.paper_title,p.name,p.status,p.tags_json,p.revision,"
                 "p.created_at,p.updated_at,d.id AS document_id,d.content,d.revision AS document_revision,"
                 "d.save_status AS document_save_status,d.created_at AS document_created_at,d.updated_at AS document_updated_at,"
                 "(SELECT count(*) FROM experiment_runs r WHERE r.project_id=p.id) AS run_count,"
                 "(SELECT r.result_summary FROM experiment_runs r WHERE r.project_id=p.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS last_run_summary,"
                 "(SELECT r.status FROM experiment_runs r WHERE r.project_id=p.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS last_run_status,"
                 "(SELECT r.metrics_json FROM experiment_runs r WHERE r.project_id=p.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS latest_metrics_json,"
-                "EXISTS(SELECT 1 FROM experiment_runs r WHERE r.project_id=p.id AND r.status='failed') AS has_failed_run "
-                f"FROM reproduction_projects p LEFT JOIN reproduction_documents d ON d.project_id=p.id{where} "
+                "EXISTS(SELECT 1 FROM experiment_runs r WHERE r.project_id=p.id AND r.status='failed') AS has_failed_run,"
+                "pub.content_hash AS publication_content_hash "
+                "FROM reproduction_projects p LEFT JOIN reproduction_documents d ON d.project_id=p.id "
+                f"LEFT JOIN reproduction_publications pub ON pub.project_id=p.id{where} "
                 f"ORDER BY {order_by} LIMIT :limit OFFSET :offset"
             ), params)).mappings().all()
         except SQLAlchemyError as error:
@@ -67,24 +77,87 @@ class SqlAlchemyReproductionRepository:
 
     async def get_project(self, project_id: str) -> dict[str, object] | None:
         row = (await self._session.execute(text(
-            "SELECT p.id,p.paper_id,p.paper_title,p.name,p.status,p.tags_json,p.revision,"
+            "SELECT p.id,p.project_kind,p.paper_id,p.paper_title,p.name,p.status,p.tags_json,p.revision,"
             "p.created_at,p.updated_at,d.id AS document_id,d.content,d.revision AS document_revision,"
             "d.save_status AS document_save_status,d.created_at AS document_created_at,d.updated_at AS document_updated_at,"
             "(SELECT count(*) FROM experiment_runs r WHERE r.project_id=p.id) AS run_count,"
             "(SELECT r.result_summary FROM experiment_runs r WHERE r.project_id=p.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS last_run_summary,"
             "(SELECT r.status FROM experiment_runs r WHERE r.project_id=p.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS last_run_status,"
             "(SELECT r.metrics_json FROM experiment_runs r WHERE r.project_id=p.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS latest_metrics_json,"
-            "EXISTS(SELECT 1 FROM experiment_runs r WHERE r.project_id=p.id AND r.status='failed') AS has_failed_run "
+            "EXISTS(SELECT 1 FROM experiment_runs r WHERE r.project_id=p.id AND r.status='failed') AS has_failed_run,"
+            "pub.content_hash AS publication_content_hash "
             "FROM reproduction_projects p LEFT JOIN reproduction_documents d ON d.project_id=p.id "
+            "LEFT JOIN reproduction_publications pub ON pub.project_id=p.id "
             "WHERE p.id=:id"
         ), {"id": project_id})).mappings().one_or_none()
         return _project_row(row) if row is not None else None
 
+    async def get_publication(self, project_id: str) -> dict[str, object] | None:
+        try:
+            row = (
+                await self._session.execute(
+                    text("SELECT * FROM reproduction_publications WHERE project_id=:project_id"),
+                    {"project_id": project_id},
+                )
+            ).mappings().one_or_none()
+        except SQLAlchemyError as error:
+            raise PersistenceReadError(operation="get_reproduction_publication") from error
+        return _publication_row(row) if row is not None else None
+
+    async def save_publication(self, values: dict[str, object]) -> dict[str, object]:
+        try:
+            await self._session.execute(
+                text(
+                    "INSERT INTO reproduction_publications("
+                    "project_id,decision,status,stable_slug,public_title,public_summary,"
+                    "aggregate_conclusion,paper_url,code_url,dataset_urls_json,"
+                    "public_artifact_ids_json,validation_passed,validation_errors_json,"
+                    "approved_at,revoked_at,content_hash,last_exported_at,export_error,"
+                    "revision,created_at,updated_at) VALUES("
+                    ":project_id,:decision,:status,:stable_slug,:public_title,:public_summary,"
+                    ":aggregate_conclusion,:paper_url,:code_url,:dataset_urls_json,"
+                    ":public_artifact_ids_json,:validation_passed,:validation_errors_json,"
+                    ":approved_at,:revoked_at,:content_hash,:last_exported_at,:export_error,"
+                    ":revision,:created_at,:updated_at) ON CONFLICT(project_id) DO UPDATE SET "
+                    "decision=excluded.decision,status=excluded.status,stable_slug=excluded.stable_slug,"
+                    "public_title=excluded.public_title,public_summary=excluded.public_summary,"
+                    "aggregate_conclusion=excluded.aggregate_conclusion,paper_url=excluded.paper_url,"
+                    "code_url=excluded.code_url,dataset_urls_json=excluded.dataset_urls_json,"
+                    "public_artifact_ids_json=excluded.public_artifact_ids_json,"
+                    "validation_passed=excluded.validation_passed,"
+                    "validation_errors_json=excluded.validation_errors_json,"
+                    "approved_at=excluded.approved_at,revoked_at=excluded.revoked_at,"
+                    "content_hash=excluded.content_hash,last_exported_at=excluded.last_exported_at,"
+                    "export_error=excluded.export_error,revision=excluded.revision,"
+                    "updated_at=excluded.updated_at"
+                ),
+                values,
+            )
+            row = (
+                await self._session.execute(
+                    text("SELECT * FROM reproduction_publications WHERE project_id=:project_id"),
+                    {"project_id": values["project_id"]},
+                )
+            ).mappings().one()
+        except SQLAlchemyError as error:
+            raise PersistenceConflictError(operation="save_reproduction_publication") from error
+        return _publication_row(row)
+
+    async def mark_publication_stale(self, project_id: str, *, updated_at: str) -> None:
+        await self._session.execute(
+            text(
+                "UPDATE reproduction_publications SET status='stale',validation_passed=0,"
+                "validation_errors_json='[]',revision=revision+1,updated_at=:updated_at "
+                "WHERE project_id=:project_id AND status='published'"
+            ),
+            {"project_id": project_id, "updated_at": updated_at},
+        )
+
     async def add_project(self, values: dict[str, object], document: dict[str, object]) -> None:
         try:
             await self._session.execute(text(
-                "INSERT INTO reproduction_projects(id,paper_id,paper_title,name,status,tags_json,revision,created_at,updated_at) "
-                "VALUES(:id,:paper_id,:paper_title,:name,:status,:tags_json,:revision,:created_at,:updated_at)"
+                "INSERT INTO reproduction_projects(id,project_kind,paper_id,paper_title,name,status,tags_json,revision,created_at,updated_at) "
+                "VALUES(:id,:project_kind,:paper_id,:paper_title,:name,:status,:tags_json,:revision,:created_at,:updated_at)"
             ), values)
             await self._session.execute(text(
                 "INSERT INTO reproduction_documents(id,project_id,content,revision,save_status,created_at,updated_at) "
@@ -251,7 +324,8 @@ def _project_row(row: Any) -> dict[str, object]:
     except (TypeError, ValueError):
         tags = []
     return {
-        "id": row["id"], "paperId": row["paper_id"], "paperTitle": row["paper_title"],
+        "id": row["id"], "projectKind": row.get("project_kind") or "reproduction",
+        "paperId": row["paper_id"], "paperTitle": row["paper_title"],
         "name": row["name"], "status": row["status"], "tags": tags if isinstance(tags, list) else [],
         "revision": row["revision"], "createdAt": row["created_at"], "updatedAt": row["updated_at"],
         "runCount": int(row.get("run_count") or 0),
@@ -260,6 +334,7 @@ def _project_row(row: Any) -> dict[str, object]:
         "latestMetrics": _json_object(row.get("latest_metrics_json") or "{}"),
         "hasFailedTask": bool(row.get("has_failed_run")),
         "hasUnsavedContent": (row.get("document_save_status") or "saved") != "saved",
+        "isPublished": bool(row.get("publication_content_hash")),
         "document": {
             "id": row.get("document_id"), "content": row.get("content") or "",
             "revision": row.get("document_revision") or 1,
@@ -281,6 +356,41 @@ def _run_row(row: Any) -> dict[str, object]:
         "dataset": row["dataset"], "preprocessing": row["preprocessing"],
         "repositoryUrl": row["repository_url"], "config": row["config"],
         "issues": row["issues"], "createdAt": row["created_at"], "updatedAt": row["updated_at"],
+    }
+
+
+def _publication_row(row: Any) -> dict[str, object]:
+    def json_list(value: object) -> list[str]:
+        try:
+            decoded = json.loads(str(value or "[]"))
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(decoded, list):
+            return []
+        return [str(item) for item in decoded if isinstance(item, str)]
+
+    return {
+        "projectId": row["project_id"],
+        "decision": row["decision"],
+        "status": row["status"],
+        "stableSlug": row["stable_slug"],
+        "publicTitle": row["public_title"],
+        "publicSummary": row["public_summary"],
+        "aggregateConclusion": row["aggregate_conclusion"],
+        "paperUrl": row["paper_url"],
+        "codeUrl": row["code_url"],
+        "datasetUrls": json_list(row["dataset_urls_json"]),
+        "publicArtifactIds": json_list(row["public_artifact_ids_json"]),
+        "validationPassed": bool(row["validation_passed"]),
+        "validationErrors": json_list(row["validation_errors_json"]),
+        "approvedAt": row["approved_at"],
+        "revokedAt": row["revoked_at"],
+        "contentHash": row["content_hash"],
+        "lastExportedAt": row["last_exported_at"],
+        "exportError": row["export_error"],
+        "revision": int(row["revision"]),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
     }
 
 

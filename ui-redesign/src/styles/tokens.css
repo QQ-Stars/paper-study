@@ -19,7 +19,15 @@
   --editor-tool-hover: hsl(240 6% 18%);
   --editor-tool-active: hsl(5 76% 54% / 0.16);
   --editor-drop-wash: hsl(5 76% 54% / 0.14);
+  --artifact-drop-surface: hsl(240 7% 8%);
+  --artifact-drop-surface-hover: hsl(5 76% 54% / 0.09);
+  --artifact-drop-line: hsl(240 5% 28%);
+  --artifact-file-surface: hsl(240 6% 13%);
   --inspector-surface: hsl(240 6% 10%);
+  --selection-surface: var(--paper-deep);
+  --selection-hover: var(--card-hover);
+  --selection-active: var(--seal-wash);
+  --selection-active-line: var(--seal-line);
   --app-background: var(--paper);
   --overlay: hsl(240 10% 3% / 0.72);
 
@@ -43,8 +51,10 @@
   /* ── 语义色 ── */
   --jade: hsl(157 54% 60%);
   --jade-wash: hsl(157 54% 50% / 0.16);
+  --jade-line: hsl(157 54% 60% / 0.42);
   --amber: hsl(35 92% 64%);
   --amber-wash: hsl(35 92% 54% / 0.16);
+  --amber-line: hsl(35 92% 64% / 0.42);
   --info: hsl(215 82% 72%);
   --info-wash: hsl(215 82% 62% / 0.16);
 
@@ -128,6 +138,10 @@
   --editor-tool-hover: hsl(0 0% 100% / 0.86);
   --editor-tool-active: hsl(9 68% 47% / 0.1);
   --editor-drop-wash: hsl(9 68% 47% / 0.08);
+  --artifact-drop-surface: hsl(40 34% 98%);
+  --artifact-drop-surface-hover: hsl(9 68% 47% / 0.055);
+  --artifact-drop-line: hsl(33 12% 78%);
+  --artifact-file-surface: hsl(36 22% 95%);
   --inspector-surface: hsl(36 22% 95%);
   --app-background: var(--paper);
   --overlay: hsl(24 14% 12% / 0.28);
@@ -145,8 +159,10 @@
   --seal-line: hsl(9 68% 47% / 0.22);
   --jade: hsl(158 38% 34%);
   --jade-wash: hsl(158 38% 34% / 0.08);
+  --jade-line: hsl(158 38% 34% / 0.24);
   --amber: hsl(32 82% 42%);
   --amber-wash: hsl(32 82% 42% / 0.1);
+  --amber-line: hsl(32 82% 42% / 0.24);
   --info: hsl(217 52% 48%);
   --info-wash: hsl(217 52% 48% / 0.08);
   --shadow-sm: 0 1px 2px hsl(30 15% 20% / 0.05);

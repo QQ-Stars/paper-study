@@ -23,7 +23,7 @@ from backend.tests.support.p1_database import create_legacy_database, run_alembi
 
 
 class _Application:
-    schema_revision = "20260826_01"
+    schema_revision = "20260830_01"
 
     def __init__(self, session_factory):
         self.session_factory = session_factory
@@ -41,7 +41,7 @@ class ReproductionApiContractTests(unittest.TestCase):
         self.root = Path(self._temp.name)
         self.database_path = self.root / "database" / "app.db"
         create_legacy_database(self.database_path)
-        run_alembic(self.database_path, "20260826_01")
+        run_alembic(self.database_path, "20260830_01")
         self.session_factory = create_async_session_factory(
             DatabaseSettings(self.database_path)
         )
@@ -54,7 +54,7 @@ class ReproductionApiContractTests(unittest.TestCase):
             create_app(
                 settings=ApiSettings.for_tests(),
                 dependencies=ApiDependencies(self.application, self.session_factory),
-                required_schema_revision="20260826_01",
+                required_schema_revision="20260830_01",
             )
         )
         self.client = self.client_context.__enter__()
@@ -245,6 +245,70 @@ class ReproductionApiContractTests(unittest.TestCase):
         )
         self.assertEqual(422, response.status_code, response.text)
         self.assertEqual("INVALID_REQUEST", response.json()["error"]["code"])
+
+    def test_article_project_can_stand_alone_and_kind_filters_are_isolated(self) -> None:
+        article = self.client.post(
+            "/api/v2/reproductions",
+            json={
+                "projectKind": "article",
+                "paperId": None,
+                "name": "Notes on scaling laws",
+                "tags": ["writing"],
+            },
+        )
+        self.assertEqual(201, article.status_code, article.text)
+        article_project = article.json()
+        self.assertEqual("article", article_project["projectKind"])
+        self.assertIsNone(article_project["paperId"])
+        self.assertIn("文章标题", article_project["document"]["content"])
+        article_dir = self.root / "artifacts" / "projects" / article_project["id"]
+        article_manifest = json.loads((article_dir / "project.json").read_text(encoding="utf-8"))
+        self.assertEqual("article", article_manifest["projectKind"])
+
+        reproduction = self.client.post(
+            "/api/v2/reproductions",
+            json={"paperId": "paper-1", "name": "A reproduction"},
+        )
+        self.assertEqual(201, reproduction.status_code, reproduction.text)
+
+        linked_article = self.client.post(
+            "/api/v2/reproductions",
+            json={
+                "projectKind": "article",
+                "paperId": "paper-1",
+                "name": "Notes linked to the same paper",
+            },
+        )
+        self.assertEqual(201, linked_article.status_code, linked_article.text)
+
+        article_listing = self.client.get("/api/v2/reproductions", params={"kind": "article"})
+        self.assertEqual(200, article_listing.status_code, article_listing.text)
+        self.assertEqual(2, article_listing.json()["total"])
+        self.assertEqual("article", article_listing.json()["items"][0]["projectKind"])
+
+        reproduction_listing = self.client.get("/api/v2/reproductions", params={"kind": "reproduction"})
+        self.assertEqual(200, reproduction_listing.status_code, reproduction_listing.text)
+        self.assertEqual(1, reproduction_listing.json()["total"])
+        self.assertEqual("reproduction", reproduction_listing.json()["items"][0]["projectKind"])
+
+        linked_reproduction = self.client.get(
+            "/api/v2/reproductions",
+            params={"paperId": "paper-1", "kind": "reproduction"},
+        )
+        self.assertEqual(200, linked_reproduction.status_code, linked_reproduction.text)
+        self.assertEqual(1, linked_reproduction.json()["total"])
+        self.assertEqual(reproduction.json()["id"], linked_reproduction.json()["items"][0]["id"])
+
+        for path, payload in (
+            (f"/api/v2/reproductions/{article_project['id']}/runs", {"status": "planned"}),
+            (
+                f"/api/v2/reproductions/{article_project['id']}/results",
+                {"metricName": "accuracy"},
+            ),
+        ):
+            response = self.client.post(path, json=payload)
+            self.assertEqual(422, response.status_code, response.text)
+            self.assertEqual("REPRODUCTION_INVALID", response.json()["error"]["code"])
 
     def test_projects_can_be_sorted_by_name(self) -> None:
         for name in ("Zeta project", "Alpha project"):

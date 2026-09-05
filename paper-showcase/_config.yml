@@ -1,0 +1,78 @@
+title: Paper Reproduction Atlas
+subtitle: Completed research reproductions and public research writing.
+description: A public, static collection of approved paper reproductions and research articles.
+keywords:
+  - paper reproduction
+  - reproducibility
+  - machine learning
+  - research writing
+author: Paper Study
+language: zh-CN
+timezone: Asia/Shanghai
+
+url: https://qq-stars.github.io/paper-study
+root: /paper-study/
+permalink: reproductions/:slug/
+permalink_defaults: {}
+
+theme: fluid
+source_dir: source
+public_dir: public
+code_dir: downloads/code
+i18n_dir: :lang
+skip_render: []
+post_asset_folder: false
+relative_link: false
+future: true
+render_drafts: false
+post_permalink: reproductions/:slug/
+
+highlight:
+  enable: false
+prismjs:
+  enable: false
+
+markdown:
+  preset: default
+  render:
+    html: true
+    xhtmlOut: false
+    langPrefix: language-
+    breaks: false
+    linkify: true
+    typographer: true
+    quotes: '“”‘’'
+  plugins:
+    - '@traptitech/markdown-it-katex'
+    - markdown-it-footnote
+  anchors:
+    level: 2
+    permalink: false
+    case: 0
+    separator: '-'
+  images:
+    lazyload: true
+    prepend_root: true
+    post_asset: false
+
+archive_generator:
+  per_page: 12
+  yearly: true
+  monthly: false
+  daily: false
+category_generator:
+  per_page: 12
+tag_generator:
+  per_page: 12
+index_generator:
+  # Let Hexo generate the standard Fluid index at the site root.
+  path: ''
+  per_page: 12
+
+search:
+  path: local-search.xml
+  field: post
+  content: true
+
+deploy:
+  type: ''

@@ -14,6 +14,11 @@ class ReproductionProjectStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class ReproductionProjectKind(str, Enum):
+    REPRODUCTION = "reproduction"
+    ARTICLE = "article"
+
+
 class ExperimentRunStatus(str, Enum):
     PLANNED = "planned"
     RUNNING = "running"
@@ -29,10 +34,35 @@ class ReproductionResultStatus(str, Enum):
     INCONSISTENT = "inconsistent"
 
 
+class PublicationDecision(str, Enum):
+    """Human decision controlling whether a completed project may be exported."""
+
+    DRAFT = "draft"
+    APPROVED = "approved"
+    REVOKED = "revoked"
+
+
+class PublicationStatus(str, Enum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    STALE = "stale"
+    FAILED = "failed"
+    REVOKED = "revoked"
+
+
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_PROJECT_KINDS = frozenset(kind.value for kind in ReproductionProjectKind)
 _PROJECT_STATUSES = frozenset(status.value for status in ReproductionProjectStatus)
 _RUN_STATUSES = frozenset(status.value for status in ExperimentRunStatus)
 _RESULT_STATUSES = frozenset(status.value for status in ReproductionResultStatus)
+_PUBLICATION_DECISIONS = frozenset(status.value for status in PublicationDecision)
+_PUBLICATION_STATUSES = frozenset(status.value for status in PublicationStatus)
+
+
+def validate_project_kind(value: str) -> str:
+    if value not in _PROJECT_KINDS:
+        raise ValueError("project kind is invalid")
+    return value
 
 
 def validate_project_status(value: str) -> str:
@@ -53,6 +83,18 @@ def validate_result_status(value: str) -> str:
     return value
 
 
+def validate_publication_decision(value: str) -> str:
+    if value not in _PUBLICATION_DECISIONS:
+        raise ValueError("publication decision is invalid")
+    return value
+
+
+def validate_publication_status(value: str) -> str:
+    if value not in _PUBLICATION_STATUSES:
+        raise ValueError("publication status is invalid")
+    return value
+
+
 def validate_sha256(value: str) -> str:
     if _SHA256.fullmatch(value) is None:
         raise ValueError("sha256 must be a lowercase SHA-256 digest")
@@ -63,6 +105,7 @@ def validate_sha256(value: str) -> str:
 class ReproductionProject:
     id: str
     name: str
+    project_kind: ReproductionProjectKind | str
     paper_id: str | None
     paper_title: str
     status: ReproductionProjectStatus | str
@@ -76,6 +119,7 @@ class ReproductionProject:
             raise ValueError("project id and name must be nonblank")
         if not self.paper_title.strip():
             raise ValueError("paper_title must be nonblank")
+        object.__setattr__(self, "project_kind", ReproductionProjectKind(self.project_kind))
         object.__setattr__(self, "status", ReproductionProjectStatus(self.status))
         if self.revision < 1:
             raise ValueError("revision must be positive")
@@ -179,19 +223,48 @@ DEFAULT_DOCUMENT = """# 复现目标
 """
 
 
+ARTICLE_DOCUMENT = """# 文章标题
+
+用一段话写清这篇文章要回答的问题，以及读者可以获得什么。
+
+## 背景与动机
+
+交代问题背景、写作缘由和必要上下文。
+
+## 核心观点
+
+展开主要论点、方法、案例或教程步骤。
+
+## 讨论与延伸
+
+记录限制、不同观点、可继续探索的方向。
+
+## 结语
+
+总结文章结论，并补充参考资料或后续计划。
+"""
+
+
 __all__ = [
+    "ARTICLE_DOCUMENT",
     "DEFAULT_DOCUMENT",
     "ExperimentRun",
     "ExperimentRunStatus",
+    "PublicationDecision",
+    "PublicationStatus",
     "ReproductionResult",
     "ReproductionResultStatus",
     "ReproductionArtifact",
     "ReproductionDocument",
     "ReproductionNote",
     "ReproductionProject",
+    "ReproductionProjectKind",
     "ReproductionProjectStatus",
+    "validate_project_kind",
     "validate_project_status",
     "validate_run_status",
     "validate_result_status",
+    "validate_publication_decision",
+    "validate_publication_status",
     "validate_sha256",
 ]

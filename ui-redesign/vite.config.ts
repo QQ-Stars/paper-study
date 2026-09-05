@@ -22,7 +22,16 @@ export default defineConfig(({ command }) => ({
   /* 生产构建托管在后端 /workspace/ 路由下（frontend_assets 静态适配器），
    * 资源引用需以 /workspace/ 为基址；dev 模式（5180）仍用根路径。 */
   base: command === 'build' ? '/workspace/' : '/',
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'normalize-built-html-newlines',
+      transformIndexHtml: {
+        order: 'post',
+        handler: (html) => html.replace(/\r\n?/g, '\n'),
+      },
+    },
+  ],
   server: {
     port: 5180,
     strictPort: true,

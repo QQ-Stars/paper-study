@@ -20,11 +20,11 @@ def create_router(required_schema_revision: str) -> APIRouter:
 
     if required_schema_revision != "20260807_01":
         v2_router.include_router(create_document_processing_router())
-    if required_schema_revision in {"20260807_03", "20260825_04", "20260826_01"}:
+    if required_schema_revision in {"20260807_03", "20260825_04", "20260826_01", "20260829_01", "20260830_01"}:
         v2_router.include_router(create_document_consumer_router())
         v2_router.include_router(create_document_search_router())
         v2_router.include_router(create_obsidian_router())
-    if required_schema_revision in {"20260825_04", "20260826_01"}:
+    if required_schema_revision in {"20260825_04", "20260826_01", "20260829_01", "20260830_01"}:
         v2_router.include_router(create_reproduction_router())
 
     router.include_router(v2_router)

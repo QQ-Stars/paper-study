@@ -235,6 +235,7 @@ class VaultProjectionModel(Base):
 class ReproductionProjectModel(Base):
     __tablename__ = "reproduction_projects"
     id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_kind: Mapped[str] = mapped_column(Text)
     paper_id: Mapped[str | None] = mapped_column(Text)
     paper_title: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
@@ -318,5 +319,32 @@ class ReproductionResultModel(Base):
     source: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)
+
+
+class ReproductionPublicationModel(Base):
+    """Additive publication projection metadata for the static showcase."""
+
+    __tablename__ = "reproduction_publications"
+    project_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    decision: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    stable_slug: Mapped[str | None] = mapped_column(Text, unique=True)
+    public_title: Mapped[str | None] = mapped_column(Text)
+    public_summary: Mapped[str | None] = mapped_column(Text)
+    aggregate_conclusion: Mapped[str | None] = mapped_column(Text)
+    paper_url: Mapped[str | None] = mapped_column(Text)
+    code_url: Mapped[str | None] = mapped_column(Text)
+    dataset_urls_json: Mapped[str] = mapped_column(Text)
+    public_artifact_ids_json: Mapped[str] = mapped_column(Text)
+    validation_passed: Mapped[int] = mapped_column(Integer)
+    validation_errors_json: Mapped[str] = mapped_column(Text)
+    approved_at: Mapped[str | None] = mapped_column(Text)
+    revoked_at: Mapped[str | None] = mapped_column(Text)
+    content_hash: Mapped[str | None] = mapped_column(Text)
+    last_exported_at: Mapped[str | None] = mapped_column(Text)
+    export_error: Mapped[str | None] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text)

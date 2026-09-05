@@ -11,7 +11,8 @@ class _Body(BaseModel):
 
 
 class CreateProjectBody(_Body):
-    paperId: StrictStr = Field(min_length=1, max_length=200)
+    projectKind: Literal["reproduction", "article"] = "reproduction"
+    paperId: StrictStr | None = Field(default=None, min_length=1, max_length=200)
     name: StrictStr = Field(min_length=1, max_length=200)
     tags: list[StrictStr] = Field(default_factory=list, max_length=30)
 
@@ -117,6 +118,23 @@ class RevisionBody(_Body):
     expectedRevision: Annotated[int, Field(strict=True, ge=1)]
 
 
+class PublicationBody(_Body):
+    expectedRevision: Annotated[int, Field(strict=True, ge=1)] | None = None
+    decision: Literal["draft", "approved", "revoked"] | None = None
+    stableSlug: StrictStr | None = Field(default=None, max_length=80)
+    publicTitle: StrictStr | None = Field(default=None, max_length=300)
+    publicSummary: StrictStr | None = Field(default=None, max_length=20_000)
+    aggregateConclusion: Literal["reproduced", "partial", "inconsistent", "not_reproduced"] | None = None
+    paperUrl: StrictStr | None = Field(default=None, max_length=2_000)
+    codeUrl: StrictStr | None = Field(default=None, max_length=2_000)
+    datasetUrls: list[StrictStr] | None = Field(default=None, max_length=30)
+    publicArtifactIds: list[StrictStr] | None = Field(default=None, max_length=200)
+
+
+class PublicationActionBody(_Body):
+    expectedRevision: Annotated[int, Field(strict=True, ge=1)] | None = None
+
+
 def create_reproduction_router() -> APIRouter:
     router = APIRouter()
 
@@ -126,18 +144,30 @@ def create_reproduction_router() -> APIRouter:
         q: Annotated[str | None, Query(max_length=200)] = None,
         status_filter: Annotated[str | None, Query(alias="status", max_length=30)] = None,
         tag: Annotated[str | None, Query(max_length=50)] = None,
+        paper_id: Annotated[str | None, Query(alias="paperId", max_length=200)] = None,
+        kind: Literal["reproduction", "article"] | None = None,
         sort: Literal["updated", "created", "name"] = "updated",
         limit: Annotated[int, Query(ge=1, le=100)] = 25,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict[str, object]:
         return await _workspace(request).list_projects(
-            query=q, status=status_filter, tag=tag, sort=sort, limit=limit, offset=offset
+            query=q,
+            status=status_filter,
+            tag=tag,
+            paper_id=paper_id,
+            project_kind=kind,
+            sort=sort,
+            limit=limit,
+            offset=offset,
         )
 
     @router.post("/reproductions", status_code=status.HTTP_201_CREATED)
     async def create_reproduction(request: Request, body: CreateProjectBody) -> dict[str, object]:
         return await _workspace(request).create_project(
-            paper_id=body.paperId, name=body.name, tags=list(body.tags)
+            paper_id=body.paperId,
+            name=body.name,
+            tags=list(body.tags),
+            project_kind=body.projectKind,
         )
 
     @router.get("/reproductions/{project_id}")
@@ -176,6 +206,53 @@ def create_reproduction_router() -> APIRouter:
     async def save_reproduction_document(request: Request, body: SaveDocumentBody, project_id: str = Path(min_length=1, max_length=100)) -> dict[str, object]:
         return await _workspace(request).save_document(
             project_id, content=body.content, expected_revision=body.expectedRevision
+        )
+
+    @router.get("/reproductions/{project_id}/publication")
+    async def get_reproduction_publication(
+        request: Request,
+        project_id: str = Path(min_length=1, max_length=100),
+    ) -> dict[str, object]:
+        return await _workspace(request).get_publication(project_id)
+
+    @router.put("/reproductions/{project_id}/publication")
+    async def save_reproduction_publication(
+        request: Request,
+        body: PublicationBody,
+        project_id: str = Path(min_length=1, max_length=100),
+    ) -> dict[str, object]:
+        return await _workspace(request).save_publication(
+            project_id,
+            body.model_dump(exclude_unset=True),
+        )
+
+    @router.post("/reproductions/{project_id}/publication/validate")
+    async def validate_reproduction_publication(
+        request: Request,
+        project_id: str = Path(min_length=1, max_length=100),
+    ) -> dict[str, object]:
+        return await _workspace(request).validate_publication(project_id)
+
+    @router.post("/reproductions/{project_id}/publication/publish")
+    async def publish_reproduction_publication(
+        request: Request,
+        body: PublicationActionBody,
+        project_id: str = Path(min_length=1, max_length=100),
+    ) -> dict[str, object]:
+        return await _workspace(request).publish_publication(
+            project_id,
+            expected_revision=body.expectedRevision,
+        )
+
+    @router.post("/reproductions/{project_id}/publication/revoke")
+    async def revoke_reproduction_publication(
+        request: Request,
+        body: PublicationActionBody,
+        project_id: str = Path(min_length=1, max_length=100),
+    ) -> dict[str, object]:
+        return await _workspace(request).revoke_publication(
+            project_id,
+            expected_revision=body.expectedRevision,
         )
 
     @router.post("/reproductions/{project_id}/runs", status_code=status.HTTP_201_CREATED)

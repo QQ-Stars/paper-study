@@ -291,6 +291,13 @@ body {
   padding-inline: clamp(0rem, 1vw, 0.75rem);
 }
 
+/* 长文页面在 doc-viewer 的内部滚动容器中展示；不能沿用整页 sticky 偏移，
+ * 否则分页栏会停在正文中间并遮住标题/作者。 */
+.reader__doc .long-document__bar {
+  position: static;
+  top: auto;
+}
+
 .reader__next {
   margin-top: 1.5rem;
   border-color: var(--line-strong);
@@ -355,7 +362,7 @@ body {
 
 .reproduction-page--list .reproduction__toolbar {
   display: grid;
-  grid-template-columns: minmax(15rem, 1fr) repeat(3, minmax(9rem, auto)) auto auto;
+  grid-template-columns: minmax(11rem, 1fr) repeat(4, minmax(8rem, auto)) auto auto;
   align-items: center;
   gap: 0.6rem;
   padding-bottom: 0.95rem;
@@ -436,6 +443,11 @@ body {
 
 .reproduction__project-progress::before {
   background: var(--paper-sunken);
+}
+
+/* 进度填充不能伸入右侧状态标签的保留区，尤其是 100% 的已归档项目。 */
+.reproduction-page--list .reproduction__project-progress i {
+  max-width: calc(100% - 3.25rem);
 }
 
 /* ── Reproduction detail ───────────────────────── */

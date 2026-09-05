@@ -2,7 +2,7 @@
 
 Paper-Study uses one local SQLite database. The Python runtime creates a new
 database when a clone has no `data/app.db`, then applies the Alembic migrations
-through revision `20260826_01` before starting FastAPI.
+through revision `20260830_01` before starting FastAPI.
 
 ## Files
 
@@ -30,10 +30,13 @@ Alembic finishes the migration. The main groups are:
 - source-consumer, full-text-search, embedding, and Obsidian export tables.
 - `reproduction_projects`, `reproduction_documents`, `experiment_runs`,
   `reproduction_artifacts`, `reproduction_notes`, and `reproduction_results`
-  for the paper reproduction
-  workspace. These tables are separate from ordinary paper notes, generated
-  artifacts, and processing jobs. The paper relationship is nullable and uses
-  `SET NULL`, retaining the project title snapshot when a paper is removed.
+  for the research workspace;
+- `reproduction_publications` for public-showcase decisions, validation state,
+  stable slugs, and export evidence. `reproduction_projects.project_kind`
+  distinguishes paper reproductions from standalone articles. These tables are
+  separate from ordinary paper notes, generated artifacts, and processing jobs.
+  The paper relationship is nullable and uses `SET NULL`, retaining the project
+  title snapshot when a paper is removed.
 
 Each reproduction project also owns an isolated maintenance directory keyed by
 its stable opaque project ID:
@@ -70,10 +73,15 @@ commands.
 The database layer enables WAL mode, foreign keys, and a busy timeout for local
 concurrent API, worker, and scheduler access.
 
+The current head adds publication metadata in `20260829_01` and the
+`project_kind` discriminator in `20260830_01`. Both migrations are additive;
+existing reproduction projects remain `reproduction` projects and receive a
+draft publication row on first access to the publication endpoint.
+
 ## 13. P3 source consumers、search 与回滚门禁
 
 The P3 migration contract remains additive: `20260807_02 → 20260807_03`, then
-the reproduction workspace migration `20260825_04 → 20260826_01`. Before a
+the reproduction workspace migrations `20260825_04 → 20260826_01 → 20260829_01 → 20260830_01`. Before a
 production upgrade, capture the `pre-p3-source-consumers-search` backup and
 verify the following stable snapshots:
 

@@ -6,6 +6,7 @@ export type MarkdownCommand =
   | 'link'
   | 'quote'
   | 'code'
+  | 'mermaid'
   | 'unordered-list'
   | 'ordered-list'
   | 'table'
@@ -189,6 +190,11 @@ function applyCode(value: string, selection: MarkdownSelection): MarkdownEditRes
   return wrapInline(value, safe, '`', '代码');
 }
 
+function applyMermaid(value: string, selection: MarkdownSelection): MarkdownEditResult {
+  const diagram = '```mermaid\nflowchart TD\n  A[实验设计] --> B[运行与记录]\n  B --> C[结果对照]\n  C --> D[复现结论]\n```';
+  return withBlockSpacing(value, selection, diagram);
+}
+
 function applyTable(value: string, selection: MarkdownSelection): MarkdownEditResult {
   const table = '| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n| 内容 | 内容 | 内容 |';
   const result = withBlockSpacing(value, selection, table);
@@ -216,6 +222,8 @@ export function applyMarkdownCommand(
       return applyLinePrefix(value, selection, '> ', /^(\s*)>\s+/, '引用文字');
     case 'code':
       return applyCode(value, selection);
+    case 'mermaid':
+      return applyMermaid(value, selection);
     case 'unordered-list':
       return applyLinePrefix(value, selection, '- ', /^(\s*)[-*+]\s+/, '列表项');
     case 'ordered-list':

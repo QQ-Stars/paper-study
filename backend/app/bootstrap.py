@@ -78,8 +78,8 @@ from backend.app.workers.obsidian import ObsidianJobHandler, ObsidianJobService
 from backend.app.workers.runtime import ObsidianStartupReconciler
 
 
-_REVISION = re.compile(r"(?:20260807_0[123]|20260825_04|20260826_01)\Z")
-_P3_REVISIONS = frozenset({"20260807_03", "20260825_04", "20260826_01"})
+_REVISION = re.compile(r"(?:20260807_0[123]|20260825_04|20260826_01|20260829_01|20260830_01)\Z")
+_P3_REVISIONS = frozenset({"20260807_03", "20260825_04", "20260826_01", "20260829_01", "20260830_01"})
 _PROCESSING_CURSOR_SECRET_VARIABLE = "PROCESSING_CURSOR_SECRET"
 
 

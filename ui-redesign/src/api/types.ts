@@ -292,6 +292,8 @@ export type ReproductionStatus =
   | 'blocked'
   | 'archived';
 
+export type ReproductionProjectKind = 'reproduction' | 'article';
+
 export type ReproductionDocumentStatus = 'unsaved' | 'saving' | 'saved' | 'failed';
 
 export interface ReproductionDocument {
@@ -308,6 +310,7 @@ export interface ReproductionDocument {
 
 export interface ReproductionProject {
   id: string;
+  projectKind: ReproductionProjectKind;
   paperId: string | null;
   paperTitle: string;
   name: string;
@@ -327,6 +330,7 @@ export interface ReproductionProject {
   latestMetrics?: Record<string, unknown>;
   hasFailedTask?: boolean;
   hasUnsavedContent?: boolean;
+  isPublished: boolean;
 }
 
 export interface ReproductionListResponse {
@@ -401,4 +405,39 @@ export interface ReproductionResult {
   notes?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type PublicationDecision = 'draft' | 'approved' | 'revoked';
+export type PublicationStatus = 'draft' | 'published' | 'stale' | 'failed' | 'revoked';
+export type ReproductionConclusion = 'reproduced' | 'partial' | 'inconsistent' | 'not_reproduced';
+
+export interface ReproductionPublication {
+  projectId: string;
+  decision: PublicationDecision;
+  status: PublicationStatus;
+  stableSlug: string | null;
+  publicTitle: string | null;
+  publicSummary: string | null;
+  aggregateConclusion: ReproductionConclusion | null;
+  paperUrl: string | null;
+  codeUrl: string | null;
+  datasetUrls: string[];
+  publicArtifactIds: string[];
+  validationPassed: boolean;
+  validationErrors: string[];
+  approvedAt: string | null;
+  revokedAt: string | null;
+  contentHash: string | null;
+  lastExportedAt: string | null;
+  exportError: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicationValidationResponse {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  publication: ReproductionPublication;
 }

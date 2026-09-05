@@ -10,18 +10,31 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import tempfile
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from backend.app.domain import (
+    ARTICLE_DOCUMENT,
     DEFAULT_DOCUMENT,
+    PublicationNotFoundError,
+    PublicationValidationError,
     ReproductionArchivedError,
     ReproductionConflictError,
     ReproductionNotFoundError,
     ReproductionValidationError,
+    ShowcaseExportError,
+    validate_publication_decision,
+    validate_project_kind,
     validate_project_status,
     validate_result_status,
     validate_run_status,
     validate_sha256,
+)
+from backend.app.application.showcase_export import (
+    PUBLICATION_CONCLUSIONS,
+    ShowcaseExporter,
+    normalize_slug,
+    validate_publication_snapshot,
 )
 
 
@@ -37,6 +50,7 @@ class ReproductionWorkspace:
         *,
         clock: Callable[[], datetime] | None = None,
         artifact_root: Path | None = None,
+        showcase_root: Path | None = None,
     ) -> None:
         self._work_factory = work_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
@@ -44,6 +58,19 @@ class ReproductionWorkspace:
             artifact_root.expanduser().resolve()
             if artifact_root is not None
             else Path.cwd().joinpath("data", "reproduction-artifacts").resolve()
+        )
+        self._showcase_root = (
+            showcase_root.expanduser().resolve()
+            if showcase_root is not None
+            else Path(__file__).resolve().parents[3].joinpath("paper-showcase").resolve()
+        )
+        self._showcase_exporter = ShowcaseExporter(
+            self._showcase_root,
+            artifact_resolver=lambda storage_key, project_id: self.artifact_path(
+                storage_key,
+                project_id=project_id,
+            ),
+            clock=self._clock,
         )
 
     def artifact_path(self, storage_key: str, *, project_id: str | None = None) -> Path:
@@ -67,16 +94,38 @@ class ReproductionWorkspace:
                 raise ReproductionValidationError() from error
         return target
 
-    async def list_projects(self, *, query: str | None, status: str | None, tag: str | None, sort: str = "updated", limit: int, offset: int) -> dict[str, object]:
+    async def list_projects(
+        self,
+        *,
+        query: str | None,
+        status: str | None,
+        tag: str | None,
+        paper_id: str | None = None,
+        project_kind: str | None = None,
+        sort: str = "updated",
+        limit: int,
+        offset: int,
+    ) -> dict[str, object]:
         if status is not None:
             try:
                 validate_project_status(status)
             except ValueError as error:
                 raise ReproductionValidationError() from error
+        if project_kind is not None:
+            try:
+                validate_project_kind(project_kind)
+            except ValueError as error:
+                raise ReproductionValidationError() from error
+        if paper_id is not None:
+            paper_id = paper_id.strip()
+            if not paper_id or len(paper_id) > 200:
+                raise ReproductionValidationError()
         async with self._work_factory() as work:
             items, total = await work.reproductions.list_projects(
                 query=query.strip() if isinstance(query, str) and query.strip() else None,
                 status=status, tag=tag.strip() if isinstance(tag, str) and tag.strip() else None,
+                paper_id=paper_id,
+                project_kind=project_kind,
                 sort=sort, limit=limit, offset=offset,
             )
         return {"items": items, "total": total, "limit": limit, "offset": offset}
@@ -114,28 +163,46 @@ class ReproductionWorkspace:
                 type(error).__name__,
             )
 
-    async def create_project(self, *, paper_id: str, name: str, tags: list[str]) -> dict[str, object]:
+    async def create_project(
+        self,
+        *,
+        paper_id: str | None,
+        name: str,
+        tags: list[str],
+        project_kind: str = "reproduction",
+    ) -> dict[str, object]:
         name = name.strip()
         if not name or len(name) > 200:
+            raise ReproductionValidationError()
+        try:
+            validate_project_kind(project_kind)
+        except ValueError as error:
+            raise ReproductionValidationError() from error
+        paper_id = paper_id.strip() if isinstance(paper_id, str) and paper_id.strip() else None
+        if project_kind == "reproduction" and paper_id is None:
             raise ReproductionValidationError()
         cleaned_tags = _tags(tags)
         now = _timestamp(self._clock())
         project_id = f"repro_{uuid4().hex}"
         document_id = f"rdoc_{uuid4().hex}"
         async with self._work_factory() as work:
-            paper = await work.papers.get_legacy(paper_id)
-            if paper is None:
+            paper = await work.papers.get_legacy(paper_id) if paper_id is not None else None
+            if paper_id is not None and paper is None:
                 from backend.app.domain import MissingPaperError
                 raise MissingPaperError(paper_id=paper_id)
             await work.reproductions.add_project(
                 {
-                    "id": project_id, "paper_id": paper_id,
-                    "paper_title": str(paper.get("title") or "Untitled paper"),
+                    "id": project_id,
+                    "project_kind": project_kind,
+                    "paper_id": paper_id,
+                    "paper_title": str(paper.get("title") or "Untitled paper") if paper is not None else "独立文章",
                     "name": name, "status": "planned", "tags_json": json.dumps(cleaned_tags, ensure_ascii=False),
                     "revision": 1, "created_at": now, "updated_at": now,
                 },
                 {
-                    "id": document_id, "project_id": project_id, "content": DEFAULT_DOCUMENT,
+                    "id": document_id,
+                    "project_id": project_id,
+                    "content": DEFAULT_DOCUMENT if project_kind == "reproduction" else ARTICLE_DOCUMENT,
                     "revision": 1, "save_status": "saved", "created_at": now, "updated_at": now,
                 },
             )
@@ -221,6 +288,7 @@ class ReproductionWorkspace:
                 await work.reproductions.add_project(
                     {
                         "id": copy_id,
+                        "project_kind": source.get("projectKind") or "reproduction",
                         "paper_id": source.get("paperId"),
                         "paper_title": _required_text(source.get("paperTitle"), 10_000),
                         "name": copy_name,
@@ -266,6 +334,26 @@ class ReproductionWorkspace:
             values["status"] = status
         if tags is not None:
             values["tags_json"] = json.dumps(_tags(tags), ensure_ascii=False)
+        if status is not None and status != "completed":
+            # Check the project version before any filesystem side effect. A
+            # stale client must not revoke a still-live public snapshot.
+            should_revoke = False
+            async with self._work_factory() as work:
+                current = await work.reproductions.get_project(project_id)
+                if current is None:
+                    raise ReproductionNotFoundError(project_id=project_id)
+                if current["status"] != "archived":
+                    if int(current["revision"]) != expected_revision:
+                        raise ReproductionConflictError(
+                            project_id=project_id,
+                            expected_revision=expected_revision,
+                        )
+                    should_revoke = True
+            if should_revoke:
+                await self._revoke_if_public(
+                    project_id,
+                    expected_revision=expected_revision,
+                )
         async with self._work_factory() as work:
             current = await work.reproductions.get_project(project_id)
             if current is None:
@@ -279,10 +367,32 @@ class ReproductionWorkspace:
             else:
                 if not await work.reproductions.update_project(project_id, values=values, expected_revision=expected_revision):
                     raise ReproductionConflictError(project_id=project_id, expected_revision=expected_revision)
+                await work.reproductions.mark_publication_stale(
+                    project_id,
+                    updated_at=str(values["updated_at"]),
+                )
                 await work.commit()
         return await self._sync_project_workspace(project_id)
 
     async def archive_project(self, project_id: str, *, expected_revision: int) -> dict[str, object]:
+        already_archived = False
+        async with self._work_factory() as work:
+            current = await work.reproductions.get_project(project_id)
+            if current is None:
+                raise ReproductionNotFoundError(project_id=project_id)
+            if current["status"] == "archived":
+                already_archived = True
+            elif int(current["revision"]) != expected_revision:
+                raise ReproductionConflictError(
+                    project_id=project_id,
+                    expected_revision=expected_revision,
+                )
+        if already_archived:
+            return await self._sync_project_workspace(project_id)
+        await self._revoke_if_public(
+            project_id,
+            expected_revision=expected_revision,
+        )
         async with self._work_factory() as work:
             current = await work.reproductions.get_project(project_id)
             if current is None:
@@ -332,6 +442,7 @@ class ReproductionWorkspace:
                 raise ReproductionArchivedError(project_id=project_id)
             if not await work.reproductions.save_document(project_id, content=content, expected_revision=expected_revision, updated_at=now):
                 raise ReproductionConflictError(project_id=project_id, expected_revision=expected_revision)
+            await work.reproductions.mark_publication_stale(project_id, updated_at=now)
             await work.commit()
         result = await self._sync_project_workspace(project_id)
         document = result.get("document")
@@ -340,6 +451,260 @@ class ReproductionWorkspace:
         saved_document = dict(document)
         saved_document["projectRevision"] = result.get("revision")
         return saved_document
+
+    async def get_publication(self, project_id: str) -> dict[str, object]:
+        _, _, publication = await self._load_publication_snapshot(project_id, create=True)
+        if publication is None:
+            raise PublicationNotFoundError(project_id=project_id)
+        return publication
+
+    async def save_publication(
+        self,
+        project_id: str,
+        body: Mapping[str, object],
+    ) -> dict[str, object]:
+        project, paper, current = await self._load_publication_snapshot(project_id, create=True)
+        if current is None:
+            raise PublicationNotFoundError(project_id=project_id)
+        expected_revision = body.get("expectedRevision")
+        if expected_revision is not None:
+            if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+                raise ReproductionValidationError()
+            if expected_revision != current["revision"]:
+                raise ReproductionConflictError(
+                    project_id=project_id,
+                    expected_revision=expected_revision,
+                )
+        updated = _publication_patch(
+            current,
+            body,
+            project=project,
+            paper=paper,
+            now=_timestamp(self._clock()),
+        )
+        if _has_managed_export(current) and updated.get("decision") != "approved":
+            try:
+                self._showcase_exporter.revoke(project_id=project_id)
+            except (OSError, UnicodeError, ValueError) as error:
+                raise ShowcaseExportError(project_id=project_id) from error
+            now = _timestamp(self._clock())
+            updated.update(
+                {
+                    "status": "revoked",
+                    "revokedAt": now,
+                    "contentHash": None,
+                    "validationPassed": False,
+                    "validationErrors": [],
+                    "exportError": None,
+                    "updatedAt": now,
+                }
+            )
+        return await self._persist_publication(updated)
+
+    async def validate_publication(self, project_id: str) -> dict[str, object]:
+        project, paper, publication = await self._load_publication_snapshot(project_id, create=True)
+        if publication is None:
+            raise PublicationNotFoundError(project_id=project_id)
+        validation = validate_publication_snapshot(
+            project,
+            paper,
+            publication,
+            artifact_resolver=lambda storage_key, scoped_project: self.artifact_path(
+                storage_key,
+                project_id=scoped_project,
+            ),
+        )
+        now = _timestamp(self._clock())
+        has_managed_export = _has_managed_export(publication)
+        updated = {
+            **publication,
+            "validationPassed": validation.ok,
+            "validationErrors": list(validation.errors),
+            "status": (
+                "published"
+                if publication["status"] == "published" and validation.ok
+                else "stale"
+                if has_managed_export
+                else "draft"
+                if validation.ok
+                else "failed"
+            ),
+            "exportError": None if validation.ok else "PUBLICATION_VALIDATION_FAILED",
+            "revision": int(publication["revision"]) + 1,
+            "updatedAt": now,
+        }
+        saved = await self._persist_publication(updated)
+        return {**validation.as_dict(), "publication": saved}
+
+    async def publish_publication(
+        self,
+        project_id: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, object]:
+        project, paper, publication = await self._load_publication_snapshot(project_id, create=True)
+        if publication is None:
+            raise PublicationNotFoundError(project_id=project_id)
+        _require_publication_revision(project_id, publication, expected_revision)
+        validation = validate_publication_snapshot(
+            project,
+            paper,
+            publication,
+            artifact_resolver=lambda storage_key, scoped_project: self.artifact_path(
+                storage_key,
+                project_id=scoped_project,
+            ),
+        )
+        if not validation.ok:
+            await self._persist_publication(
+                {
+                    **publication,
+                    "status": "stale" if _has_managed_export(publication) else "failed",
+                    "validationPassed": False,
+                    "validationErrors": list(validation.errors),
+                    "exportError": "PUBLICATION_VALIDATION_FAILED",
+                    "revision": int(publication["revision"]) + 1,
+                    "updatedAt": _timestamp(self._clock()),
+                }
+            )
+            raise PublicationValidationError(project_id=project_id)
+        try:
+            exported = self._showcase_exporter.export(
+                project=project,
+                paper=paper,
+                publication=publication,
+            )
+        except PublicationValidationError:
+            raise
+        except (OSError, UnicodeError, ValueError) as error:
+            await self._persist_publication(
+                {
+                    **publication,
+                    "status": "stale" if _has_managed_export(publication) else "failed",
+                    "validationPassed": False,
+                    "validationErrors": [],
+                    "exportError": type(error).__name__,
+                    "revision": int(publication["revision"]) + 1,
+                    "updatedAt": _timestamp(self._clock()),
+                }
+            )
+            raise ShowcaseExportError(project_id=project_id) from error
+        saved = await self._persist_publication(
+            {
+                **publication,
+                "decision": "approved",
+                "status": "published",
+                "validationPassed": True,
+                "validationErrors": [],
+                "approvedAt": publication.get("approvedAt") or exported.exported_at,
+                "revokedAt": None,
+                "contentHash": exported.content_hash,
+                "lastExportedAt": exported.exported_at,
+                "exportError": None,
+                "revision": int(publication["revision"]) + 1,
+                "updatedAt": exported.exported_at,
+            }
+        )
+        return {
+            "publication": saved,
+            "url": exported.url,
+            "files": list(exported.files),
+        }
+
+    async def revoke_publication(
+        self,
+        project_id: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, object]:
+        _, _, publication = await self._load_publication_snapshot(project_id, create=False)
+        if publication is None:
+            raise PublicationNotFoundError(project_id=project_id)
+        _require_publication_revision(project_id, publication, expected_revision)
+        try:
+            removed = self._showcase_exporter.revoke(project_id=project_id)
+        except (OSError, UnicodeError, ValueError) as error:
+            raise ShowcaseExportError(project_id=project_id) from error
+        now = _timestamp(self._clock())
+        saved = await self._persist_publication(
+            {
+                **publication,
+                "decision": "revoked",
+                "status": "revoked",
+                "validationPassed": False,
+                "validationErrors": [],
+                "revokedAt": now,
+                "contentHash": None,
+                "exportError": None,
+                "revision": int(publication["revision"]) + 1,
+                "updatedAt": now,
+            }
+        )
+        return {"publication": saved, "removedFiles": list(removed)}
+
+    async def _revoke_if_public(
+        self,
+        project_id: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> None:
+        """Withdraw static output before a project becomes immutable/archived."""
+        _validate_project_id(project_id)
+        async with self._work_factory() as work:
+            current = await work.reproductions.get_project(project_id)
+            if current is None:
+                raise ReproductionNotFoundError(project_id=project_id)
+            if expected_revision is not None and int(current["revision"]) != expected_revision:
+                raise ReproductionConflictError(
+                    project_id=project_id,
+                    expected_revision=expected_revision,
+                )
+            publication = await work.reproductions.get_publication(project_id)
+        if publication is None or not _has_managed_export(publication):
+            return
+        await self.revoke_publication(project_id)
+
+    async def _load_publication_snapshot(
+        self,
+        project_id: str,
+        *,
+        create: bool,
+    ) -> tuple[dict[str, object], dict[str, object] | None, dict[str, object] | None]:
+        _validate_project_id(project_id)
+        async with self._work_factory() as work:
+            project = await work.reproductions.get_project(project_id)
+            if project is None:
+                raise ReproductionNotFoundError(project_id=project_id)
+            project["runs"] = await work.reproductions.list_runs(project_id)
+            project["artifacts"] = await work.reproductions.list_artifacts(project_id)
+            project["notes"] = await work.reproductions.list_notes(project_id)
+            project["results"] = await work.reproductions.list_results(project_id)
+            paper_id = project.get("paperId")
+            paper = await work.papers.get_legacy(str(paper_id)) if paper_id else None
+            publication = await work.reproductions.get_publication(project_id)
+            if publication is None and create:
+                values = _new_publication_values(
+                    project,
+                    paper,
+                    now=_timestamp(self._clock()),
+                )
+                publication = await work.reproductions.save_publication(values)
+            await work.commit()
+        return project, paper, publication
+
+    async def _persist_publication(
+        self,
+        publication: Mapping[str, object],
+    ) -> dict[str, object]:
+        project_id = _required_text(publication.get("projectId"), 100)
+        async with self._work_factory() as work:
+            if await work.reproductions.get_project(project_id) is None:
+                raise ReproductionNotFoundError(project_id=project_id)
+            saved = await work.reproductions.save_publication(
+                _publication_storage_values(publication)
+            )
+            await work.commit()
+        return saved
 
     async def add_run(self, project_id: str, body: Mapping[str, object]) -> dict[str, object]:
         status = str(body.get("status") or "planned")
@@ -351,6 +716,7 @@ class ReproductionWorkspace:
             current = await work.reproductions.get_project(project_id)
             if current is None:
                 raise ReproductionNotFoundError(project_id=project_id)
+            _ensure_experiment_project(current)
             if current["status"] == "archived":
                 raise ReproductionArchivedError(project_id=project_id)
             now = _timestamp(self._clock())
@@ -369,6 +735,7 @@ class ReproductionWorkspace:
                 "config": _optional_text(body.get("config")), "issues": _optional_text(body.get("issues")),
                 "created_at": now, "updated_at": now,
             })
+            await work.reproductions.mark_publication_stale(project_id, updated_at=now)
             await work.commit()
         project = await self._sync_project_workspace(project_id)
         return next(row for row in project["runs"] if row["id"] == run_id)
@@ -379,10 +746,15 @@ class ReproductionWorkspace:
             current = await work.reproductions.get_project(project_id)
             if current is None:
                 raise ReproductionNotFoundError(project_id=project_id)
+            _ensure_experiment_project(current)
             if current["status"] == "archived":
                 raise ReproductionArchivedError(project_id=project_id)
             if not values or not await work.reproductions.update_run(project_id, run_id, values):
                 raise ReproductionNotFoundError(project_id=project_id)
+            await work.reproductions.mark_publication_stale(
+                project_id,
+                updated_at=str(values["updated_at"]),
+            )
             await work.commit()
         project = await self._sync_project_workspace(project_id)
         return next(row for row in project["runs"] if row["id"] == run_id)
@@ -392,10 +764,15 @@ class ReproductionWorkspace:
             current = await work.reproductions.get_project(project_id)
             if current is None:
                 raise ReproductionNotFoundError(project_id=project_id)
+            _ensure_experiment_project(current)
             if current["status"] == "archived":
                 raise ReproductionArchivedError(project_id=project_id)
             if not await work.reproductions.delete_run(project_id, run_id):
                 raise ReproductionNotFoundError(project_id=project_id)
+            await work.reproductions.mark_publication_stale(
+                project_id,
+                updated_at=_timestamp(self._clock()),
+            )
             await work.commit()
         await self._sync_project_workspace(project_id)
 
@@ -405,9 +782,14 @@ class ReproductionWorkspace:
             current = await work.reproductions.get_project(project_id)
             if current is None:
                 raise ReproductionNotFoundError(project_id=project_id)
+            _ensure_experiment_project(current)
             if current["status"] == "archived":
                 raise ReproductionArchivedError(project_id=project_id)
             await work.reproductions.add_result(values)
+            await work.reproductions.mark_publication_stale(
+                project_id,
+                updated_at=str(values["updated_at"]),
+            )
             await work.commit()
         await self._sync_project_workspace(project_id)
         return _result_public(values)
@@ -419,10 +801,15 @@ class ReproductionWorkspace:
             current = await work.reproductions.get_project(project_id)
             if current is None:
                 raise ReproductionNotFoundError(project_id=project_id)
+            _ensure_experiment_project(current)
             if current["status"] == "archived":
                 raise ReproductionArchivedError(project_id=project_id)
             if not values or not await work.reproductions.update_result(project_id, result_id, values):
                 raise ReproductionNotFoundError(project_id=project_id)
+            await work.reproductions.mark_publication_stale(
+                project_id,
+                updated_at=str(values["updated_at"]),
+            )
             await work.commit()
         project = await self._sync_project_workspace(project_id)
         return next(item for item in project["results"] if item["id"] == result_id)
@@ -432,10 +819,15 @@ class ReproductionWorkspace:
             current = await work.reproductions.get_project(project_id)
             if current is None:
                 raise ReproductionNotFoundError(project_id=project_id)
+            _ensure_experiment_project(current)
             if current["status"] == "archived":
                 raise ReproductionArchivedError(project_id=project_id)
             if not await work.reproductions.delete_result(project_id, result_id):
                 raise ReproductionNotFoundError(project_id=project_id)
+            await work.reproductions.mark_publication_stale(
+                project_id,
+                updated_at=_timestamp(self._clock()),
+            )
             await work.commit()
         await self._sync_project_workspace(project_id)
 
@@ -467,6 +859,7 @@ class ReproductionWorkspace:
             now = _timestamp(self._clock())
             values = {"id": f"artifact_{uuid4().hex}", "project_id": project_id, "run_id": run_id, "kind": kind, "filename": filename, "storage_key": storage_key, "mime_type": mime_type, "size_bytes": size_bytes, "sha256": sha256, "created_at": now}
             await work.reproductions.add_artifact(values)
+            await work.reproductions.mark_publication_stale(project_id, updated_at=now)
             await work.commit()
         await self._sync_project_workspace(project_id)
         return {"id": values["id"], "projectId": project_id, "runId": run_id, "kind": kind, "filename": filename, "storageKey": storage_key, "mimeType": mime_type, "sizeBytes": size_bytes, "sha256": sha256, "createdAt": now}
@@ -551,6 +944,7 @@ class ReproductionWorkspace:
                 if current["status"] == "archived":
                     raise ReproductionArchivedError(project_id=project_id)
                 await work.reproductions.add_artifact(values)
+                await work.reproductions.mark_publication_stale(project_id, updated_at=now)
                 await work.commit()
             persisted = True
         except Exception:
@@ -674,6 +1068,7 @@ class ReproductionWorkspace:
             "schemaVersion": 1,
             "workspaceFingerprint": _workspace_fingerprint(project),
             "id": project_id,
+            "projectKind": project.get("projectKind") or "reproduction",
             "name": project.get("name"),
             "paperId": project.get("paperId"),
             "paperTitle": project.get("paperTitle"),
@@ -721,6 +1116,271 @@ class ReproductionWorkspace:
         return {"id": values["id"], "projectId": project_id, "content": content, "createdAt": now, "updatedAt": now}
 
 
+_PUBLICATION_EDITABLE_FIELDS = {
+    "decision",
+    "stableSlug",
+    "publicTitle",
+    "publicSummary",
+    "aggregateConclusion",
+    "paperUrl",
+    "codeUrl",
+    "datasetUrls",
+    "publicArtifactIds",
+    "expectedRevision",
+}
+
+
+def _new_publication_values(
+    project: Mapping[str, object],
+    paper: Mapping[str, object] | None,
+    *,
+    now: str,
+) -> dict[str, object]:
+    project_id = _required_text(project.get("id"), 100)
+    project_kind = str(project.get("projectKind") or "reproduction")
+    runs = _list_of_mappings(project.get("runs"))
+    code_url = next(
+        (
+            str(run.get("repositoryUrl"))
+            for run in runs
+            if isinstance(run.get("repositoryUrl"), str)
+            and _valid_public_url(str(run.get("repositoryUrl")))
+        ),
+        None,
+    )
+    paper_url = None
+    if paper is not None:
+        paper_url = next(
+            (
+                str(paper.get(field))
+                for field in ("url", "pdf_url")
+                if isinstance(paper.get(field), str)
+                and _valid_public_url(str(paper.get(field)))
+            ),
+            None,
+        )
+    public = {
+        "projectId": project_id,
+        "decision": "draft",
+        "status": "draft",
+        "stableSlug": normalize_slug(
+            project.get("name"),
+            fallback=f"{'article' if project_kind == 'article' else 'reproduction'}-{project_id[-8:]}",
+        ),
+        "publicTitle": project.get("name") or project.get("paperTitle"),
+        "publicSummary": None,
+        "aggregateConclusion": None,
+        "paperUrl": paper_url,
+        "codeUrl": code_url,
+        "datasetUrls": [],
+        "publicArtifactIds": [],
+        "validationPassed": False,
+        "validationErrors": [],
+        "approvedAt": None,
+        "revokedAt": None,
+        "contentHash": None,
+        "lastExportedAt": None,
+        "exportError": None,
+        "revision": 1,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    return _publication_storage_values(public)
+
+
+def _publication_patch(
+    current: Mapping[str, object],
+    body: Mapping[str, object],
+    *,
+    project: Mapping[str, object],
+    paper: Mapping[str, object] | None,
+    now: str,
+) -> dict[str, object]:
+    del paper
+    if any(key not in _PUBLICATION_EDITABLE_FIELDS for key in body):
+        raise ReproductionValidationError()
+    updated = dict(current)
+    if "decision" in body:
+        decision = str(body.get("decision") or "")
+        try:
+            validate_publication_decision(decision)
+        except ValueError as error:
+            raise ReproductionValidationError() from error
+        updated["decision"] = decision
+    if "publicTitle" in body:
+        updated["publicTitle"] = _optional_public_text(body.get("publicTitle"), 300)
+    if "publicSummary" in body:
+        updated["publicSummary"] = _optional_public_text(body.get("publicSummary"), 20_000)
+    if "aggregateConclusion" in body:
+        conclusion = _optional_public_text(body.get("aggregateConclusion"), 40)
+        if conclusion is not None and conclusion not in PUBLICATION_CONCLUSIONS:
+            raise ReproductionValidationError()
+        updated["aggregateConclusion"] = conclusion
+    for field in ("paperUrl", "codeUrl"):
+        if field in body:
+            value = _optional_public_text(body.get(field), 2_000)
+            if value is not None and not _valid_public_url(value):
+                raise ReproductionValidationError()
+            updated[field] = value
+    if "datasetUrls" in body:
+        updated["datasetUrls"] = _public_string_list(
+            body.get("datasetUrls"),
+            maximum=30,
+            item_maximum=2_000,
+            urls=True,
+        )
+    if "publicArtifactIds" in body:
+        updated["publicArtifactIds"] = _public_string_list(
+            body.get("publicArtifactIds"),
+            maximum=200,
+            item_maximum=100,
+            urls=False,
+        )
+    if "stableSlug" in body:
+        requested = normalize_slug(
+            body.get("stableSlug"),
+            fallback=(
+                f"{'article' if project.get('projectKind') == 'article' else 'reproduction'}-"
+                f"{str(project.get('id') or '')[-8:]}"
+            ),
+        )
+        if current.get("lastExportedAt") and requested != current.get("stableSlug"):
+            raise ReproductionValidationError()
+        updated["stableSlug"] = requested
+    elif not updated.get("stableSlug"):
+        updated["stableSlug"] = normalize_slug(
+            updated.get("publicTitle") or project.get("name"),
+            fallback=(
+                f"{'article' if project.get('projectKind') == 'article' else 'reproduction'}-"
+                f"{str(project.get('id') or '')[-8:]}"
+            ),
+        )
+
+    changed = any(
+        updated.get(field) != current.get(field)
+        for field in _PUBLICATION_EDITABLE_FIELDS
+        if field != "expectedRevision"
+    )
+    decision = str(updated.get("decision") or "draft")
+    if decision == "approved":
+        updated["approvedAt"] = updated.get("approvedAt") or now
+        updated["revokedAt"] = None
+        if current.get("status") in {"revoked", "failed"}:
+            updated["status"] = "draft"
+    elif decision == "revoked":
+        updated["status"] = "revoked"
+        updated["revokedAt"] = now
+    else:
+        updated["status"] = "draft"
+        updated["approvedAt"] = None
+        updated["revokedAt"] = None
+    if changed and _has_managed_export(current) and decision == "approved":
+        updated["status"] = "stale"
+    if changed:
+        updated["validationPassed"] = False
+        updated["validationErrors"] = []
+        updated["exportError"] = None
+    updated["revision"] = int(current.get("revision") or 0) + 1
+    updated["updatedAt"] = now
+    return updated
+
+
+def _has_managed_export(publication: Mapping[str, object]) -> bool:
+    """Return whether the showcase manifest still owns live files."""
+
+    return bool(publication.get("contentHash"))
+
+
+def _publication_storage_values(publication: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "project_id": _required_text(publication.get("projectId"), 100),
+        "decision": _required_text(publication.get("decision"), 20),
+        "status": _required_text(publication.get("status"), 20),
+        "stable_slug": _optional_public_text(publication.get("stableSlug"), 80),
+        "public_title": _optional_public_text(publication.get("publicTitle"), 300),
+        "public_summary": _optional_public_text(publication.get("publicSummary"), 20_000),
+        "aggregate_conclusion": _optional_public_text(publication.get("aggregateConclusion"), 40),
+        "paper_url": _optional_public_text(publication.get("paperUrl"), 2_000),
+        "code_url": _optional_public_text(publication.get("codeUrl"), 2_000),
+        "dataset_urls_json": json.dumps(
+            _public_string_list(publication.get("datasetUrls"), maximum=30, item_maximum=2_000, urls=True),
+            ensure_ascii=False,
+        ),
+        "public_artifact_ids_json": json.dumps(
+            _public_string_list(publication.get("publicArtifactIds"), maximum=200, item_maximum=100, urls=False),
+            ensure_ascii=False,
+        ),
+        "validation_passed": 1 if publication.get("validationPassed") is True else 0,
+        "validation_errors_json": json.dumps(
+            _public_string_list(publication.get("validationErrors"), maximum=200, item_maximum=500, urls=False),
+            ensure_ascii=False,
+        ),
+        "approved_at": _optional_public_text(publication.get("approvedAt"), 100),
+        "revoked_at": _optional_public_text(publication.get("revokedAt"), 100),
+        "content_hash": _optional_public_text(publication.get("contentHash"), 64),
+        "last_exported_at": _optional_public_text(publication.get("lastExportedAt"), 100),
+        "export_error": _optional_public_text(publication.get("exportError"), 500),
+        "revision": _optional_int(publication.get("revision")) or 1,
+        "created_at": _required_text(publication.get("createdAt"), 100),
+        "updated_at": _required_text(publication.get("updatedAt"), 100),
+    }
+
+
+def _optional_public_text(value: object, maximum: int) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > maximum:
+        raise ReproductionValidationError()
+    return value.strip() or None
+
+
+def _public_string_list(
+    value: object,
+    *,
+    maximum: int,
+    item_maximum: int,
+    urls: bool,
+) -> list[str]:
+    if not isinstance(value, (list, tuple)) or len(value) > maximum:
+        raise ReproductionValidationError()
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip() or len(item.strip()) > item_maximum:
+            raise ReproductionValidationError()
+        clean = item.strip()
+        if urls and not _valid_public_url(clean):
+            raise ReproductionValidationError()
+        if clean not in result:
+            result.append(clean)
+    return result
+
+
+def _valid_public_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.netloc)
+        and parsed.username is None
+        and parsed.password is None
+    )
+
+
+def _require_publication_revision(
+    project_id: str,
+    publication: Mapping[str, object],
+    expected_revision: int | None,
+) -> None:
+    if expected_revision is None:
+        return
+    if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+        raise ReproductionValidationError()
+    if int(publication.get("revision") or 0) != expected_revision:
+        raise ReproductionConflictError(
+            project_id=project_id,
+            expected_revision=expected_revision,
+        )
+
+
 def _tags(values: object) -> list[str]:
     if not isinstance(values, list) or len(values) > 30:
         raise ReproductionValidationError()
@@ -731,6 +1391,12 @@ def _tags(values: object) -> list[str]:
         if value.strip() not in result:
             result.append(value.strip())
     return result
+
+
+def _ensure_experiment_project(project: Mapping[str, object]) -> None:
+    """Keep experiment-only records out of article/blog projects."""
+    if str(project.get("projectKind") or "reproduction") != "reproduction":
+        raise ReproductionValidationError()
 
 
 _RUN_TEXT_FIELDS = {

@@ -369,6 +369,24 @@ class ReproductionValidationError(DomainError):
     http_status = 422
 
 
+class PublicationNotFoundError(DomainError):
+    code = "PUBLICATION_NOT_FOUND"
+    public_message = "The publication settings do not exist."
+    http_status = 404
+
+
+class PublicationValidationError(DomainError):
+    code = "PUBLICATION_VALIDATION_FAILED"
+    public_message = "The reproduction is not ready for public publication."
+    http_status = 422
+
+
+class ShowcaseExportError(DomainError):
+    code = "SHOWCASE_EXPORT_FAILED"
+    public_message = "The public showcase export could not be completed."
+    http_status = 503
+
+
 class CredentialBackendError(DomainError):
     code = "CREDENTIAL_BACKEND_ERROR"
     public_message = "The secure credential backend is unavailable."

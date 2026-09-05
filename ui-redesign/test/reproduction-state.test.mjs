@@ -25,6 +25,7 @@ test('reproduction list state restores filters and scroll position', () => {
       query: 'vision',
       status: 'running',
       tag: 'baseline',
+      kind: 'article',
       sort: 'created',
       scrollTop: 388,
     }),
@@ -34,6 +35,7 @@ test('reproduction list state restores filters and scroll position', () => {
     query: 'vision',
     status: 'running',
     tag: 'baseline',
+    kind: 'article',
     sort: 'created',
     scrollTop: 388,
   });
@@ -49,6 +51,7 @@ test('reproduction list state rejects malformed values and writes a stable snaps
     query: '  ',
     status: '',
     tag: '',
+    kind: '',
     sort: 'updated',
     scrollTop: -20,
   });

@@ -190,12 +190,12 @@ export default function App() {
 
   const current = NAV_ITEMS.find((item) => item.id === page) ?? NAV_ITEMS[0];
   const papersReady = papers ?? [];
-  const topbarLabel = page === 'reader' ? '阅读' : page === 'reproduction-detail' ? '论文复现' : page === 'themes' ? '主题' : current.label;
+  const topbarLabel = page === 'reader' ? '阅读' : page === 'reproduction-detail' ? '研究项目' : page === 'themes' ? '主题' : current.label;
   const topbarHint =
     page === 'reader'
       ? (papersReady.find((paper) => paper.id === readerPaperId)?.title_zh ?? '论文精读')
       : page === 'reproduction-detail'
-        ? '独立复现工作区 · 文档、实验与结果'
+        ? '独立研究工作区 · 文档、证据与公开发布'
         : page === 'themes'
           ? '选择一套适合长时间研究的工作界面'
       : papersError

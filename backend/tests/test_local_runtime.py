@@ -11,7 +11,7 @@ from backend.app.cli.local_runtime import ensure_database
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_REVISION = "20260826_01"
+SCHEMA_REVISION = "20260830_01"
 
 
 class LocalRuntimeDatabaseTests(unittest.TestCase):

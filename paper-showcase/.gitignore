@@ -1,0 +1,7 @@
+node_modules/
+.npm-cache/
+public/
+db.json
+.hexo-pages.yml
+_multiconfig.yml
+.DS_Store

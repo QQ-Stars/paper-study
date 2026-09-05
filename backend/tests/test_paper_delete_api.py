@@ -30,7 +30,7 @@ from backend.app.runtime import ApiSettings
 from backend.tests.support.p1_database import create_legacy_database, run_alembic
 
 
-REVISION = "20260826_01"
+REVISION = "20260830_01"
 NOW = "2026-08-27T09:00:00Z"
 SHA_A = "a" * 64
 SHA_B = "b" * 64

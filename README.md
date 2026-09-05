@@ -77,7 +77,7 @@ npm test
 .venv/Scripts/python.exe -m unittest discover -s backend/tests -p 'test_*.py' -v
 ```
 
-Linux/macOS 将 `.venv/Scripts/python.exe` 换成 `.venv/bin/python`。数据库迁移入口为 `backend/migrations/`，当前 head 为 `20260826_01`。该 head 完善论文复现工作区（实验时间戳与结果对照表）；降级前必须确认这些表为空。
+Linux/macOS 将 `.venv/Scripts/python.exe` 换成 `.venv/bin/python`。数据库迁移入口为 `backend/migrations/`，当前 head 为 `20260830_01`。该 head 增加研究项目公开发布元数据和文章项目类型；降级前必须确认相关表与项目类型数据符合迁移的回滚门禁。
 
 ## API 健康检查
 

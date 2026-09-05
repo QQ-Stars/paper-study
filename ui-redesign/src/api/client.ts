@@ -25,6 +25,9 @@ import type {
   ReproductionNote,
   ReproductionProject,
   ReproductionResult,
+  ReproductionPublication,
+  ReproductionProjectKind,
+  PublicationValidationResponse,
 } from './types';
 
 async function json<T>(response: Response): Promise<T> {
@@ -222,11 +225,13 @@ export const libraryApi = {
 /* ── 论文复现工作区（v2） ────────────────────────── */
 
 export const reproductionApi = {
-  list: (params: { q?: string; status?: string; tag?: string; sort?: 'updated' | 'created' | 'name'; page?: number; limit?: number } = {}) => {
+  list: (params: { q?: string; status?: string; tag?: string; paperId?: string; kind?: ReproductionProjectKind; sort?: 'updated' | 'created' | 'name'; page?: number; limit?: number } = {}) => {
     const query = new URLSearchParams();
     if (params.q) query.set('q', params.q);
     if (params.status) query.set('status', params.status);
     if (params.tag) query.set('tag', params.tag);
+    if (params.paperId) query.set('paperId', params.paperId);
+    if (params.kind) query.set('kind', params.kind);
     if (params.sort) query.set('sort', params.sort);
     if (params.limit !== undefined) query.set('limit', String(params.limit));
     if (params.page !== undefined) {
@@ -237,7 +242,7 @@ export const reproductionApi = {
     return get<ReproductionListResponse>(`/api/v2/reproductions${suffix}`);
   },
   get: (id: string) => get<ReproductionProject>(`/api/v2/reproductions/${encodeURIComponent(id)}`),
-  create: (body: { paperId: string; name: string; tags?: string[] }) =>
+  create: (body: { projectKind?: ReproductionProjectKind; paperId?: string | null; name: string; tags?: string[] }) =>
     post<ReproductionProject>('/api/v2/reproductions', body),
   copy: (id: string, body: { name?: string; content?: string } = {}) =>
     post<ReproductionProject>(`/api/v2/reproductions/${encodeURIComponent(id)}/copy`, body),
@@ -249,6 +254,22 @@ export const reproductionApi = {
     mutate<void>('DELETE', `/api/v2/reproductions/${encodeURIComponent(id)}`, { expectedRevision }),
   saveDocument: (id: string, body: { content: string; expectedRevision: number }) =>
     mutate<ReproductionDocument>('PUT', `/api/v2/reproductions/${encodeURIComponent(id)}/document`, body),
+  getPublication: (id: string) =>
+    get<ReproductionPublication>(`/api/v2/reproductions/${encodeURIComponent(id)}/publication`),
+  savePublication: (id: string, body: Partial<Omit<ReproductionPublication, 'projectId' | 'status' | 'validationPassed' | 'validationErrors' | 'approvedAt' | 'revokedAt' | 'contentHash' | 'lastExportedAt' | 'exportError' | 'revision' | 'createdAt' | 'updatedAt'>> & { expectedRevision: number }) =>
+    mutate<ReproductionPublication>('PUT', `/api/v2/reproductions/${encodeURIComponent(id)}/publication`, body),
+  validatePublication: (id: string) =>
+    post<PublicationValidationResponse>(`/api/v2/reproductions/${encodeURIComponent(id)}/publication/validate`),
+  publishPublication: (id: string, expectedRevision: number) =>
+    post<{ publication: ReproductionPublication; url: string; files: string[] }>(
+      `/api/v2/reproductions/${encodeURIComponent(id)}/publication/publish`,
+      { expectedRevision },
+    ),
+  revokePublication: (id: string, expectedRevision: number) =>
+    post<{ publication: ReproductionPublication; removedFiles: string[] }>(
+      `/api/v2/reproductions/${encodeURIComponent(id)}/publication/revoke`,
+      { expectedRevision },
+    ),
   listRuns: (id: string) =>
     get<ExperimentRun[] | { items: ExperimentRun[] }>(`/api/v2/reproductions/${encodeURIComponent(id)}/runs`),
   createRun: (id: string, body: Partial<Omit<ExperimentRun, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>>) =>
